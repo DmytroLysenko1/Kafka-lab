@@ -1,0 +1,42 @@
+<meta charset="utf-8">
+<title>Kafka-lab Walkthroughs</title>
+<link rel="stylesheet" href="./walkthrough.css">
+<div class="wrap picker-bar">
+  <p class="eyebrow">Kafka-lab · interactive walkthroughs</p>
+  <nav class="picker" id="picker" aria-label="Walkthroughs"></nav>
+</div>
+<div class="wrap" id="app"></div>
+<script src="./walkthrough.js"></script>
+<script src="./write-path/steps.js"></script>
+<script src="./read-path/steps.js"></script>
+<script src="./lost-message/steps.js"></script>
+<script src="./outbox/steps.js"></script>
+<script src="./retry-dlq/steps.js"></script>
+<script src="./rebalance/steps.js"></script>
+<script>
+(function () {
+  "use strict";
+  var picker = document.getElementById("picker");
+  var items = Walkthrough.list();
+
+  function select(id) {
+    Walkthrough.mount(Walkthrough.get(id), "#app");
+    Array.prototype.forEach.call(picker.children, function (button) {
+      button.setAttribute("aria-current", String(button.getAttribute("data-id") === id));
+    });
+    if (window.history.replaceState) { window.history.replaceState(null, "", "#" + id); }
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
+
+  items.forEach(function (config) {
+    var button = document.createElement("button");
+    button.textContent = config.title;
+    button.setAttribute("data-id", config.id);
+    button.addEventListener("click", function () { select(config.id); });
+    picker.appendChild(button);
+  });
+
+  var requested = window.location.hash.slice(1);
+  select(Walkthrough.get(requested) ? requested : items[0].id);
+}());
+</script>

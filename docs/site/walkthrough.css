@@ -1,0 +1,159 @@
+:root {
+  --paper:      #F4F6F5;
+  --surface:    #FFFFFF;
+  --ink:        #17211F;
+  --muted:      #5C6B68;
+  --rule:       #D6DEDB;
+  --accent:     #0F6E6A;
+  --accent-dim: #D9EAE7;
+  --warn:       #A8324A;
+  --warn-dim:   #F6E3E7;
+  --code-bg:    #EEF2F1;
+  --shadow:     0 1px 2px rgba(23,33,31,.06), 0 10px 30px -20px rgba(23,33,31,.4);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:      #0E1615;
+    --surface:    #141E1C;
+    --ink:        #E3EBE8;
+    --muted:      #93A5A1;
+    --rule:       #26332F;
+    --accent:     #57BFB4;
+    --accent-dim: #16302D;
+    --warn:       #E0788C;
+    --warn-dim:   #2A1A1F;
+    --code-bg:    #101A18;
+    --shadow:     0 1px 2px rgba(0,0,0,.4), 0 10px 30px -20px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"] {
+  --paper:      #0E1615;
+  --surface:    #141E1C;
+  --ink:        #E3EBE8;
+  --muted:      #93A5A1;
+  --rule:       #26332F;
+  --accent:     #57BFB4;
+  --accent-dim: #16302D;
+  --warn:       #E0788C;
+  --warn-dim:   #2A1A1F;
+  --code-bg:    #101A18;
+  --shadow:     0 1px 2px rgba(0,0,0,.4), 0 10px 30px -20px rgba(0,0,0,.9);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  margin: 0;
+  padding: clamp(1.5rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem) 4rem;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 60rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1.5rem; }
+
+.topline { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+
+.eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .7rem; letter-spacing: .11em; text-transform: uppercase;
+  color: var(--accent); margin: 0 0 .5rem;
+}
+
+h1 {
+  font-family: Charter, "Bitstream Charter", "Iowan Old Style", Georgia, serif;
+  font-weight: 600; font-size: clamp(1.75rem, 4.5vw, 2.4rem);
+  line-height: 1.1; letter-spacing: -.015em; margin: 0;
+}
+
+.stage {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  overflow-x: auto;
+  padding: .5rem;
+}
+svg.diagram { display: block; width: 100%; min-width: 700px; height: auto; }
+
+.actor-box { fill: var(--code-bg); stroke: var(--rule); }
+.actor-box.on { fill: var(--accent-dim); stroke: var(--accent); }
+.actor-label { fill: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+.lifeline { stroke: var(--rule); stroke-dasharray: 3 5; }
+.wire { stroke: var(--ink); fill: none; color: currentColor; }
+.wire.reply { stroke-dasharray: 6 4; }
+.wire.warn { stroke: var(--warn); color: var(--warn); }
+.wire-label { fill: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.stepnum { fill: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.note-box { fill: var(--accent-dim); stroke: var(--accent); }
+.note-box.warn { fill: var(--warn-dim); stroke: var(--warn); }
+.note-text { fill: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.packet { fill: var(--accent); }
+.fade-in { animation: fade .35s ease both; }
+@keyframes fade { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+.controls { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.controls button {
+  font-family: inherit; font-size: .9rem; font-weight: 500;
+  padding: .5rem 1rem; border-radius: 3px; cursor: pointer;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+}
+.controls button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.controls button:disabled { opacity: .4; cursor: default; }
+.dots { display: flex; gap: .3rem; margin-left: auto; flex-wrap: wrap; }
+.dots button {
+  width: 1.6rem; height: 1.6rem; padding: 0; border-radius: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .7rem; font-variant-numeric: tabular-nums;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--muted); cursor: pointer;
+}
+.dots button[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.dots button.seen { color: var(--ink); border-color: var(--accent); }
+
+.panel {
+  background: var(--surface); border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent); border-radius: 4px;
+  padding: 1.15rem 1.35rem; min-height: 11.5rem;
+  display: flex; flex-direction: column; gap: .6rem;
+}
+.panel .idx {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent);
+  margin: 0;
+}
+.panel h2 {
+  font-family: Charter, "Bitstream Charter", "Iowan Old Style", Georgia, serif;
+  font-size: 1.35rem; font-weight: 600; margin: 0; letter-spacing: -.01em; text-wrap: balance;
+}
+.panel p { margin: 0; }
+.panel .risk {
+  background: var(--warn-dim); border-radius: 3px; padding: .7rem .9rem;
+  font-size: .92rem; border-left: 2px solid var(--warn);
+}
+.panel .risk b { color: var(--warn); }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--code-bg); border-radius: 2px; padding: .08em .35em; font-size: .87em;
+}
+.hint { color: var(--muted); font-size: .84rem; margin: 0; }
+
+.picker-bar { gap: .75rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--rule); }
+.picker { display: flex; gap: .4rem; flex-wrap: wrap; }
+.picker button {
+  font-family: inherit; font-size: .86rem;
+  padding: .45rem .85rem; border-radius: 3px; cursor: pointer;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--muted);
+}
+.picker button[aria-current="true"] {
+  background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 500;
+}
+
+.backlink { font-size: .86rem; }
+
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .fade-in { animation: none; } }
