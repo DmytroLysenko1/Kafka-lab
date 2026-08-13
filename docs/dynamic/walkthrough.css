@@ -87,9 +87,18 @@ svg.diagram { display: block; width: 100%; min-width: 700px; height: auto; }
 .wire.reply { stroke-dasharray: 6 4; }
 .wire.warn { stroke: var(--warn); color: var(--warn); }
 .wire.ghost { stroke: var(--muted); color: var(--muted); stroke-dasharray: 2 6; opacity: .6; }
+.wire.ghost.warn { stroke: var(--warn); color: var(--warn); }
 .wire-label { fill: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
 .wire-label.ghost { fill: var(--muted); font-style: italic; }
+.wire-label.ghost.warn { fill: var(--warn); }
 .stepnum { fill: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+.span-box { fill: var(--accent-dim); fill-opacity: .55; stroke: var(--accent); stroke-dasharray: 5 4; }
+.span-box.warn { fill: var(--warn-dim); stroke: var(--warn); }
+.span-label {
+  fill: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px; letter-spacing: .04em;
+}
+.span-label.warn { fill: var(--warn); }
 .note-box { fill: var(--accent-dim); stroke: var(--accent); }
 .note-box.warn { fill: var(--warn-dim); stroke: var(--warn); }
 .note-text { fill: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }

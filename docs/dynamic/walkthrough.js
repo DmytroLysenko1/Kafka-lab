@@ -31,6 +31,12 @@ window.Walkthrough = (function () {
     return null;
   }
 
+  function halfHeight(step) {
+    if (step.kind === "note") { return 38; }
+    if (step.kind === "span") { return 12; }
+    return 30;
+  }
+
   function layout(lanes, steps) {
     var x = {};
     var span = lanes.length > 1 ? (WIDTH - 2 * PAD_X) / (lanes.length - 1) : 0;
@@ -38,10 +44,17 @@ window.Walkthrough = (function () {
 
     var cursor = TOP;
     steps.forEach(function (step) {
-      var half = step.kind === "note" ? 38 : 30;
+      var half = halfHeight(step);
       step._y = cursor + half;
       cursor = step._y + half + 6;
     });
+
+    steps.forEach(function (step, i) {
+      if (step.kind !== "span") { return; }
+      var last = steps[Math.min(i + (step.covers || 1), steps.length - 1)];
+      step._yEnd = last._y + halfHeight(last);
+    });
+
     return { x: x, height: cursor + 30 };
   }
 
@@ -76,6 +89,7 @@ window.Walkthrough = (function () {
     el("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "currentColor" }, marker);
     var lifelines = el("g", {}, svg);
     var actorsG = el("g", {}, svg);
+    var spansG = el("g", {}, svg);
     var arrowsG = el("g", {}, svg);
     var notesG = el("g", {}, svg);
     var packet = el("circle", { class: "packet", r: 8, opacity: 0 }, svg);
@@ -107,6 +121,18 @@ window.Walkthrough = (function () {
       return geo.x[step.at];
     }
 
+    function drawSpan(step, animate) {
+      var ids = Array.isArray(step.at) ? step.at : [step.at];
+      var xs = ids.map(function (id) { return geo.x[id]; });
+      var x0 = Math.max(6, Math.min.apply(null, xs) - 104);
+      var x1 = Math.min(WIDTH - 6, Math.max.apply(null, xs) + 104);
+      var g = el("g", { class: animate ? "fade-in" : null }, spansG);
+      el("rect", { x: x0, y: step._y - 10, width: x1 - x0, height: step._yEnd - step._y + 18, rx: 4,
+                   class: "span-box" + (step.warn ? " warn" : ""), "stroke-width": 1 }, g);
+      var label = el("text", { x: x0 + 10, y: step._y + 6, class: "span-label" + (step.warn ? " warn" : "") }, g);
+      label.textContent = step.label;
+    }
+
     function drawNote(step, animate) {
       var cx = noteCenter(step);
       var longest = step.lines.reduce(function (m, s) { return Math.max(m, s.length); }, 0);
@@ -131,14 +157,21 @@ window.Walkthrough = (function () {
       var mid = (x1 + x2) / 2;
       var num = el("text", { x: mid, y: step._y - 22, class: "stepnum", "text-anchor": "middle" }, g);
       num.textContent = String(index + 1);
-      var lbl = el("text", { x: mid, y: step._y - 8, class: "wire-label" + (step.ghost ? " ghost" : ""), "text-anchor": "middle" }, g);
+      var lbl = el("text", { x: mid, y: step._y - 8, "text-anchor": "middle",
+                             class: "wire-label" + (step.ghost ? " ghost" : "") + (step.ghost && step.warn ? " warn" : "") }, g);
       lbl.textContent = step.label;
+    }
+
+    function draw(step, index, animate) {
+      if (step.kind === "msg") { drawArrow(step, index, animate); }
+      else if (step.kind === "span") { drawSpan(step, animate); }
+      else { drawNote(step, animate); }
     }
 
     function highlight(step) {
       var on = {};
       if (step.kind === "msg") { on[step.from] = true; on[step.to] = true; }
-      else if (Array.isArray(step.at)) { on[step.at[0]] = true; on[step.at[1]] = true; }
+      else if (Array.isArray(step.at)) { step.at.forEach(function (id) { on[id] = true; }); }
       else { on[step.at] = true; }
       Array.prototype.forEach.call(actorsG.querySelectorAll("rect"), function (r) {
         r.classList.toggle("on", !!on[r.getAttribute("data-actor")]);
@@ -203,12 +236,11 @@ window.Walkthrough = (function () {
       if (raf) { cancelAnimationFrame(raf); raf = null; }
       packet.setAttribute("opacity", "0");
       current = index;
+      spansG.innerHTML = "";
       arrowsG.innerHTML = "";
       notesG.innerHTML = "";
 
-      for (var i = 0; i < index; i++) {
-        if (steps[i].kind === "msg") { drawArrow(steps[i], i, false); } else { drawNote(steps[i], false); }
-      }
+      for (var i = 0; i < index; i++) { draw(steps[i], i, false); }
 
       var step = steps[index];
       highlight(step);
@@ -217,7 +249,7 @@ window.Walkthrough = (function () {
       syncButtons();
 
       function settle() {
-        if (step.kind === "msg") { drawArrow(step, index, animate); } else { drawNote(step, animate); }
+        draw(step, index, animate);
         if (then) { then(); }
       }
 

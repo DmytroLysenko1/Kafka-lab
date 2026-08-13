@@ -19,6 +19,6 @@ coverage.*
 /experiments/tmp/
 *.log
 
-/docs/site/dist/
+/docs/dynamic/dist/
 
 .DS_Store
