@@ -23,7 +23,7 @@ sequenceDiagram
     CO-->>A: heartbeat response REBALANCE_IN_PROGRESS
 
     rect rgba(229, 57, 53, 0.16)
-        Note over A,B: nothing in the group is processed from here
+        Note over A,B: 4 of 4 partitions idle — no record is handled and<br/>no offset is committed anywhere in the group until the frame closes
         A->>A: revoke all four partitions, stop processing
         A->>CO: JoinGroup with no assignment
         CO-->>A: SyncGroup p0, p1
@@ -58,7 +58,9 @@ sequenceDiagram
     CO-->>A: SyncGroup p0, p1 only
 
     rect rgba(245, 158, 11, 0.18)
-        Note over A: revoke p2 and p3 only, p0 and p1 never stop
+        Note over A,B: 2 of 4 partitions idle — and the other two are not merely<br/>"not revoked", they are still processing and still committing
+        A->>A: revoke p2 and p3 only
+        A->>CO: OffsetCommit p0, p1 — inside the frame, work never stopped
         A->>CO: JoinGroup, triggering round two
         CO-->>B: SyncGroup p2, p3
     end
@@ -68,7 +70,9 @@ sequenceDiagram
 
 *Fig. 8b — `cooperative-sticky` pays one extra rebalance round to keep every partition
 that is not moving in service, so downtime tracks the partitions actually transferred
-instead of the size of the group (exp-14).*
+instead of the size of the group. The `OffsetCommit` drawn inside the frame is the entire
+difference between the two figures, and it is the thing exp-14 has to observe — not the
+absence of an error, but committed progress during a rebalance (exp-14).*
 
 The trade is one extra round trip against near-zero processing downtime, and it is
 almost always worth taking.

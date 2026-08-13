@@ -28,13 +28,22 @@ sequenceDiagram
     Note over L: 11. serves up to the high watermark,<br/>or up to the LSO for read_committed
     L-->>C: 12. batch 1043 to 1092, shipped as stored
 
-    Note over C: 13. deserialize, business logic, Postgres write
-    C->>CO: 14. OffsetCommit 1093
+    rect rgba(245, 158, 11, 0.18)
+        Note over C,CO: 13. the whole time budget of the service is this one pause:<br/>deserialize, business logic and a Postgres write, for all 50 records.<br/>franz-go gives it RebalanceTimeout, 60s — Java gives it max.poll.interval.ms, 300s
+
+        alt the batch is handled inside that budget
+            C->>CO: 14. OffsetCommit 1093
+        else a rebalance starts during the pause and the member cannot rejoin in time
+            CO-->>C: 15. ILLEGAL_GENERATION, p3 already belongs to another member
+            Note over C,CO: 16. the 50 records are redelivered to the new owner,<br/>and every side effect already written happens a second time
+        end
+    end
 ```
 
-*Fig. 3 — the broker delivers nothing and assigns nothing: the consumer pulls, and one
-of the consumers computes the assignment; all the coordinator owns is membership and
-committed offsets (exp-02).*
+*Fig. 3 — the broker delivers nothing and assigns nothing: the consumer pulls, one of the
+consumers computes the assignment, and all the coordinator owns is membership and
+committed offsets. The amber pause is where the service actually spends its time, and it
+is the only step here that can lose the partition mid-batch (exp-02, exp-16).*
 
 ## What each step really is
 
@@ -49,6 +58,7 @@ committed offsets (exp-02).*
 | 12 | The broker ships the stored batch straight from the page cache: it does not decompress, deserialize or inspect records. Compression is end-to-end between producer and consumer. | True on the fast path only. TLS disables `sendfile` zero-copy because the bytes must be encrypted in user space; the broker recompresses if the topic's `compression.type` differs from the producer's; down-converting for an old client message format costs CPU and heap. A broker at 100% CPU "with no traffic" is usually one of these three. |
 | 13 | Deserialization, business logic and database writes — the entire time budget lives in this one pause. | Take too long and the group moves on without you. Heartbeats keep flowing from a background thread, so the session timeout is not what fires: it is the rebalance timeout. In the Java client the trigger is `max.poll.interval.ms`, which doubles as the rebalance timeout. **franz-go has no poll watchdog at all** — it exposes `kgo.RebalanceTimeout`, `kgo.SessionTimeout` and `kgo.BlockRebalanceOnPoll` instead, so a slow handler goes unnoticed until a rebalance actually happens, and then finishes inside a 60 s default rather than Java's 300 s (exp-16). |
 | 14 | A commit is just another produce, into `__consumer_offsets`. | Commit before processing and a crash loses records; commit after and a crash duplicates them. There is no third option — see [05](05-delivery-semantics.md). |
+| 15–16 | The other exit from the pause, and the reason the frame is drawn at all. The member is not fenced for being slow as such: it is fenced because a rebalance started while it was busy and it did not rejoin within the rebalance timeout. Its commit then fails with `ILLEGAL_GENERATION`, and the batch is handed to whoever owns the partition now. | Reading this as "a rebalance costs some latency". It costs a **reprocessed batch**: every row already written by the doomed member is written again by the new owner. A slow handler is therefore a duplicate generator, not only a lag generator — which is the whole argument for the inbox in [05](05-delivery-semantics.md). |
 
 ## The batch is the unit, not the record
 

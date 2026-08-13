@@ -1,7 +1,9 @@
 # Kafka internals — cheat sheet and case files
 
 This package is the **KR1 deliverable**: a one-screen summary of the internals, followed
-by ten cases — one file, one diagram, one question each. Mermaid in Markdown, in git,
+by ten cases — one file and one question each, drawn in as many figures as the answer
+has cases: one where the mechanism is a sequence, two or three where the answer is
+"compare these". Mermaid in Markdown, in git,
 rendered by GitHub without running anything. Six of the ten also exist as interactive
 walkthroughs in [`docs/dynamic/`](../dynamic/), for learning the mechanics and for the
 tech talk; a reviewer reads this package, an audience watches that one.
@@ -124,6 +126,21 @@ atomicity ends: the transaction frame, the process edge, the network call.
 
 **Failure points are marked.** At least half of these cases exist because something goes
 wrong, so the failure window is on the diagram, not only in the prose.
+
+**Every question about a boundary is answered with a frame.** A `rect` marks one of two
+things and nothing else: the extent of a guarantee (green — [01](01-write-path.md),
+[05](05-delivery-semantics.md), [06](06-transactional-outbox.md),
+[10](10-transactions-eos.md)) or the window in which it fails (red for loss, amber for
+duplication or stalled work). A boundary that appears only in the caption has not been
+drawn.
+
+**Where the answer is a comparison, both cases are drawn, not one case and a paragraph.**
+Same participants, same record, same failure — and exactly one thing different between
+the figures: the position of the commit ([05](05-delivery-semantics.md)), the assignor
+([08](08-rebalance.md)), the place the waiting happens ([07](07-retry-dlq.md)), the deploy
+order ([09](09-schema-evolution.md)), the ordering of two writes
+([06](06-transactional-outbox.md)). The reader compares two pictures instead of trusting
+one picture and a claim.
 
 **Names match the code.** `outbox-relay`, `payments.retry.5s`, `payments-consumer` —
 the same identifiers that appear in `cmd/` and in the topic list, never a generic

@@ -18,24 +18,36 @@ partition directory: /var/lib/kafka/data/payments.main-3/
   leader-epoch-checkpoint                         - epoch -> start offset, used to truncate
   partition.metadata
 
-offsets inside the partition:
+the same partition as offsets - the file names above are the tick marks below:
 
-    1024          1043              1088     1092        1097
-      |             |                 |        |           |
-      v             v                 v        v           v
-      [=============|=================|========|===========]
-                    ^                 ^        ^           ^
-                    |                 |        |           LEO  - the leader's next offset
-                    |                 |        HW   - every ISR member holds this; consumers stop here
-                    |                 LSO  - read_committed stops here: a transaction is still open
-                    committed offset of group "payments-consumer"
+                                           LSO    HW        LEO
+                                           1088   1092      1097
+                                             |      |         |
+                                             v      v         v
+  [===========================|=============|======|=========]
+  ^                           ^
+  |                           1024  first offset of the ACTIVE segment: never
+  |                                 compacted and never deleted, which is also
+  |                                 the floor on what retention is able to remove
+  0  oldest offset still on disk - retention drops whole segments, never records
 
-  consumer lag of the group = HW - committed = 1092 - 1043 = 49 records
+                                      x  1043  committed offset of the group
+                                      |        "payments-consumer", drawn below the
+                                      |        log because it is not a position of
+                                      |        the partition at all: it is one
+                                      |        group's promise, stored in
+                                      |        __consumer_offsets, and a second
+                                      |        group on this same partition sits
+                                      |        at a completely different number
+
+  consumer lag of that group = HW - committed = 1092 - 1043 = 49 records
 ```
 
-*Fig. 2 — four different "current positions" exist at the same time, and consumer lag is
-the distance between two specific ones; confusing LEO with HW is how a lag dashboard
-ends up showing a number nobody can explain (exp-03).*
+*Fig. 2 — three of these positions belong to the partition and are the same for every
+reader; the fourth belongs to one consumer group and is drawn on its own line for that
+reason. Consumer lag is the distance between one of each, which is why "the lag" is
+meaningless without naming the group — and why confusing LEO with HW produces a
+dashboard number nobody can explain (exp-03).*
 
 ## The four positions
 

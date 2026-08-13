@@ -26,6 +26,11 @@ sequenceDiagram
     R->>DB: SELECT unpublished FOR UPDATE SKIP LOCKED
     R->>K: Produce event with key = payment_id
     K-->>R: ack
+
+    rect rgba(245, 158, 11, 0.18)
+        Note over R,DB: duplicate window - crash here and the event is published<br/>but still marked unpublished, so the next pass sends it again.<br/>This is the deliberate half of the trade: of the two orderings<br/>only this one cannot lose an event, and the consumer's inbox absorbs the copy
+    end
+
     R->>DB: UPDATE outbox SET published_at = now()
 
     Note over K: broker unavailable means a growing table,<br/>not a failed payment and not a lost event
@@ -41,20 +46,33 @@ Calling the broker from the use case is a **dual write**: two systems, no shared
 transaction, and four possible outcomes instead of two.
 
 ```mermaid
-flowchart LR
-    UC["use case"] -->|"1. COMMIT"| DB[("Postgres")]
-    UC -->|"2. Publish"| K["Kafka"]
-    DB -.->|"committed"| S1["state changed"]
-    K -.->|"publish failed or process died"| S2["no event, ever"]
+sequenceDiagram
+    autonumber
+    participant UC as use case
+    participant DB as Postgres
+    participant K as Kafka
+
+    alt commit first, then publish
+        UC->>DB: INSERT payment, COMMIT
+        rect rgba(229, 57, 53, 0.16)
+            Note over UC,K: kill -9, a broker timeout or a pod eviction here:<br/>the payment exists and no event is ever produced for it
+        end
+        UC->>K: Publish PaymentCaptured
+    else publish first, then commit
+        UC->>K: Publish PaymentCaptured
+        rect rgba(229, 57, 53, 0.16)
+            Note over UC,K: the same failure one arrow earlier: the event is on<br/>the topic and announces a payment that does not exist
+        end
+        UC->>DB: INSERT payment, COMMIT
+    end
 ```
 
-*Fig. 6b — the dual write cannot be fixed by ordering or by retrying in the handler: the
-process can die between the two arrows, and then the payment exists while the rest of
-the company never learns it happened.*
+*Fig. 6b — both orderings are drawn because that is the whole argument: each one has a
+window, the windows sit in different places, and neither can be closed from inside the
+handler. A process that dies does not retry.*
 
-Swapping the order does not help either — publish first and a failed commit announces a
-payment that does not exist. The only fix is to stop having two writes: the event
-becomes a row.
+Retrying is not the missing piece and neither is ordering. The only fix is to stop having
+two writes: the event becomes a row, and Fig. 6 is what that looks like.
 
 ## What the relay must get right
 

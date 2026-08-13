@@ -9,33 +9,47 @@ KR1 · no interactive twin yet — this case is the one that justifies every def
 ```mermaid
 sequenceDiagram
     autonumber
+    participant P as payments-api
     participant CT as Active controller, KRaft
-
-
     participant B1 as Broker 1, leader of p3
     participant B2 as Broker 2, follower
     participant B3 as Broker 3, follower
 
     Note over B1,B3: ISR is 1, 2, 3 — acks=all waits for all three
+    P->>B1: Produce, acks=all
+    B1-->>P: ok, offset 1049, held by all three
+
     B3--xB1: stops fetching, GC pause or a slow disk
     Note over B1: after replica.lag.time.max.ms, 30s by default
     B1->>CT: AlterPartition, shrink ISR to 1, 2
-    Note over CT: the new ISR is a record in __cluster_metadata,<br/>brokers learn it by fetching metadata
-    Note over B1: acks=all now means two machines, and nothing said so
+    B2--xB1: falls behind as well
+    B1->>CT: AlterPartition, shrink ISR to 1
+    Note over CT: each new ISR is one more record in __cluster_metadata.<br/>No producer is told, no topic config changed,<br/>no error is returned anywhere
+
+    rect rgba(229, 57, 53, 0.16)
+        Note over P,B1: min.insync.replicas=1, so acks=all now means one machine
+        P->>B1: Produce, acks=all
+        B1-->>P: ok, offset 1050
+        Note over P,B1: the customer has been told the payment succeeded,<br/>and offset 1050 exists on exactly one broker
+    end
 
     B1--xCT: broker 1 dies
-    CT->>B2: you lead p3 now, leader epoch incremented
-    Note over CT: the new leader comes from the ISR only, because<br/>unclean.leader.election.enable is false
-    Note over B2: promotion truncates nothing:<br/>broker 2 keeps its log and serves from the LEO it already had
 
-    B1->>B2: broker 1 returns as a follower, OffsetsForLeaderEpoch
-    B2-->>B1: the offset at which the previous epoch ended
-    Note over B1: broker 1 truncates to that offset, deleting what it held above it<br/>with a healthy ISR those records were never acknowledged<br/>after case 2 or case 3 below, they were
+    alt unclean.leader.election.enable = false (the default)
+        Note over CT: no ISR member is alive, so p3 goes OFFLINE.<br/>Producers get LEADER_NOT_AVAILABLE and consumers stall,<br/>while 1050 waits, intact, on a dead broker's disk
+    else unclean.leader.election.enable = true
+        CT->>B2: you lead p3 now, leader epoch incremented
+        Note over B2: broker 2 left the ISR before 1050 was written,<br/>so it serves p3 with a log that ends at 1049
+        B1->>B2: broker 1 returns as a follower, OffsetsForLeaderEpoch
+        B2-->>B1: the previous epoch ended at 1050
+        Note over B1: broker 1 truncates to 1050 and deletes the record it acknowledged.<br/>The payment was not lost in transit — it was deleted, by design,<br/>by the mechanism that keeps replicas from disagreeing
+    end
 ```
 
-*Fig. 4 — the ISR shrinks quietly and the guarantee shrinks with it; the only thing
-between a lagging replica and lost acknowledged writes is
-`unclean.leader.election.enable=false` (exp-04).*
+*Fig. 4 — the ISR shrinks in silence and `min.insync.replicas=1` lets `acks=all` keep
+returning success from a single machine; what happens to the acknowledged offset 1050 is
+then decided by one flag, and neither branch is pleasant: `false` takes the partition
+offline, `true` deletes the payment with a routine truncation (exp-04, exp-04b).*
 
 ## Who decides what
 
@@ -67,15 +81,19 @@ before any follower fetches, the record was acknowledged and exists nowhere. Not
 the cluster reports this — the offset simply never existed for the new leader.
 
 **2. `acks=all` with a collapsed ISR.** The ISR shrank to one, `acks=all` kept
-succeeding, and that one machine died. Identical outcome, reached through a
-configuration that reads as safe. `min.insync.replicas=2` is what prevents it: the
-producer gets `NOT_ENOUGH_REPLICAS` and the payment fails loudly instead of vanishing
-quietly.
+succeeding, and that one machine died — the red frame in the figure. Reached through a
+configuration that reads as safe, and the reason the frame is worth drawing:
+`min.insync.replicas=2` is what prevents it, by turning the second `Produce` into a
+`NOT_ENOUGH_REPLICAS` rejection so the payment fails loudly instead of vanishing quietly.
 
-**3. Unclean leader election.** Every ISR member is dead and an out-of-sync replica is
-promoted. It becomes the source of truth while missing acknowledged records, and the
-records are not "lost in transit" — they are deleted from the log when the old leader
-returns and truncates to the new leader's epoch.
+**3. Unclean leader election.** This is the second branch of the same figure, and the
+distinction matters: on its own, case 2 does not yet destroy anything. With
+`unclean.leader.election.enable=false` the partition simply goes offline and offset 1050
+is still sitting on the dead broker. The record only dies if that log never comes back —
+or if an out-of-sync replica is promoted, which is case 3. Then the promoted replica
+becomes the source of truth while missing acknowledged records, and those records are not
+"lost in transit": they are deleted from the old leader's log when it returns and
+truncates to the new leader's epoch.
 
 With `unclean.leader.election.enable=false` the partition stays **offline** instead.
 Availability is sacrificed on purpose: a payment system that cannot write is an

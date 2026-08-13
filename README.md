@@ -14,32 +14,38 @@ quietly implying otherwise.
 
 ```mermaid
 flowchart LR
-    API["payments-api<br/>HTTP"] -.->|"register schema, then encode<br/>magic byte + id into the payload"| SR["Schema Registry"]
-    API -->|"one tx:<br/>payment + outbox row"| PG[("Postgres<br/>payments · outbox · inbox")]
-
-    REL["outbox-relay"] -->|"SELECT unpublished<br/>FOR UPDATE SKIP LOCKED"| PG
-    REL -->|"produce after ack,<br/>key = payment_id"| MAIN["payments.main<br/>6 partitions"]
-
+    API["payments-api<br/>HTTP"] -->|"one tx:<br/>payment + outbox row"| PG[("Postgres<br/>payments · outbox · inbox")]
+    PG -->|"unpublished rows,<br/>SKIP LOCKED"| REL["outbox-relay"]
+    REL -->|"produce after the ack,<br/>key = payment_id"| MAIN["payments.main<br/>6 partitions"]
     MAIN --> CG
 
     subgraph CG["consumer group payments-consumer"]
-        W1["worker 1<br/>p0 p1 p2"]
-        W2["worker 2<br/>p3 p4 p5"]
+        direction TB
+        W1["worker 1 · schema v2<br/>p0 p1 p2"]
+        W2["worker 2 · schema v1<br/>still rolling · p3 p4 p5"]
     end
 
-    CG -->|"one tx: inbox ON CONFLICT<br/>+ business write"| PG
     CG -->|"transient failure"| RETRY["payments.retry.5s<br/>payments.retry.1m<br/>payments.retry.10m"]
-
     RETRY --> RC["retry-consumer<br/>pauses until the delay elapses"]
-    RC -->|"attempts exhausted,<br/>or poison on first failure"| DLQ["payments.dlq"]
+    RC -->|"attempts exhausted,<br/>or poison on the first failure"| DLQ["payments.dlq"]
     DLQ --> RP["dlq-replayer"]
-    RP --> MAIN
+    RP -->|"after the bug is fixed"| MAIN
+    CG -->|"one tx: inbox ON CONFLICT<br/>+ business write"| PG
+
+    SR["Schema Registry · BACKWARD<br/>checked at registration,<br/>never in the data path"]
+    API -.-> SR
+    CG -.->|"resolve the id, then cache it"| SR
 ```
 
-*Fig. — every boundary in this diagram is a place where atomicity ends: the API writes
-state and event in one transaction and never calls the broker, the consumer writes the
-inbox row and the business row in one transaction and never sleeps, and everything
-between them is retryable delivery.*
+*Fig. — the bottom row is the write path and the top row is the consume path, and every
+solid arrow between them is a boundary where atomicity ends: the API writes state and
+event in one transaction and never calls the broker, the consumer writes the inbox row and
+the business row in one transaction and never sleeps, and everything in between is
+retryable delivery. The two dotted edges are the only ones that are not per record — the
+registry is consulted when a schema is registered and once per unseen id, never in the
+data path. The group is drawn mid-deploy, one worker on each schema version, because that
+is the only state in which compatibility means anything
+([09](docs/static/09-schema-evolution.md)).*
 
 | Component | What it guarantees | Detail |
 |---|---|---|
@@ -58,8 +64,10 @@ implementation, and both are why the two patterns above exist.
 ## Documentation
 
 **[`docs/static/`](docs/static/)** — the deliverable, and the cheat sheet: it opens with
-a one-screen summary of the internals, then one case per file, one diagram per case,
-rendered by GitHub without running anything.
+a one-screen summary of the internals, then one case per file, rendered by GitHub without
+running anything. Where a case is a comparison — where the message is lost, which
+assignor, which deploy order — the file draws every side of it, because the argument is
+the difference between two pictures.
 
 | # | Case | The question it answers | Interactive |
 |---|---|---|---|

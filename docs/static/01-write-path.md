@@ -24,25 +24,30 @@ sequenceDiagram
     alt ISR smaller than min.insync.replicas
         L-->>P: 7. NOT_ENOUGH_REPLICAS, nothing was appended
     else ISR large enough
-        Note over L: 8. append to the active segment, LEO advances<br/>the write lands in page cache, no fsync per record
-        F->>L: 9. FetchRequest from their own LEO
-        L-->>F: 10. records
-        Note over L,F: 11. high watermark equals the lowest LEO in the ISR<br/>it moves only when every ISR member holds the record
-        L-->>P: 12. ProduceResponse ok, base offset 1043
+        rect rgba(67, 160, 71, 0.16)
+            Note over L,F: 8. the whole guarantee lives inside this frame,<br/>and there is no disk in it: append to the active segment,<br/>LEO advances, the write sits in page cache, no fsync
+            F->>L: 9. FetchRequest from their own LEO
+            L-->>F: 10. records
+            Note over L,F: 11. high watermark equals the lowest LEO in the ISR<br/>it moves only when every ISR member holds the record
+            L-->>P: 12. ProduceResponse ok, base offset 1043
+        end
     end
 
     P-->>App: 13. ack
 ```
 
-*Fig. 1 — with `acks=all` the acknowledgement arrives after replication to every in-sync
-replica and before any `fsync`: durability here is a property of replication, not of the
-disk (exp-08).*
+*Fig. 1 — the frame is the entire meaning of `acks=all`: the record is in the page cache
+of every replica **currently in the ISR**, no `fsync` has happened on any of them, and
+how much that is worth depends on how wide the ISR was at step 8, not on how the topic
+was configured (exp-08).*
 
 ## What each step really is
 
 The numbers are written into the diagram by hand, and they cover the pauses as well as
 the arrows — steps 4, 5, 8 and 11 are where the interesting things happen, and Mermaid's
-`autonumber` would have skipped every one of them.
+`autonumber` would have skipped every one of them. The frame around 8–12 is the answer to
+the second half of the question: it contains everything the acknowledgement promises, and
+a `fsync` is not in it.
 
 | # | What actually happens | Config that moves it | What breaks if you get it wrong |
 |---|---|---|---|
