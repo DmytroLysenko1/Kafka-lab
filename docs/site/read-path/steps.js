@@ -11,12 +11,12 @@ Walkthrough.register({
   steps: [
     { kind: "msg", from: "cons", to: "coord", label: "JoinGroup payments-consumer",
       t: "A consumer group is negotiated, not configured",
-      d: "The consumer asks to join the group. The coordinator is one specific broker, picked by hashing the group id — every member talks to that same broker about membership." },
+      d: "The consumer asks to join the group. The coordinator is one specific broker, picked by hashing the group id — every member talks to that same broker about membership. In its reply the coordinator also names one member the group leader." },
 
     { kind: "msg", from: "coord", to: "cons", label: "SyncGroup assign p0, p3", reply: true,
-      t: "The coordinator hands out partitions",
-      d: "Each partition goes to exactly one consumer in the group. That is the entire parallelism model — there is nothing finer-grained than a partition.",
-      r: "More consumers than partitions means the extra ones sit idle forever. Six partitions is a hard ceiling of six workers (exp-02)." },
+      t: "The group leader assigns; the coordinator only delivers",
+      d: "The assignor runs inside the elected member, not on the broker — the coordinator receives the finished plan and hands each member its share. Every partition goes to exactly one consumer, and that is the whole parallelism model: there is nothing finer-grained than a partition.",
+      r: "More consumers than partitions means the extra ones sit idle forever — six partitions is a hard ceiling of six workers (exp-02). Note this is the classic group protocol; KIP-848 (GA in Kafka 4.0) moves assignment onto the broker and removes this JoinGroup/SyncGroup round trip, so check which protocol the client actually negotiates before quoting either version." },
 
     { kind: "msg", from: "cons", to: "coord", label: "OffsetFetch",
       t: "Where did we stop last time?",
@@ -40,7 +40,7 @@ Walkthrough.register({
     { kind: "note", at: "cons", lines: ["deserialize, process,", "write to Postgres"],
       t: "This is where the time budget is spent",
       d: "Everything slow lives here: deserialization, business logic, database writes, calls to providers.",
-      r: "Take too long between fetches and the coordinator declares the consumer dead, revokes its partitions and rebalances the group — lag then grows in an avalanche (exp-16)." },
+      r: "Take too long here and the group moves on without you. Heartbeats keep flowing in the background, so it is not the session timeout that fires — it is the rebalance timeout: a member that cannot rejoin in time is fenced and its partitions reassigned. Java calls this max.poll.interval.ms; franz-go has no such setting, which is exactly why the tuning checklist has to map the two (exp-16)." },
 
     { kind: "msg", from: "cons", to: "coord", label: "OffsetCommit 1093",
       t: "Commit after processing, never before",

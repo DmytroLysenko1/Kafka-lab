@@ -21,8 +21,8 @@ Walkthrough.register({
 
     { kind: "msg", from: "prod", to: "leader", label: "ProduceRequest acks=all, seq=N",
       t: "The client already chose the partition",
-      d: "hash(key) % partitions is computed on the client. The request goes straight to the leader of that partition — the broker is never asked where to put it.",
-      r: "Same key means same partition means ordering preserved. No key means round-robin, and ordering is gone (exp-01)." },
+      d: "murmur2(key) % partitions is computed on the client. The request goes straight to the leader of that partition — the broker is never asked where to put it.",
+      r: "Same key, same partition, ordering preserved. Without a key franz-go does not round-robin: it sticks to one partition until the batch closes. Ordering then survives by accident at low volume and collapses under load — exp-01 has to push enough traffic to see it break." },
 
     { kind: "note", at: "leader", lines: ["append to active segment", "page cache, not fsync"],
       t: "Written — but not to disk",

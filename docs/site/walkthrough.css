@@ -86,7 +86,9 @@ svg.diagram { display: block; width: 100%; min-width: 700px; height: auto; }
 .wire { stroke: var(--ink); fill: none; color: currentColor; }
 .wire.reply { stroke-dasharray: 6 4; }
 .wire.warn { stroke: var(--warn); color: var(--warn); }
+.wire.ghost { stroke: var(--muted); color: var(--muted); stroke-dasharray: 2 6; opacity: .6; }
 .wire-label { fill: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.wire-label.ghost { fill: var(--muted); font-style: italic; }
 .stepnum { fill: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
 .note-box { fill: var(--accent-dim); stroke: var(--accent); }
 .note-box.warn { fill: var(--warn-dim); stroke: var(--warn); }

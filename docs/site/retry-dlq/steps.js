@@ -7,6 +7,7 @@ Walkthrough.register({
     { id: "main",  name: "payments.main" },
     { id: "cons",  name: "payments-consumer" },
     { id: "retry", name: "payments.retry.*" },
+    { id: "rcons", name: "retry-consumer" },
     { id: "dlq",   name: "payments.dlq" }
   ],
   steps: [
@@ -16,7 +17,7 @@ Walkthrough.register({
 
     { kind: "note", at: "cons", warn: true, lines: ["do NOT sleep here"],
       t: "The tempting wrong fix",
-      d: "Waiting inside the consumer blocks the whole partition. One stuck payment stops every other payment that happens to hash to the same one.",
+      d: "Waiting inside the main consumer blocks the whole partition. One stuck payment stops every other payment that happens to hash to the same one.",
       r: "Head-of-line blocking is how a single failing merchant destroys throughput for everyone sharing its partition." },
 
     { kind: "msg", from: "cons", to: "retry", label: "produce → retry.5s, attempt=1",
@@ -27,17 +28,17 @@ Walkthrough.register({
       t: "The main partition keeps flowing",
       d: "The offset advances immediately. As far as the main topic is concerned this record is handled — its fate now belongs to the retry topic." },
 
-    { kind: "msg", from: "retry", to: "cons", label: "redelivered after 5s", reply: true,
-      t: "Blocking is fine in here",
-      d: "Kafka has no delayed delivery, so the retry consumer reads the record timestamp and waits until the delay has elapsed. That is acceptable precisely because every record in this topic carries the same delay and they arrive in time order.",
-      r: "This is why the tiers are separate topics. One shared retry topic with mixed delays reintroduces the head-of-line blocking the pattern was meant to remove." },
+    { kind: "msg", from: "retry", to: "rcons", label: "redelivered after 5s", reply: true,
+      t: "A different consumer — and here blocking is fine",
+      d: "Kafka has no delayed delivery, so this consumer reads the record timestamp and pauses the partition until the delay has elapsed. Waiting is safe here and forbidden in the main consumer, because every record in this topic carries the same delay and they arrive in time order — the main flow is untouched either way.",
+      r: "This is why the tiers are separate topics, and why they are not consumed by the main group. One shared retry topic with mixed delays reintroduces the head-of-line blocking the pattern was meant to remove." },
 
-    { kind: "note", at: "cons", warn: true, lines: ["attempt=2 → retry.1m", "attempt=3 → retry.10m"],
+    { kind: "note", at: "rcons", warn: true, lines: ["attempt=2 → retry.1m", "attempt=3 → retry.10m"],
       t: "Backoff as topology",
       d: "Each failure promotes the record to the next tier. The backoff schedule is visible in the topic list instead of being buried inside a sleep somewhere in the consumer.",
       r: "Retries reorder events by design: a record sent to retry.10m comes back long after its neighbours. Handlers must guard the state transition in the database, not assume arrival order." },
 
-    { kind: "msg", from: "cons", to: "dlq", label: "attempts exhausted → DLQ",
+    { kind: "msg", from: "rcons", to: "dlq", label: "attempts exhausted → DLQ",
       t: "Dead letter, with the evidence attached",
       d: "Headers carry the original topic, partition and offset, the error class, the attempt count and the trace id — enough to reconstruct the failure without digging through consumer logs.",
       r: "A DLQ you cannot replay from is a trash can. dlq-replayer exists so that fixing the bug and reprocessing is one command rather than a manual export." },

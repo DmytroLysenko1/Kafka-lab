@@ -68,7 +68,8 @@ window.Walkthrough = (function () {
     tag("h1", null, config.title, titleCol);
 
     var stage = tag("div", "stage", undefined, root);
-    var svg = el("svg", { class: "diagram", viewBox: "0 0 " + WIDTH + " " + Math.round(geo.height), role: "img" }, stage);
+    var svg = el("svg", { class: "diagram", viewBox: "0 0 " + WIDTH + " " + Math.round(geo.height),
+                          role: "img", "aria-label": config.title + " — sequence diagram; the step text below carries the same content" }, stage);
     var defs = el("defs", {}, svg);
     var marker = el("marker", { id: "wt-head", viewBox: "0 0 10 10", refX: 9, refY: 5,
                                 markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
@@ -125,12 +126,12 @@ window.Walkthrough = (function () {
       var dir = x2 > x1 ? 1 : -1;
       var g = el("g", { class: animate ? "fade-in" : null }, arrowsG);
       el("line", { x1: x1 + dir * 4, y1: step._y, x2: x2 - dir * 10, y2: step._y,
-                   class: "wire" + (step.reply ? " reply" : "") + (step.warn ? " warn" : ""),
+                   class: "wire" + (step.reply ? " reply" : "") + (step.warn ? " warn" : "") + (step.ghost ? " ghost" : ""),
                    "stroke-width": 1.6, "marker-end": "url(#wt-head)" }, g);
       var mid = (x1 + x2) / 2;
       var num = el("text", { x: mid, y: step._y - 22, class: "stepnum", "text-anchor": "middle" }, g);
       num.textContent = String(index + 1);
-      var lbl = el("text", { x: mid, y: step._y - 8, class: "wire-label", "text-anchor": "middle" }, g);
+      var lbl = el("text", { x: mid, y: step._y - 8, class: "wire-label" + (step.ghost ? " ghost" : ""), "text-anchor": "middle" }, g);
       lbl.textContent = step.label;
     }
 

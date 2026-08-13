@@ -22,9 +22,9 @@ Walkthrough.register({
       d: "The process dies between the commit and the database write. On restart the group resumes at offset 43, record 42 is never delivered again, and payment 7f3a exists nowhere.",
       r: "exp-05 will measure how many of 1000 payments disappear. Expect a small number — which is worse than a large one, because small silent losses do not look like an incident." },
 
-    { kind: "msg", from: "c", to: "db", label: "INSERT payment 7f3a",
+    { kind: "msg", from: "c", to: "db", label: "INSERT payment 7f3a", ghost: true,
       t: "The write that never happened",
-      d: "In the crashed run this line was never reached. Kafka is convinced the record was handled, because \"handled\" only ever meant \"committed\"." },
+      d: "Drawn faded because in the crashed run this arrow never fired. Kafka is convinced the record was handled, because \"handled\" only ever meant \"committed\"." },
 
     { kind: "msg", from: "c", to: "db", label: "INSERT payment 7f3a",
       t: "Act II — process first",
@@ -39,19 +39,25 @@ Walkthrough.register({
       d: "Die after the INSERT but before the commit and the record comes back. The consumer inserts payment 7f3a a second time — for a payment, that is charging the customer twice.",
       r: "This is not an exotic edge case. Rebalances, deploys and OOM kills all land in this window routinely. At-least-once always means duplicates eventually." },
 
-    { kind: "msg", from: "c", to: "db", label: "BEGIN; INSERT inbox(event_id) ON CONFLICT DO NOTHING",
+    { kind: "msg", from: "c", to: "db", label: "BEGIN; INSERT inbox ON CONFLICT DO NOTHING RETURNING",
       t: "Act III — let the database decide",
-      d: "The event id becomes a primary key in an inbox table. The first delivery inserts a row; a redelivery hits the conflict and inserts nothing." },
+      d: "The event id becomes the primary key of an inbox table. The first delivery inserts a row and gets it back; a redelivery hits the conflict and gets zero rows back.",
+      r: "RETURNING is the whole mechanism, not decoration. ON CONFLICT DO NOTHING raises no error, so the row count is the only signal that this event has been seen before. Ignore it and the business write below still runs on every redelivery — that is Act II again, with an extra table." },
 
-    { kind: "msg", from: "c", to: "db", label: "INSERT payment; COMMIT",
-      t: "State and inbox commit together",
-      d: "The business write and the inbox row are one transaction. Either both exist or neither does.",
+    { kind: "msg", from: "c", to: "db", label: "1 row → INSERT payment; COMMIT",
+      t: "First delivery: state and inbox commit together",
+      d: "A row came back, so this event is new. The business write and the inbox row are one transaction — either both exist or neither does.",
       r: "Splitting these into two transactions recreates exactly the bug the pattern was introduced to remove." },
 
-    { kind: "note", at: "db", lines: ["redelivery hits the", "unique key: no-op"],
-      t: "The duplicate becomes harmless",
-      d: "The record may arrive five times. Deliveries two through five find the event id already present, change nothing, and commit the offset.",
+    { kind: "note", at: "db", lines: ["conflict → 0 rows", "→ skip the write"],
+      t: "The redelivery takes the other branch",
+      d: "The record may arrive five times. Deliveries two through five find the event id already present; the insert changes nothing and returns nothing, and that empty result is what the consumer branches on.",
       r: "Notice what did not change: Kafka still delivered at-least-once. The broker behaves identically — it is the effect that became exactly-once, not the delivery." },
+
+    { kind: "msg", from: "c", to: "db", label: "0 rows → skip INSERT; COMMIT", ghost: true,
+      t: "The write that must not happen twice",
+      d: "Drawn faded because it belongs to the redelivery run, not the first one. Zero rows means the payment is already recorded, so the consumer skips the business write entirely and goes straight to the offset.",
+      r: "This is the branch exp-07 has to prove: 1000 payments, redelivered under kill -9, still 1000 rows in the database and zero duplicates." },
 
     { kind: "msg", from: "c", to: "k", label: "CommitOffsets(43)",
       t: "Exactly-once effect, at-least-once delivery",

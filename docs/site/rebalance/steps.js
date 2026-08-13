@@ -11,7 +11,8 @@ Walkthrough.register({
   steps: [
     { kind: "msg", from: "b", to: "coord", label: "JoinGroup",
       t: "A second consumer appears",
-      d: "A deploy, a scale-up, or a restarted pod. Membership changed, so the partition assignment has to change with it." },
+      d: "A deploy, a scale-up, or a restarted pod. Membership changed, so the partition assignment has to change with it.",
+      r: "Everything below is the classic protocol — JoinGroup, SyncGroup, generations, assignment computed by the group leader. KIP-848 (GA in Kafka 4.0) replaces it with incremental broker-side assignment over ConsumerGroupHeartbeat, so confirm which protocol the client negotiates before quoting these mechanics." },
 
     { kind: "note", at: "coord", lines: ["rebalance triggered:", "new generation"],
       t: "The group has to agree again",
