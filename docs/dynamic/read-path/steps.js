@@ -62,12 +62,12 @@ Walkthrough.register({
     { kind: "msg", from: "leader", to: "cons", label: "records 1043..1092", reply: true,
       t: "The batch is sent as it lies on disk",
       d: "The broker does not decompress, deserialize or inspect anything — it ships the stored batch straight from the page cache. Compression is end-to-end between producer and consumer.",
-      r: "True on the fast path only: TLS disables sendfile zero-copy, and the broker recompresses if the topic's compression.type differs from the producer's. A broker at 100% CPU \"with no traffic\" is usually one of those two." },
+      r: "True on the fast path only: TLS disables sendfile zero-copy because the bytes have to be encrypted in user space, the broker recompresses if the topic's compression.type differs from the producer's, and down-converting for an old client message format costs CPU and heap. A broker at 100% CPU \"with no traffic\" is usually one of those three." },
 
     { kind: "note", at: "cons", lines: ["deserialize, process,", "write to Postgres"],
       t: "This is where the time budget is spent",
       d: "Everything slow lives here: deserialization, business logic, database writes, calls to providers. The batch is the unit of transfer, so a fetch sized for throughput can hand a consumer far more work at once than expected.",
-      r: "Take too long and the group moves on without you. Heartbeats keep flowing in the background, so it is not the session timeout that fires — it is the rebalance timeout. Java's trigger is max.poll.interval.ms; franz-go has no poll watchdog at all, so a slow handler goes unnoticed until a rebalance actually happens (exp-16)." },
+      r: "Take too long and the group moves on without you. Heartbeats keep flowing in the background, so it is not the session timeout that fires — it is the rebalance timeout. Java's trigger is max.poll.interval.ms, 300 s by default; franz-go has no poll watchdog at all and its RebalanceTimeout defaults to 60 s, so a slow handler goes unnoticed until a rebalance actually happens — and then it has a fifth of the Java budget to finish (exp-16)." },
 
     { kind: "msg", from: "cons", to: "coord", label: "OffsetCommit 1093",
       t: "Commit after processing, never before",

@@ -13,7 +13,7 @@ sequenceDiagram
     participant R as outbox-relay
     participant K as Kafka
 
-    rect rgb(232, 245, 233)
+    rect rgba(67, 160, 71, 0.16)
         Note over API,DB: one transaction - the only atomic part of this diagram
         API->>DB: BEGIN
         API->>DB: INSERT payment

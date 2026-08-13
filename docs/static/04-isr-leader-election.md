@@ -10,21 +10,27 @@ KR1 · no interactive twin yet — this case is the one that justifies every def
 sequenceDiagram
     autonumber
     participant CT as Active controller, KRaft
-    participant L as Leader p3, broker 1
-    participant F1 as Follower, broker 2
-    participant F2 as Follower, broker 3
 
-    Note over L,F2: ISR is 1, 2, 3 — acks=all waits for all three
-    F2--xL: stops fetching, GC pause or a slow disk
-    Note over L: after replica.lag.time.max.ms, 30s by default
-    L->>CT: AlterPartition, shrink ISR to 1, 2
+
+    participant B1 as Broker 1, leader of p3
+    participant B2 as Broker 2, follower
+    participant B3 as Broker 3, follower
+
+    Note over B1,B3: ISR is 1, 2, 3 — acks=all waits for all three
+    B3--xB1: stops fetching, GC pause or a slow disk
+    Note over B1: after replica.lag.time.max.ms, 30s by default
+    B1->>CT: AlterPartition, shrink ISR to 1, 2
     Note over CT: the new ISR is a record in __cluster_metadata,<br/>brokers learn it by fetching metadata
-    Note over L: acks=all now means two machines, and nothing said so
+    Note over B1: acks=all now means two machines, and nothing said so
 
-    L--xCT: broker 1 dies
-    CT->>F1: you are the leader of p3 now, epoch incremented
+    B1--xCT: broker 1 dies
+    CT->>B2: you lead p3 now, leader epoch incremented
     Note over CT: the new leader comes from the ISR only, because<br/>unclean.leader.election.enable is false
-    F1->>F1: truncate to the leader-epoch boundary, then serve
+    Note over B2: promotion truncates nothing:<br/>broker 2 keeps its log and serves from the LEO it already had
+
+    B1->>B2: broker 1 returns as a follower, OffsetsForLeaderEpoch
+    B2-->>B1: the offset at which the previous epoch ended
+    Note over B1: broker 1 truncates to that offset, deleting what it held above it<br/>with a healthy ISR those records were never acknowledged<br/>after case 2 or case 3 below, they were
 ```
 
 *Fig. 4 — the ISR shrinks quietly and the guarantee shrinks with it; the only thing

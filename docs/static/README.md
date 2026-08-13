@@ -1,8 +1,8 @@
 # Kafka internals — cheat sheet and case files
 
 This package is the **KR1 deliverable**: a one-screen summary of the internals, followed
-by nine cases — one file, one diagram, one question each. Mermaid in Markdown, in git,
-rendered by GitHub without running anything. Six of the nine also exist as interactive
+by ten cases — one file, one diagram, one question each. Mermaid in Markdown, in git,
+rendered by GitHub without running anything. Six of the ten also exist as interactive
 walkthroughs in [`docs/dynamic/`](../dynamic/), for learning the mechanics and for the
 tech talk; a reviewer reads this package, an audience watches that one.
 
@@ -31,10 +31,14 @@ tech talk; a reviewer reads this package, an audience watches that one.
 
 ## The four "current offsets" — [02](02-log-segments-retention.md)
 
-`committed <= LSO <= HW <= LEO`. LEO is where the leader will write next; HW is the
-lowest LEO in the ISR and the ceiling for `read_uncommitted`; LSO is the first offset of
-the oldest open transaction and the ceiling for `read_committed`; committed is one
-group's promise. **Consumer lag = HW − committed.**
+`LSO <= HW <= LEO`, always. LEO is where the leader will write next; HW is the lowest LEO
+in the ISR and the ceiling for `read_uncommitted`; LSO is the first offset of the oldest
+open transaction and the ceiling for `read_committed` ([10](10-transactions-eos.md) is
+what moves it). The committed offset is **not** part of that chain: it is one group's
+promise, it sits wherever that group left it, and a `read_uncommitted` consumer routinely
+commits above the LSO. **Consumer lag = HW − committed** — because the "latest offset" a
+client gets back from `ListOffsets` is the high watermark, not the LEO, which is exactly
+why the tool prints it in a column labelled LOG-END-OFFSET.
 
 ## The durability chain — [01](01-write-path.md), [04](04-isr-leader-election.md)
 
@@ -61,10 +65,19 @@ the sequence of what happened is the point.
 | `replica.lag.time.max.ms` | 30 s | how long a dead follower stays in the ISR |
 | `enable.auto.commit` | `true` — franz-go autocommits every 5 s when group consuming | the at-most-once default nobody chose (exp-05) |
 | `auto.offset.reset` | `latest` in Java, **`AtStart` (earliest) in franz-go** | the two clients default in opposite directions: a new group either replays all history or silently skips it. First entry for the "Java parameter → franz-go equivalent" column of the tuning checklist |
+| `compression.type` | `none` in Java, **snappy in franz-go** | the Go producer compresses before you ask it to, so every throughput and CPU figure in this lab is a compressed figure until exp-17 says otherwise |
+| `partition.assignment.strategy` | `[range, cooperative-sticky]` in Java — which negotiates down to eager `range` — **`CooperativeStickyBalancer` in franz-go** | the two clients rebalance differently out of the box. exp-14 has to configure the eager balancer explicitly, or it measures cooperative twice ([08](08-rebalance.md)) |
+| rebalance timeout | `max.poll.interval.ms` 5 min in Java, **`RebalanceTimeout` 60 s in franz-go** | the budget a slow handler gets before the group gives up on it differs by 5× ([03](03-read-path.md)) |
+| `linger.ms` / `batch.size` | `0` / 16 KB in Java, **10 ms / ≈1 MB in franz-go** | franz-go has already traded latency for throughput before any tuning happens (exp-17) |
 | `segment.bytes` / `segment.ms` | 1 GB / 7 days | the active segment is never compacted or deleted |
 | `min.cleanable.dirty.ratio` | `0.5` | compaction does not start until half the log is superseded |
 | `delete.retention.ms` | 24 h | how long tombstones stay visible |
 | `unclean.leader.election.enable` | `false` | availability traded for not deleting acknowledged writes |
+
+The franz-go column is read out of `pkg/kgo/config.go` on master, not out of memory: these
+defaults have moved between releases, and the partitioner in [01](01-write-path.md) is the
+clearest example of a fact that used to be true. Re-check every one of them against the
+revision pinned in `go.mod` once the service exists.
 
 ## The cases
 
@@ -79,6 +92,7 @@ the sequence of what happened is the point.
 | [07](07-retry-dlq.md) | Retry chain and DLQ | Where does a failing message wait, and who is blocked? | KR3 | [yes](../dynamic/retry-dlq/) |
 | [08](08-rebalance.md) | Eager vs cooperative rebalance | How long does the group stop processing? | KR2, KR4 | [yes](../dynamic/rebalance/) |
 | [09](09-schema-evolution.md) | Schema evolution | Who gets upgraded first, producers or consumers? | KR3 | — |
+| [10](10-transactions-eos.md) | Transactions and EOS | What does a Kafka transaction actually cover, and where does it stop? | KR2 | — |
 
 The service architecture diagram required by KR3 lives in the [repository
 README](../../README.md), because that is where the reviewer looks for it.
@@ -100,8 +114,9 @@ the table above. Anything that does not serve it belongs in another file.
 **A referenced step is numbered by hand.** Mermaid's `autonumber` counts arrows and skips
 notes, so the pauses — batching, page cache, the high watermark — fall out of the
 numbering exactly where the explanation needs them. Wherever a table or a sentence points
-at a step ([01](01-write-path.md), [03](03-read-path.md)), the numbers are therefore
-written into the diagram by hand and verified against the rendered output. `autonumber`
+at a step ([01](01-write-path.md), [03](03-read-path.md), [10](10-transactions-eos.md)),
+the numbers are therefore written into the diagram by hand and verified against the
+rendered output. `autonumber`
 survives only in files where nothing references a number.
 
 **Boundaries are drawn, not implied.** The most valuable line in these diagrams is where
@@ -114,5 +129,10 @@ wrong, so the failure window is on the diagram, not only in the prose.
 the same identifiers that appear in `cmd/` and in the topic list, never a generic
 "Publisher".
 
-**Colour never carries meaning alone.** Every highlighted block is also labelled, so the
-diagrams survive dark mode and a black-and-white printout.
+**Colour never carries meaning alone, and it is applied as a tint.** Every highlighted
+block is also labelled, so the diagrams survive a black-and-white printout. The `rect`
+fills are `rgba` washes rather than solid pastels, because GitHub renders Mermaid in the
+reader's own theme: a solid light fill puts near-white text on a pale background for
+everyone in dark mode, and pinning the whole palette with `%%{init}%%` only moves the
+problem outside the frame. Both variants were rendered in both themes before this one was
+chosen.

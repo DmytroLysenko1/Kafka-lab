@@ -9,9 +9,9 @@ KR3 · interactive version: [`docs/dynamic/retry-dlq/`](../dynamic/retry-dlq/)
 flowchart LR
     M["payments.main<br/>6 partitions"] --> H{"handler outcome"}
 
-    H -->|"ok"| OK["commit offset"]
-    H -->|"transient<br/>provider timeout"| R5["payments.retry.5s"]
-    H -->|"poison<br/>will not deserialize"| D["payments.dlq"]
+    H -->|"ok"| OK["commit the main offset"]
+    H -->|"transient, provider timeout<br/>produce first, commit after the ack"| R5["payments.retry.5s"]
+    H -->|"poison, will not deserialize<br/>produce first, commit after the ack"| D["payments.dlq"]
 
     R5 --> RC["retry-consumer<br/>pause partition until ts plus delay"]
     RC -->|"fails again, attempt 2"| R1["payments.retry.1m"]
@@ -25,7 +25,9 @@ flowchart LR
 ```
 
 *Fig. 7 — the backoff schedule is visible in the topic list instead of being buried in a
-sleep, and the main partition never waits for a failing record (exp-11).*
+sleep, and the main partition never waits for a failing record: every route out of the
+handler commits the main offset, and on two of them the commit is only allowed once the
+produce that moved the record elsewhere has been acknowledged (exp-11).*
 
 ## The wrong fix, and why it is tempting
 
@@ -56,8 +58,9 @@ retry topics must stay on `CreateTime`, or the delay has to travel in a header.
 ## The offset on the main topic advances immediately
 
 Producing to the retry topic and then committing the main offset is itself a small dual
-write. The order drawn above is the safe one: produce first, commit after the ack, so a
-crash in between redelivers the record and it lands in the retry topic twice. That
+write, which is why the branch labels above carry an order rather than just a
+destination. Produce first, commit after the ack, so a crash in between redelivers the
+record and it lands in the retry topic twice. That
 duplicate is harmless only because the consumer has an inbox
 ([05](05-delivery-semantics.md)) — without one, this pattern manufactures duplicates by
 design.

@@ -72,8 +72,9 @@ rendered by GitHub without running anything.
 | [07](docs/static/07-retry-dlq.md) | Retry chain and DLQ | Where does a failing message wait, and who is blocked? | [yes](docs/dynamic/retry-dlq/) |
 | [08](docs/static/08-rebalance.md) | Eager vs cooperative rebalance | How long does the group stop processing? | [yes](docs/dynamic/rebalance/) |
 | [09](docs/static/09-schema-evolution.md) | Schema evolution | Who gets upgraded first, producers or consumers? | — |
+| [10](docs/static/10-transactions-eos.md) | Transactions and EOS | What does a Kafka transaction cover, and where does it stop? | — |
 
-**[`docs/dynamic/`](docs/dynamic/)** — six of those nine cases as interactive
+**[`docs/dynamic/`](docs/dynamic/)** — six of those ten cases as interactive
 walkthroughs: open `docs/dynamic/index.html` in a browser and step through with the arrow
 keys. Built for learning the mechanics and for presenting them; not a replacement for the
 static files.

@@ -20,7 +20,7 @@ sequenceDiagram
     K-->>C: record offset 42, payment 7f3a
     C->>K: OffsetCommit 43
 
-    rect rgb(255, 232, 232)
+    rect rgba(229, 57, 53, 0.16)
         Note over C,DB: loss window - kill -9 here<br/>the offset moved, the payment does not exist
     end
 
@@ -48,7 +48,7 @@ sequenceDiagram
     K-->>C: record offset 42, payment 7f3a
     C->>DB: INSERT payment 7f3a
 
-    rect rgb(255, 244, 224)
+    rect rgba(245, 158, 11, 0.18)
         Note over C,K: duplicate window - kill -9 here<br/>the row exists, the offset did not move
     end
 
@@ -74,7 +74,7 @@ sequenceDiagram
 
     K-->>C: record offset 42, event_id e91c
 
-    rect rgb(232, 245, 233)
+    rect rgba(67, 160, 71, 0.16)
         Note over C,DB: one transaction
         C->>DB: INSERT inbox(event_id) ON CONFLICT DO NOTHING RETURNING event_id
         alt one row returned - first delivery
@@ -112,8 +112,10 @@ event arrives with a different offset and the inbox lets it through.
 
 Exactly-once semantics inside Kafka — a transactional producer doing read-process-write
 — make the consumed offsets and the produced records one atomic unit **within Kafka**.
-The moment the effect is a row in another database, the guarantee stops at the boundary,
-because that database is not part of the transaction.
+The mechanism, and the exact point at which it stops, is [10](10-transactions-eos.md):
+every participant in that two-phase commit is a Kafka partition. The moment the effect is
+a row in another database, the guarantee ends at the boundary, because that database is
+not one of them.
 
 So for "Kafka plus Postgres" the answer is not EOS. It is an inbox on the way in
 (this file) and an outbox on the way out ([06](06-transactional-outbox.md)). Stating

@@ -44,9 +44,9 @@ Walkthrough.register({
       d: "Everything inside this frame either happens together or not at all. Note what the frame does not contain: the offset commit. Kafka is outside the transaction and always will be — which is the whole reason this pattern exists.",
       r: "Splitting the inbox row and the business write into separate transactions recreates exactly the bug the pattern was introduced to remove, with an extra table as decoration." },
 
-    { kind: "msg", from: "c", to: "db", label: "INSERT inbox ON CONFLICT DO NOTHING RETURNING",
+    { kind: "msg", from: "c", to: "db", label: "INSERT inbox(event_id e91c) ON CONFLICT DO NOTHING RETURNING",
       t: "The event id becomes a primary key",
-      d: "The first delivery inserts a row and gets it back; a redelivery hits the conflict and gets zero rows back.",
+      d: "The record carried event_id e91c from the producer, and that id — not the offset — is what the inbox is keyed by. The first delivery inserts a row and gets it back; a redelivery hits the conflict and gets zero rows back.",
       r: "RETURNING is the whole mechanism, not decoration. ON CONFLICT DO NOTHING raises no error, so the row count is the only signal that this event has been seen before. Ignore it and the business write still runs on every redelivery — that is Act II again, with an extra table." },
 
     { kind: "msg", from: "c", to: "db", label: "1 row → INSERT payment; COMMIT",

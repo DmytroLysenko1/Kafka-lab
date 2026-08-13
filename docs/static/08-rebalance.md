@@ -22,7 +22,7 @@ sequenceDiagram
     Note over CO: membership changed, new generation
     CO-->>A: heartbeat response REBALANCE_IN_PROGRESS
 
-    rect rgb(255, 232, 232)
+    rect rgba(229, 57, 53, 0.16)
         Note over A,B: nothing in the group is processed from here
         A->>A: revoke all four partitions, stop processing
         A->>CO: JoinGroup with no assignment
@@ -57,12 +57,12 @@ sequenceDiagram
     A->>CO: JoinGroup keeping the current assignment
     CO-->>A: SyncGroup p0, p1 only
 
-    rect rgb(255, 244, 224)
+    rect rgba(245, 158, 11, 0.18)
         Note over A: revoke p2 and p3 only, p0 and p1 never stop
         A->>CO: JoinGroup, triggering round two
+        CO-->>B: SyncGroup p2, p3
     end
 
-    CO-->>B: SyncGroup p2, p3
     Note over A,B: the group never went fully idle
 ```
 
@@ -72,6 +72,22 @@ instead of the size of the group (exp-14).*
 
 The trade is one extra round trip against near-zero processing downtime, and it is
 almost always worth taking.
+
+**Both frames are measured the same way**, or the comparison is worthless: each one opens
+at the revocation and closes when the new owner has actually been handed the partitions.
+The eager frame is that interval for the whole group; the cooperative frame is that
+interval for the two partitions that moved, while p0 and p1 keep committing throughout.
+
+Both diagrams also collapse one step that [03](03-read-path.md) draws in full: the plan
+still comes from the **group leader**, an ordinary member, and the coordinator only
+distributes it. Nothing about assignment moved onto the broker in either case.
+
+**The client defaults are not the same, and exp-14 depends on it.** Java's
+`partition.assignment.strategy` defaults to `[range, cooperative-sticky]`, which
+negotiates down to eager `range`; franz-go's `Balancers` default is
+`CooperativeStickyBalancer()`. So Case A is what a Java service gets for free and what a
+franz-go service has to be told to do — exp-14 must configure the eager balancer
+explicitly, or it will measure cooperative twice and find no difference.
 
 **Switching assignors on a running group is a rolling upgrade, not a config flip.** The
 members must first be deployed with both the old and the new assignor configured, then

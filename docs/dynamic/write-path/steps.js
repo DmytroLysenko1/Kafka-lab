@@ -2,7 +2,7 @@ Walkthrough.register({
   id: "write-path",
   eyebrow: "Kafka-lab · KR1 · write path",
   title: "Write path",
-  hint: "Twelve steps, and two of them are the ones nobody draws: the metadata lookup, and the branch that has to fail.",
+  hint: "Two of these steps are the ones nobody draws: the metadata lookup, and the branch that has to fail.",
   lanes: [
     { id: "app",    name: "payments-api" },
     { id: "prod",   name: "franz-go producer" },
@@ -25,10 +25,10 @@ Walkthrough.register({
       d: "No broker is ever asked where to put a record. The client now knows the topology and decides for itself.",
       r: "After leadership moves, the old leader answers NOT_LEADER_OR_FOLLOWER. A client that does not refresh its metadata retries into a void — which is why metadata.max.age.ms exists." },
 
-    { kind: "note", at: "prod", lines: ["partition = murmur2(key) % 6", "batch fills until linger.ms / batch.size"],
+    { kind: "note", at: "prod", lines: ["partition = murmur2(key) % 6", "batch fills until linger or max bytes"],
       t: "The partition is chosen, then the message waits in a batch",
-      d: "murmur2(key) % partitions is computed on the client, the same way the Java client computes it, so a Go producer and a Java producer put the same key on the same partition. The record then accumulates in a batch until linger.ms elapses or batch.size fills up.",
-      r: "Same key, same partition, ordering preserved. Without a key franz-go does not round-robin: it sticks to one partition until the batch closes. Ordering then survives by accident at low volume and collapses under load — exp-01 has to push enough traffic to see it break." },
+      d: "murmur2(key) % partitions is computed on the client, the same way the Java client computes it, so a Go producer and a Java producer put the same key on the same partition. The record then accumulates in a batch until the linger interval elapses or the batch hits its size limit — in franz-go those are ProducerLinger, 10 ms by default where Java's linger.ms is 0, and ProducerBatchMaxBytes, about 1 MB where Java's batch.size is 16 KB.",
+      r: "Same key, same partition, ordering preserved. Without a key franz-go does not round-robin per record: its default UniformBytesPartitioner (KIP-794) holds one partition until 64 KiB have been produced to it and only then re-picks, adaptively favouring the least backed-up broker. Ordering survives by accident at low volume and collapses once traffic crosses that threshold — exp-01 has to push well past it." },
 
     { kind: "msg", from: "prod", to: "leader", label: "ProduceRequest acks=all, seq=N",
       t: "Straight to the leader of that partition",

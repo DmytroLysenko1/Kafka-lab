@@ -48,7 +48,9 @@ ends up showing a number nobody can explain (exp-03).*
 
 `LSO <= HW <= LEO` always. A single long-running transaction pins the LSO and stalls
 every `read_committed` consumer on that partition while `read_uncommitted` consumers see
-no problem at all — a failure mode worth recognising before it is diagnosed live.
+no problem at all — a failure mode worth recognising before it is diagnosed live. What
+moves the LSO, and why it moves only when a marker is written, is
+[10](10-transactions-eos.md).
 
 ## Segments
 
