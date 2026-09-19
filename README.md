@@ -14,8 +14,8 @@ architecture diagram is labelled accordingly rather than quietly implying otherw
 
 | KR (PDP) | Deliverable | Where it lives | State |
 |---|---|---|---|
-| Fundamentals and internals | cheat sheet with write and read path diagrams | [`docs/static/`](docs/static/) — index plus cases 01–04 | diagrams done; every number is `TBD` until exp-01…04 have run |
-| Delivery guarantees and tuning | notes on semantics plus a tuning checklist | cases 05, 08, 10; `docs/tuning-checklist.md` | mechanics drawn; checklist and exp-05…10, 16, 17 outstanding |
+| Fundamentals and internals | cheat sheet with write and read path diagrams | [`docs/static/`](docs/static/) — index plus cases 01–04 | diagrams done; exp-01 measured (6 448 – 7 964 order violations without a key, 0 with one), exp-02…04 outstanding |
+| Delivery guarantees and tuning | notes on semantics plus a tuning checklist | cases 05, 08, 10; [`docs/tuning-checklist.md`](docs/tuning-checklist.md) | mechanics and checklist written; every measured number waits on exp-05…10, 16, 17 |
 | Production-shaped Go app | working repo, README, architecture diagram | `cmd/`, `internal/` (created at the service stage), this file | no Go code yet; the service is the next stage |
 | Operate, observe, stress | Compose, Grafana dashboard, failure report, runbook | [`deploy/`](deploy/), `docs/failure-report.md`, `docs/runbook.md` | three-broker Compose runs; metrics stack and exp-13…16 outstanding |
 | Patterns and anti-patterns | recommendations doc | `docs/patterns.md` | outstanding |
@@ -153,6 +153,14 @@ the difference between two pictures.
 | [08](docs/static/08-rebalance.md) | Eager vs cooperative rebalance | How long does the group stop processing? | [yes](docs/dynamic/rebalance/) |
 | [09](docs/static/09-schema-evolution.md) | Schema evolution | Who gets upgraded first, producers or consumers? | — |
 | [10](docs/static/10-transactions-eos.md) | Transactions and EOS | What does a Kafka transaction cover, and where does it stop? | — |
+
+**[`docs/00-journal.md`](docs/00-journal.md)** — the lab journal: one entry per run, with
+what was expected, what the cluster did and what was surprising. The case files quote its
+numbers; it is where they come from. Each run lives in
+[`experiments/`](experiments/) and is reproducible with `make exp-NN`.
+
+**[`docs/tuning-checklist.md`](docs/tuning-checklist.md)** — every setting that matters,
+what it buys, what it costs, and the defaults where franz-go and the Java client disagree.
 
 **[`docs/dynamic/`](docs/dynamic/)** — six of those ten cases as interactive
 walkthroughs: open `docs/dynamic/index.html` in a browser and step through with the arrow

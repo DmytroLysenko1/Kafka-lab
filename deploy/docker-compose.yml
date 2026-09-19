@@ -98,7 +98,38 @@ services:
     volumes:
       - kafka3-data:/var/lib/kafka/data
 
+  # Credentials are lab constants, and the port is bound to loopback: nothing here is a
+  # secret. Experiments own their own tables and create them on start.
+  postgres:
+    image: postgres:18.6-alpine
+    hostname: postgres
+    container_name: kafka-lab-postgres
+    restart: "no"
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_LAB_USER:-lab}
+      POSTGRES_PASSWORD: ${POSTGRES_LAB_PASSWORD:-lab}
+      POSTGRES_DB: ${POSTGRES_LAB_DB:-lab}
+    volumes:
+      # Postgres 18 wants the mount one level up, at /var/lib/postgresql: the image refuses
+      # to start on a volume mounted at .../data, which is where 17 and earlier put it.
+      - postgres-data:/var/lib/postgresql
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1500M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      start_interval: 2s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
   kafka1-data:
   kafka2-data:
   kafka3-data:
+  postgres-data:

@@ -60,6 +60,10 @@ the sequence of what happened is the point.
 
 ## Defaults that decide the outcome
 
+The full list, with what each setting buys and what it charges, is the tuning checklist:
+[`docs/tuning-checklist.md`](../tuning-checklist.md). The table below is the short version —
+the defaults that decide an outcome on their own.
+
 | Setting | Default | Why it matters here |
 |---|---|---|
 | `acks` | `all` — Java since 3.0, and `AllISRAcks` in franz-go | with `1` a leader crash loses acknowledged records (exp-08) |

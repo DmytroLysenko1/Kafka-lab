@@ -8,6 +8,9 @@ notes.local.md
 
 /bin/
 /dist/
+# `go build ./path/to/cmd` drops the binary in the working directory under the package
+# directory's name; the Makefile never builds one, so anything matching is a stray.
+/exp-*-*
 *.test
 /coverage.out
 *.tmp.out

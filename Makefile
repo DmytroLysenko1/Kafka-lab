@@ -10,12 +10,15 @@ KAFKA_CONTAINER ?= kafka-lab-kafka1
 KAFKA_BIN := docker exec $(KAFKA_CONTAINER) /opt/kafka/bin
 BOOTSTRAP := --bootstrap-server localhost:9092
 
+DATABASE_URL ?= postgres://lab:lab@localhost:5432/lab?sslmode=disable
+export DATABASE_URL
+
 TOPICS ?=
 TOPIC ?=
 GROUP ?=
 EXP ?=
 
-.PHONY: up stop down logs topics exp-topics check topic-lint reset-topic elect-preferred describe lag build vet lint test test-race verify tidy
+.PHONY: up stop down logs topics exp-topics check exp-% topic-lint reset-topic elect-preferred describe lag build vet lint test test-race verify tidy
 
 up:
 	$(COMPOSE) up -d --wait
@@ -40,7 +43,7 @@ topics:
 # `make topics` creates for good and `make check` keeps checking.
 exp-topics: topic-lint
 	$(if $(EXP),,$(error EXP is required, e.g. make exp-topics EXP=exp-08-acks))
-	@echo "note: apply elects the preferred leader on the topics it touches
+	@echo "note: apply elects the preferred leader on the topics it touches"
 	$(TOPICCTL) apply --cluster-config $(CLUSTER_CONFIG) --skip-confirm experiments/$(EXP)/topics/*.yaml
 
 # Non-zero on drift from the YAML in either direction, and on a cluster too unhealthy to
@@ -69,6 +72,13 @@ reset-topic:
 # The explicit replacement for the auto leader rebalance that the compose file switches off.
 elect-preferred:
 	$(KAFKA_BIN)/kafka-leader-election.sh $(BOOTSTRAP) --election-type PREFERRED --all-topic-partitions
+
+# make exp-01 runs experiments/exp-01-*/run.sh, and only after check has agreed that the
+# cluster still matches the catalog — a measurement on a drifted stand is a wrong number.
+exp-%: check
+	$(eval EXP_DIR := $(firstword $(wildcard experiments/exp-$*-*)))
+	$(if $(EXP_DIR),,$(error no experiment matches experiments/exp-$*-*))
+	$(EXP_DIR)/run.sh
 
 describe:
 	$(TOPICCTL) get partitions --cluster-config $(CLUSTER_CONFIG) $(TOPICS)
