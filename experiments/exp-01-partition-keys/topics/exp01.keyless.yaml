@@ -1,0 +1,17 @@
+meta:
+  name: exp01.keyless
+  cluster: kafka-lab
+  environment: lab
+  region: local
+  description: >-
+    exp-01, keyless run: the same 10 000 events over 100 payments, produced with
+    no key at all.
+    Six partitions, like payments.main, so the comparison carries over.
+
+spec:
+  partitions: 6
+  replicationFactor: 3
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2

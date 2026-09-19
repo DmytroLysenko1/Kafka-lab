@@ -1,0 +1,18 @@
+exp-01 — partition keys, ordering and parallelism
+date: 2026-09-20-015215
+events: 10000 over 100 payments, 6 partitions, franz-go v1.22.0
+
+mode                              keyless
+produced                          10000
+handled                           10000
+payments                          100
+payments split across partitions  100
+order violations                  7838
+
+mode                              keyed
+produced                          10000
+handled                           10000
+payments                          100
+payments split across partitions  0
+order violations                  0
+
