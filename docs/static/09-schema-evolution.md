@@ -77,6 +77,32 @@ Never assemble this by hand — use `franz-go/pkg/sr`. The symptom of getting it
 distinctive and initially baffling: the consumer fails immediately, on the first byte,
 with a decode error that mentions nothing about schemas.
 
+## Subjects: one topic, four event types
+
+The figures above register `PaymentCaptured` as if it owned its subject. With the default
+`TopicNameStrategy` it does not: the subject is `payments.main-value`, and every schema
+registered under it is checked against the one before. `payments.main` carries four event
+types — requested, authorized, captured, refunded — and they have to share it, because
+splitting them across topics would give up the per-payment ordering the key exists for.
+Registering `PaymentAuthorized` into that subject would then be judged against
+`PaymentCaptured`.
+
+The value is therefore one envelope, `PaymentEvent { oneof event { … } }`, under
+`TopicNameStrategy`, and a new event type is a new `oneof` variant — which the registry
+should accept as compatible, a verdict exp-12 records from a run against the pinned
+registry image rather than from memory. Three more rules follow from the same wire format:
+
+- **The retry tiers and the DLQ forward bytes verbatim** — magic byte, schema id and
+  payload untouched — and no subject is registered for them. A forwarder that decoded and
+  re-encoded would create `payments-consumer.retry.5s-value` and friends, each with a
+  compatibility history of its own, and a poison record could not be forwarded at all.
+- **A DLQ may contain bytes that do not decode.** That is its job for a poison pill
+  ([07](07-retry-dlq.md), exp-11), so nothing downstream may assume every dead letter
+  parses.
+- **The key is the plain UTF-8 bytes of `payment_id`, never registry-encoded.** The key is
+  what the partitioner hashes; a schema id inside it would move a payment to a different
+  partition the day the key's schema evolved.
+
 ## The direction table — this is the part people get backwards
 
 The compatibility **mode** is a registry-level rule about which direction must hold. It

@@ -144,8 +144,8 @@ order ([09](09-schema-evolution.md)), the ordering of two writes
 ([06](06-transactional-outbox.md)). The reader compares two pictures instead of trusting
 one picture and a claim.
 
-**Names match the code.** `outbox-relay`, `payments.retry.5s`, `payments-consumer` —
-the same identifiers that appear in `cmd/` and in the topic list, never a generic
+**Names match the code.** `outbox-relay`, `payments-consumer.retry.5s`, `payments-consumer` —
+the same identifiers that appear in `deploy/topics/` and, from the service stage on, in `cmd/`, never a generic
 "Publisher".
 
 **Colour never carries meaning alone, and it is applied as a tint.** Every highlighted

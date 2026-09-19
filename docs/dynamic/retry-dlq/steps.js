@@ -6,9 +6,9 @@ Walkthrough.register({
   lanes: [
     { id: "main",  name: "payments.main" },
     { id: "cons",  name: "payments-consumer" },
-    { id: "retry", name: "payments.retry.*" },
+    { id: "retry", name: "payments-consumer\n.retry.*" },
     { id: "rcons", name: "retry-consumer" },
-    { id: "dlq",   name: "payments.dlq" }
+    { id: "dlq",   name: "payments-consumer.dlq" }
   ],
   steps: [
     { kind: "msg", from: "main", to: "cons", label: "record payment 7f3a",
@@ -37,20 +37,20 @@ Walkthrough.register({
     { kind: "msg", from: "retry", to: "rcons", label: "redelivered after 5s", reply: true,
       t: "A different consumer — and here blocking is fine",
       d: "Kafka has no delayed delivery, so this consumer reads the record timestamp and pauses the partition until the delay has elapsed. Waiting is safe here because every record in this topic carries the same delay and they arrive in time order; pausing is not sleeping either — the client keeps polling and heartbeating, so the group does not consider the member dead.",
-      r: "The delay is computed from the record timestamp, so watch the timestamp type: with message.timestamp.type=LogAppendTime the broker overwrites the producer's timestamp and every delay calculation is wrong. Retry topics stay on CreateTime, or the deadline travels in a header." },
+      r: "The delay is counted from the moment the record entered this tier, so the retry topics run on message.timestamp.type=LogAppendTime. The consumer forwards the record it received, and franz-go keeps a forwarded record's original timestamp — on a CreateTime topic 'timestamp plus five seconds' is already in the past on arrival, and three attempts burn out in milliseconds. Checked on this stand: an hour-old record read back an hour old from CreateTime, zero seconds old from LogAppendTime." },
 
     { kind: "note", at: "rcons", warn: true, lines: ["attempt=2 → retry.1m", "attempt=3 → retry.10m"],
       t: "Backoff as topology",
       d: "Each failure promotes the record to the next tier. The backoff schedule is visible in the topic list instead of being buried inside a sleep somewhere in the consumer, and one shared retry topic with mixed delays would reintroduce exactly the head-of-line blocking the pattern removes.",
-      r: "Retries reorder events by design: a record sent to retry.10m comes back long after its neighbours. Handlers must guard the state transition in the database — UPDATE ... WHERE status = $expected — so a stale event finds the row in the wrong state and changes nothing." },
+      r: "Retries reorder events by design, in two directions. A stale event — Authorized coming back after Captured was applied — finds the row already past the expected state and changes nothing. A premature one — Captured arriving while Authorized waits in retry.1m — finds the row still behind it, and treating that as 'change nothing' loses the capture: it is a retriable error and joins the chain behind its predecessor, in the same partition because the key survives every hop." },
 
     { kind: "msg", from: "rcons", to: "dlq", label: "attempts exhausted → DLQ",
       t: "Dead letter, with the evidence attached",
       d: "Headers carry the original topic, partition and offset, the error class, the attempt count, the timestamp of the first failure and the trace id — enough to reconstruct what happened without digging through consumer logs that have since rotated." },
 
-    { kind: "note", at: "dlq", lines: ["dlq-replayer", "→ back to payments.main"],
+    { kind: "note", at: "dlq", lines: ["dlq-replayer", "→ payments-consumer.retry.5s"],
       t: "A DLQ you cannot replay from is a rubbish bin",
       d: "Dead letters are not an archive. dlq-replayer exists so that fixing the bug and reprocessing is one command, and so that the person doing it at 3 a.m. is not writing an ad-hoc export script.",
-      r: "Replayed records re-enter the main topic and are processed again by the ordinary consumer — which is safe for exactly one reason: the inbox makes a second delivery a no-op." }
+      r: "Replayed records go back into this group's own first retry tier with the attempt count reset, never into payments.main: the main topic would hand the replay to every group reading it, and one without an inbox would process the payment twice. The chain is named after the consumer group for the same reason — a second group on payments.main gets a chain of its own." }
   ]
 });

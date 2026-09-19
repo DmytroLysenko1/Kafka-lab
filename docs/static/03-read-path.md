@@ -13,7 +13,7 @@ sequenceDiagram
     participant L as Leader p3
 
     C->>CO: 1. FindCoordinator group=payments-consumer
-    Note over CO: 2. the coordinator is the leader of __consumer_offsets<br/>partition abs(hashCode(group)) mod 50
+    Note over CO: 2. the coordinator is the leader of __consumer_offsets<br/>partition abs(hashCode(group)) mod offsets.topic.num.partitions
 
     C->>CO: 3. JoinGroup subscription=payments.main
     CO-->>GL: 4. member list and subscriptions
@@ -49,7 +49,7 @@ is the only step here that can lose the partition mid-batch (exp-02, exp-16).*
 
 | # | What actually happens | What breaks if you get it wrong |
 |---|---|---|
-| 1–2 | The coordinator is one specific broker: the group id is hashed onto the 50 partitions of `__consumer_offsets` and the leader of that partition takes the job. The hash is Java's `String.hashCode`, **not** the `murmur2` that partitions records by key — two different hashes, two different purposes. | Killing "some broker" during a failure drill may kill the coordinator and produce a much larger outage than the one being tested (exp-13). |
+| 1–2 | The coordinator is one specific broker: the group id is hashed onto the partitions of `__consumer_offsets` — 50 by default, 3 on this stand, where the compose file sets `offsets.topic.num.partitions` — and the leader of that partition takes the job. The hash is Java's `String.hashCode`, **not** the `murmur2` that partitions records by key — two different hashes, two different purposes. | Killing "some broker" during a failure drill may kill the coordinator and produce a much larger outage than the one being tested (exp-13). |
 | 3–6 | **Classic protocol.** Members join, the coordinator elects one of them leader and hands it the member list, that member computes the assignment, the coordinator distributes each share. The assignment algorithm runs in a client. | Believing the broker balances the group. It does not: a bad custom assignor is a client-side bug, and every member must agree on the same assignor or the group cannot form. |
 | 7 | One partition belongs to exactly one member of a group. That is the whole parallelism model — there is nothing finer-grained than a partition. | More consumers than partitions means the extras idle forever. Six partitions is a hard ceiling of six workers (exp-02). |
 | 8–9 | Committed offsets live in `__consumer_offsets`, compacted, keyed by group, topic and partition — never in the consumer process. | With no committed offset `auto.offset.reset` decides: `earliest` replays all history, `latest` silently skips everything produced before the consumer appeared. A misconfigured `latest` looks exactly like "the messages never arrived" — and the clients disagree on the default: Java starts a new group at `latest`, franz-go starts it at the beginning (`ConsumeStartOffset` = `AtStart`). The reset of an *expired committed* offset is a separate option again, `ConsumeResetOffset`, whose default (`RewindOffset(1m)`) has no Java equivalent at all. |
@@ -82,4 +82,4 @@ the write-up, not in an assumption.
 | Run | What it shows | Status |
 |---|---|---|
 | exp-02 | consumers added beyond partition count: lag per partition does not improve | TBD |
-| exp-16 | slow handler, lag spike, and what the client actually does about it | TBD |
+| exp-16 | slow handler, lag spike, and what the client actually does about it — in three phases: lag on one partition, eviction from the group, and a deliberate pause ([07](07-retry-dlq.md)) | TBD |

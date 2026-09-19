@@ -8,13 +8,13 @@ requests go to which coordinator — a table reads better than an animation.
 
 ```mermaid
 sequenceDiagram
-    participant C as payments-consumer<br/>transactional producer
+    participant C as payments-enricher<br/>transactional producer
     participant TC as Transaction coordinator
     participant P as Leader, payments.enriched
     participant GC as Group coordinator
     participant PG as Postgres
 
-    C->>TC: 1. InitProducerId transactional.id=payments-eos-1
+    C->>TC: 1. InitProducerId transactional.id=payments-enricher-1
     TC-->>C: 2. producer id plus a NEW epoch, every older epoch fenced
     Note over C: 3. BeginTransaction is client-side only, no request leaves
 
@@ -25,7 +25,7 @@ sequenceDiagram
         C->>P: 6. Produce, flagged transactional, carrying pid and epoch
         Note over P: 7. the records are appended immediately<br/>a read_uncommitted consumer can already see them
 
-        C->>TC: 8. AddOffsetsToTxn group=payments-consumer
+        C->>TC: 8. AddOffsetsToTxn group=payments-enricher
         C->>GC: 9. TxnOffsetCommit 1093, inside the same transaction
         Note over GC: 10. the offset is in __consumer_offsets already,<br/>and stays invisible until the marker lands
 
@@ -40,6 +40,13 @@ sequenceDiagram
     C->>PG: 17. INSERT payment — the effect everyone actually wanted to protect
     Note over PG: 18. outside the frame, and no setting moves it in:<br/>no marker is sent here, no coordinator knows this row exists,<br/>and an aborted transaction leaves it exactly where it is
 ```
+
+The read-process-write stage here is `payments-enricher`, a consumer group of its own next to
+`payments-consumer`: two applications subscribed to `payments.main` under one group id would
+split its partitions between them, and each event would reach only one of the two.
+`payments.enriched` is an exp-10 topic, declared in that experiment's own directory rather than
+in the catalog, and exp-10 runs the stage on its own input topic too, so the measurement never
+shares a topic with the service.
 
 *Fig. 10 — the frame is the transaction, and it has exactly two members: the output
 records and the consumed offsets, which become visible together when the markers land. The

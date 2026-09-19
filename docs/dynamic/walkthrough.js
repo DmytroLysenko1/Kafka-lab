@@ -110,8 +110,12 @@ window.Walkthrough = (function () {
       el("line", { x1: x, y1: 78, x2: x, y2: geo.height - 14, class: "lifeline", "stroke-width": 1 }, lifelines);
       el("rect", { x: x - 85, y: 34, width: 170, height: 44, rx: 3, class: "actor-box",
                    "stroke-width": 1, "data-actor": lane.id }, actorsG);
-      var label = el("text", { x: x, y: 61, class: "actor-label", "text-anchor": "middle" }, actorsG);
-      label.textContent = lane.name;
+      var lines = lane.name.split("\n");
+      var label = el("text", { x: x, y: 61 - (lines.length - 1) * 7, class: "actor-label", "text-anchor": "middle" }, actorsG);
+      lines.forEach(function (line, i) {
+        var span = el("tspan", { x: x, dy: i === 0 ? 0 : 15 }, label);
+        span.textContent = line;
+      });
     });
 
     /* ---------- drawing ---------- */
