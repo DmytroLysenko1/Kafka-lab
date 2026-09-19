@@ -6,8 +6,9 @@ backed by a reproducible experiment (`make exp-NN`) with its numbers committed, 
 marked `TBD` until that experiment has run.
 
 **Status.** The diagrams and the internals documentation are in place, and so is the
-cluster they describe: `make up` brings up three KRaft brokers and `labctl` creates the
-topics and prints their leaders and ISR. The payments service described below is the
+cluster they describe: `make up` brings up three KRaft brokers, and the topics are
+declared as YAML in [`deploy/topics/`](deploy/topics/) and applied with
+[topicctl](https://github.com/segmentio/topicctl). The payments service described below is the
 target of the service stage — **its code is not in this repository yet**, and the
 architecture diagram is labelled accordingly rather than quietly implying otherwise.
 
@@ -15,7 +16,7 @@ architecture diagram is labelled accordingly rather than quietly implying otherw
 |---|---|---|---|
 | Fundamentals and internals | cheat sheet with write and read path diagrams | [`docs/static/`](docs/static/) — index plus cases 01–04 | diagrams done; every number is `TBD` until exp-01…04 have run |
 | Delivery guarantees and tuning | notes on semantics plus a tuning checklist | cases 05, 08, 10; `docs/tuning-checklist.md` | mechanics drawn; checklist and exp-05…10, 16, 17 outstanding |
-| Production-shaped Go app | working repo, README, architecture diagram | `cmd/`, `internal/`, this file | `labctl` only; the service is the next stage |
+| Production-shaped Go app | working repo, README, architecture diagram | `cmd/`, `internal/` (created at the service stage), this file | no Go code yet; the service is the next stage |
 | Operate, observe, stress | Compose, Grafana dashboard, failure report, runbook | [`deploy/`](deploy/), `docs/failure-report.md`, `docs/runbook.md` | three-broker Compose runs; metrics stack and exp-13…16 outstanding |
 | Patterns and anti-patterns | recommendations doc | `docs/patterns.md` | outstanding |
 | Share findings | write-up or tech talk | `docs/talk.md`, and the walkthroughs in [`docs/dynamic/`](docs/dynamic/) | the talk is outstanding; the interactive cases are its backbone and already run |
@@ -23,39 +24,57 @@ architecture diagram is labelled accordingly rather than quietly implying otherw
 ## Running the cluster
 
 ```
-make up            # three KRaft brokers, waits until all are healthy
-make topics        # creates the payments topics, or reports how a live one drifted
-make describe      # leader, replicas, ISR and under-replication per partition
-make down          # stops everything and wipes the brokers' state
-make verify        # build, vet, golangci-lint, go test -race
+make up                          # three KRaft brokers, waits until all are healthy
+make topics                      # create or update the catalog in deploy/topics
+make check                       # non-zero exit on drift or on a cluster unfit to measure on
+make describe TOPICS=payments.main
+make lag GROUP=payments-consumer
+make reset-topic TOPIC=payments-consumer.dlq
+make elect-preferred             # move leadership back to the preferred replicas
+make stop                        # pause, keeping the brokers' data
+make down                        # stop and wipe the brokers' data
 ```
 
-One experiment topic at a time, for the cases the catalog deliberately does not cover:
+Topics are declared, not scripted: one YAML file per topic, applied by
+[topicctl](https://github.com/segmentio/topicctl). The permanent catalog lives in
+[`deploy/topics/`](deploy/topics/). An experiment's own topics — `min.insync.replicas=3`
+for exp-08, a compacted one for exp-03 — live in `experiments/<exp>/topics/` and are
+applied with `make exp-topics EXP=<exp>`, so they neither become part of the catalog nor
+keep being checked after the experiment is over.
+
+Every YAML states `min.insync.replicas` explicitly, and `make check` refuses to run
+otherwise. With eligible leader replicas (KIP-966, on by default in Kafka 4.x) the
+controller keeps `min.insync.replicas` as a cluster-wide dynamic default — copied from the
+broker setting, 2 here, when the cluster is first formatted — and topicctl would report
+that inherited value as drift on every run of a YAML that leaves it out. Why every number
+in the catalog is what it is, and which experiment gets a topic of its own, is written
+down in [`deploy/topics/README.md`](deploy/topics/README.md).
+
+`make check` is the step to run before every experiment. It fails on two kinds of problem.
+**Drift**: a partition count or declared setting that no longer matches the YAML, and any
+topic-level setting the YAML never declared. **Health**: replicas out of sync, throttles
+left over from a reassignment, leaders off their preferred replica. The second kind matters
+as much as the first — a measurement taken on a broker that leads four of six partitions
+after the previous experiment is a number about that experiment, not about this one:
 
 ```
-go run ./cmd/labctl create-topic -name exp08.isr3 -partitions 3 -rf 3 -config min.insync.replicas=3
-go run ./cmd/labctl add-partitions -add 2 exp02.hot      # the exp-02 remedy, and its cost
-go run ./cmd/labctl delete-topic exp08.isr3              # put the cluster back
-go run ./cmd/labctl lag payments-consumer                # committed, end, lag per partition
-go run ./cmd/labctl -v describe exp08.isr3               # -v logs what the client asks the brokers
+$ make check
+  config settings correct | ✗ | 1 keys have different values between cluster and topic config: [cleanup.policy]
+make: *** [check] Error 1
 ```
 
-`make topics` is a check, not just a setup step. A topic that already exists is compared
-against the catalog in both directions: a partition count, replication factor or declared
-setting that no longer matches is drift, **and so is any topic-level override the catalog
-never declared**. An experiment that reshapes a topic — turning it compacted, say —
-therefore cannot be inherited silently by the next one, which would otherwise produce a
-number that looks real and is not:
+Because topicctl reads the replication factor off the in-sync replicas, a dead broker shows
+up in `make check` as a failure too — which is the right answer before a measurement — and
+`make topics` should only be run with all three brokers up.
 
-```
-$ go run ./cmd/labctl topics
-TOPIC          STATE    DRIFT
-payments.dlq   drifted  cleanup.policy: want unset, got compact
-exit status 1
-```
-
-`delete-topic` is the way back: drop the reshaped topic and let `make topics` recreate it,
-instead of wiping the whole cluster and every other experiment's state with it.
+Two behaviours of `topicctl apply` shape the rest. It **elects the preferred leader** on
+every topic it touches, and with `auto.leader.rebalance.enable=false` that is the only thing
+that moves leadership back on its own — so `make topics` is never run in the middle of an experiment
+that measures leadership, and `make elect-preferred` exists to do it deliberately. And it
+**only warns** about a setting the YAML never declared, leaving it in place, so
+`make reset-topic` is the way back: it drops the topic and recreates it from its own YAML,
+resetting the log as well as the config, without touching any other topic. It refuses to
+delete a topic no YAML declares.
 
 Brokers are reachable from the host at `localhost:19092,29092,39092`, bound to loopback
 only. There is no restart policy on purpose: an experiment that kills a broker needs it
@@ -78,11 +97,11 @@ flowchart LR
         W2["worker 2 · schema v1<br/>still rolling · p3 p4 p5"]
     end
 
-    CG -->|"transient failure"| RETRY["payments.retry.5s<br/>payments.retry.1m<br/>payments.retry.10m"]
+    CG -->|"transient failure"| RETRY["payments-consumer.retry.*<br/>5s · 1m · 10m"]
     RETRY --> RC["retry-consumer<br/>pauses until the delay elapses"]
-    RC -->|"attempts exhausted,<br/>or poison on the first failure"| DLQ["payments.dlq"]
+    RC -->|"attempts exhausted,<br/>or poison on the first failure"| DLQ["payments-consumer.dlq"]
     DLQ --> RP["dlq-replayer"]
-    RP -->|"after the bug is fixed"| MAIN
+    RP -->|"after the bug is fixed,<br/>into the first tier"| RETRY
     CG -->|"one tx: inbox ON CONFLICT<br/>+ business write"| PG
 
     SR["Schema Registry · BACKWARD<br/>checked at registration,<br/>never in the data path"]
@@ -106,8 +125,8 @@ is the only state in which compatibility means anything
 | `outbox-relay` | an unavailable broker becomes a backlog, never a lost event or a failed request | [06](docs/static/06-transactional-outbox.md) |
 | `payments.main` | ordering per `payment_id`, parallelism capped by partition count | [01](docs/static/01-write-path.md), [03](docs/static/03-read-path.md) |
 | `payments-consumer` | a redelivered record changes nothing on the second pass | [05](docs/static/05-delivery-semantics.md) |
-| retry topics | a failing record waits without blocking the partition it came from | [07](docs/static/07-retry-dlq.md) |
-| `payments.dlq` | a dead letter carries enough context to be replayed, not just logged | [07](docs/static/07-retry-dlq.md) |
+| `payments-consumer.retry.*` | a failing record waits without blocking the partition it came from; the chain belongs to the group, so a second group on `payments.main` gets its own | [07](docs/static/07-retry-dlq.md) |
+| `payments-consumer.dlq` | a dead letter carries enough context to be replayed, not just logged, and is kept 30 days — long enough to fix, release and replay | [07](docs/static/07-retry-dlq.md) |
 | Schema Registry | an incompatible schema is rejected at registration, not discovered at read. The registry is never in the data path: the producer encodes a schema id into the bytes, and each consumer resolves that id once and caches it | [09](docs/static/09-schema-evolution.md) |
 
 Two things this diagram deliberately does **not** contain: a `kafka.Publish()` call

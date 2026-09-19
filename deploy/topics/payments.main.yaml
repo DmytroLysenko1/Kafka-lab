@@ -1,0 +1,21 @@
+meta:
+  name: payments.main
+  cluster: kafka-lab
+  environment: lab
+  region: local
+  description: >-
+    Payment events keyed by payment_id, so one payment's events keep their order.
+    Six partitions: a multiple of the three brokers, two leaders each, and divisible
+    by 1, 2, 3 and 6 consumers. Postgres is the system of record; this topic is the
+    transport and a week of replay buffer.
+
+spec:
+  partitions: 6
+  replicationFactor: 3
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    retention.ms: 604800000
+    message.timestamp.type: CreateTime
+    unclean.leader.election.enable: false

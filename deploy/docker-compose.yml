@@ -47,6 +47,11 @@ x-broker-env: &broker-env
   KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 5000
   KAFKA_LOG_CLEANER_BACKOFF_MS: 5000
   KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  # A topic created by hand in an experiment without explicit values would otherwise get
+  # RF 1 and a quorum of one. With eligible leader replicas the controller copies this
+  # min.insync.replicas into its cluster-wide default when the cluster is first formatted.
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
   KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
   KAFKA_LOG_DIRS: /var/lib/kafka/data
 

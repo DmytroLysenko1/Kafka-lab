@@ -1,0 +1,11 @@
+meta:
+  name: kafka-lab
+  region: local
+  environment: lab
+  description: The three KRaft brokers from deploy/docker-compose.yml.
+
+spec:
+  bootstrapAddrs:
+    - localhost:19092
+    - localhost:29092
+    - localhost:39092

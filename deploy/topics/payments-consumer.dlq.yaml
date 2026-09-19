@@ -1,0 +1,22 @@
+meta:
+  name: payments-consumer.dlq
+  cluster: kafka-lab
+  environment: lab
+  region: local
+  description: >-
+    Dead letters of consumer group payments-consumer, bytes forwarded verbatim, so a
+    poison record may not decode at all. Thirty days is the window for fix, release
+    and replay; LogAppendTime makes retention count from the letter's death, not from
+    the event's birth. The replayer writes back into payments-consumer.retry.5s, never
+    into payments.main, so no other group sees the replay.
+
+spec:
+  partitions: 6
+  replicationFactor: 3
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    retention.ms: 2592000000
+    message.timestamp.type: LogAppendTime
+    unclean.leader.election.enable: false

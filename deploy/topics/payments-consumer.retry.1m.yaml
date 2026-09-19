@@ -1,0 +1,23 @@
+meta:
+  name: payments-consumer.retry.1m
+  cluster: kafka-lab
+  environment: lab
+  region: local
+  description: >-
+    Retry tier 2 (1 minute) of consumer group payments-consumer only; another group on
+    payments.main gets its own chain. Key and value are forwarded verbatim,
+    headers are kept and extended.
+    LogAppendTime makes the timestamp the moment the record entered this tier, which
+    is what the delay is counted from. Retention is how long the retry consumer may
+    be down without losing a payment in flight, not the delay.
+
+spec:
+  partitions: 6
+  replicationFactor: 3
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    retention.ms: 604800000
+    message.timestamp.type: LogAppendTime
+    unclean.leader.election.enable: false
