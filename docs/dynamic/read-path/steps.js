@@ -48,7 +48,7 @@ Walkthrough.register({
     { kind: "msg", from: "coord", to: "cons", label: "1043, or nothing at all", reply: true,
       t: "A group with no history gets nothing back",
       d: "For a brand-new group there is no committed offset to return, and the consumer has to decide where to start on its own.",
-      r: "That decision is auto.offset.reset: earliest replays the whole history, latest silently skips everything produced before the consumer showed up. A misconfigured latest looks exactly like \"the messages never arrived\" — and the clients disagree on the default: Java resets to latest, franz-go's ConsumeResetOffset defaults to AtStart." },
+      r: "That decision is auto.offset.reset: earliest replays the whole history, latest silently skips everything produced before the consumer showed up. A misconfigured latest looks exactly like \"the messages never arrived\" — and the clients disagree on the default: Java starts a new group at latest, franz-go starts it at the beginning (ConsumeStartOffset = AtStart). Resetting a committed offset that fell out of retention is a different option again — ConsumeResetOffset, defaulting to RewindOffset(1m), which Kafka has no equivalent for." },
 
     { kind: "msg", from: "cons", to: "leader", label: "FetchRequest p3 from offset 1043",
       t: "The consumer pulls; nobody pushes",

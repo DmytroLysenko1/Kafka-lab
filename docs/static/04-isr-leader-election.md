@@ -86,6 +86,15 @@ configuration that reads as safe, and the reason the frame is worth drawing:
 `min.insync.replicas=2` is what prevents it, by turning the second `Produce` into a
 `NOT_ENOUGH_REPLICAS` rejection so the payment fails loudly instead of vanishing quietly.
 
+Reaching that state on purpose is itself a lesson. On this lab's three nodes each one is
+both broker and controller, so killing two to squeeze a `min.insync.replicas=2` topic also
+takes the KRaft quorum down — and a cluster with no active controller cannot shrink an ISR
+at all, because shrinking it *is* a controller write. The produce then hangs until it times
+out, which looks nothing like the rejection the setting is supposed to produce. The
+reproducible path is the opposite one: a topic with `min.insync.replicas=3` and a single
+broker killed, which drops the ISR below the threshold while two of three controllers stay
+alive (exp-08).
+
 **3. Unclean leader election.** This is the second branch of the same figure, and the
 distinction matters: on its own, case 2 does not yet destroy anything. With
 `unclean.leader.election.enable=false` the partition simply goes offline and offset 1050

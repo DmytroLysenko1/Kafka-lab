@@ -64,9 +64,11 @@ the sequence of what happened is the point.
 |---|---|---|
 | `acks` | `all` — Java since 3.0, and `AllISRAcks` in franz-go | with `1` a leader crash loses acknowledged records (exp-08) |
 | `min.insync.replicas` | `1` | a **topic** setting, not a producer one. At `1`, `acks=all` protects nothing |
-| `replica.lag.time.max.ms` | 30 s | how long a dead follower stays in the ISR |
+| `replica.lag.time.max.ms` | 30 s | how long a **live but lagging** follower stays in the ISR — a GC pause or a slow disk, not a crash |
+| `broker.session.timeout.ms` | 9 s, with heartbeats every 2 s | what actually removes a **dead** broker from every ISR: the KRaft controller fences it when its session expires. The two timers get conflated constantly, and they answer different questions (exp-04) |
 | `enable.auto.commit` | `true` — franz-go autocommits every 5 s when group consuming | the at-most-once default nobody chose (exp-05) |
-| `auto.offset.reset` | `latest` in Java, **`AtStart` (earliest) in franz-go** | the two clients default in opposite directions: a new group either replays all history or silently skips it. First entry for the "Java parameter → franz-go equivalent" column of the tuning checklist |
+| `auto.offset.reset`, part 1: where a **new group** starts | `latest` in Java, **`AtStart` (earliest) in franz-go** (`ConsumeStartOffset`) | the two clients default in opposite directions: a new group either replays all history or silently skips it |
+| `auto.offset.reset`, part 2: what happens to a **committed offset that fell out of retention** | `latest` or `earliest` in Java, **`RewindOffset(1 minute)` in franz-go** (`ConsumeResetOffset`) | franz-go's own docs say it plainly: *Kafka has no equivalent*. The Go consumer resumes a minute back instead of jumping to either end — one Java setting, two franz-go options, and a third behaviour that does not exist in Java at all. The best entry there is for the "Java parameter → franz-go equivalent" column of the tuning checklist |
 | `compression.type` | `none` in Java, **snappy in franz-go** | the Go producer compresses before you ask it to, so every throughput and CPU figure in this lab is a compressed figure until exp-17 says otherwise |
 | `partition.assignment.strategy` | `[range, cooperative-sticky]` in Java — which negotiates down to eager `range` — **`CooperativeStickyBalancer` in franz-go** | the two clients rebalance differently out of the box. exp-14 has to configure the eager balancer explicitly, or it measures cooperative twice ([08](08-rebalance.md)) |
 | rebalance timeout | `max.poll.interval.ms` 5 min in Java, **`RebalanceTimeout` 60 s in franz-go** | the budget a slow handler gets before the group gives up on it differs by 5× ([03](03-read-path.md)) |
