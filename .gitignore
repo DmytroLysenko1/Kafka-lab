@@ -1,4 +1,5 @@
 plan.md
+status.local.md
 notes.local.md
 
 .idea/
@@ -8,16 +9,17 @@ notes.local.md
 /bin/
 /dist/
 *.test
-*.out
-coverage.*
+/coverage.out
+*.tmp.out
+
 
 .env
 .env.local
-/deploy/data/
-/deploy/**/data/
 
 /experiments/tmp/
-*.log
+# Experiment results are the evidence this repository exists for and are committed;
+# only scratch logs are ignored.
+*.tmp.log
 
 /docs/dynamic/dist/
 

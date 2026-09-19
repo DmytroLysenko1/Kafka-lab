@@ -5,10 +5,63 @@ behaviour of a payments service built on them. Every claim in this repository is
 backed by a reproducible experiment (`make exp-NN`) with its numbers committed, or
 marked `TBD` until that experiment has run.
 
-**Status.** The diagrams and the internals documentation are in place. The Go service
-described below is the target of the service stage — **the code is not in this
-repository yet**, and the architecture diagram is labelled accordingly rather than
-quietly implying otherwise.
+**Status.** The diagrams and the internals documentation are in place, and so is the
+cluster they describe: `make up` brings up three KRaft brokers and `labctl` creates the
+topics and prints their leaders and ISR. The payments service described below is the
+target of the service stage — **its code is not in this repository yet**, and the
+architecture diagram is labelled accordingly rather than quietly implying otherwise.
+
+| KR (PDP) | Deliverable | Where it lives | State |
+|---|---|---|---|
+| Fundamentals and internals | cheat sheet with write and read path diagrams | [`docs/static/`](docs/static/) — index plus cases 01–04 | diagrams done; every number is `TBD` until exp-01…04 have run |
+| Delivery guarantees and tuning | notes on semantics plus a tuning checklist | cases 05, 08, 10; `docs/tuning-checklist.md` | mechanics drawn; checklist and exp-05…10, 16, 17 outstanding |
+| Production-shaped Go app | working repo, README, architecture diagram | `cmd/`, `internal/`, this file | `labctl` only; the service is the next stage |
+| Operate, observe, stress | Compose, Grafana dashboard, failure report, runbook | [`deploy/`](deploy/), `docs/failure-report.md`, `docs/runbook.md` | three-broker Compose runs; metrics stack and exp-13…16 outstanding |
+| Patterns and anti-patterns | recommendations doc | `docs/patterns.md` | outstanding |
+| Share findings | write-up or tech talk | `docs/talk.md`, and the walkthroughs in [`docs/dynamic/`](docs/dynamic/) | the talk is outstanding; the interactive cases are its backbone and already run |
+
+## Running the cluster
+
+```
+make up            # three KRaft brokers, waits until all are healthy
+make topics        # creates the payments topics, or reports how a live one drifted
+make describe      # leader, replicas, ISR and under-replication per partition
+make down          # stops everything and wipes the brokers' state
+make verify        # build, vet, golangci-lint, go test -race
+```
+
+One experiment topic at a time, for the cases the catalog deliberately does not cover:
+
+```
+go run ./cmd/labctl create-topic -name exp08.isr3 -partitions 3 -rf 3 -config min.insync.replicas=3
+go run ./cmd/labctl add-partitions -add 2 exp02.hot      # the exp-02 remedy, and its cost
+go run ./cmd/labctl delete-topic exp08.isr3              # put the cluster back
+go run ./cmd/labctl lag payments-consumer                # committed, end, lag per partition
+go run ./cmd/labctl -v describe exp08.isr3               # -v logs what the client asks the brokers
+```
+
+`make topics` is a check, not just a setup step. A topic that already exists is compared
+against the catalog in both directions: a partition count, replication factor or declared
+setting that no longer matches is drift, **and so is any topic-level override the catalog
+never declared**. An experiment that reshapes a topic — turning it compacted, say —
+therefore cannot be inherited silently by the next one, which would otherwise produce a
+number that looks real and is not:
+
+```
+$ go run ./cmd/labctl topics
+TOPIC          STATE    DRIFT
+payments.dlq   drifted  cleanup.policy: want unset, got compact
+exit status 1
+```
+
+`delete-topic` is the way back: drop the reshaped topic and let `make topics` recreate it,
+instead of wiping the whole cluster and every other experiment's state with it.
+
+Brokers are reachable from the host at `localhost:19092,29092,39092`, bound to loopback
+only. There is no restart policy on purpose: an experiment that kills a broker needs it
+to stay dead until the experiment brings it back. Several broker defaults are pinned in
+the Compose file for the same reason — auto leader rebalance and the retention check both
+run on 300 s timers that would otherwise decide an experiment's outcome instead of Kafka.
 
 ## Target architecture
 

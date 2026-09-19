@@ -1,0 +1,99 @@
+name: kafka-lab
+
+x-broker: &broker
+  image: apache/kafka:4.3.1
+  # No restart policy on purpose: exp-04/exp-13 kill a broker and expect it to stay dead
+  # until the experiment brings it back. `restart: unless-stopped` would resurrect it.
+  restart: "no"
+  # The probe starts a JVM (~1.1 s), so it runs often only while the broker is coming up:
+  # at a 5 s steady-state interval three of them cost ~0.7 of a core and show up in the
+  # p99 numbers exp-13/exp-17 are supposed to measure.
+  healthcheck:
+    test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+    interval: 30s
+    start_interval: 2s
+    timeout: 10s
+    retries: 5
+    start_period: 60s
+  deploy:
+    resources:
+      limits:
+        cpus: "2"
+        memory: 1500M
+
+x-broker-env: &broker-env
+  CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka1:9093,2@kafka2:9093,3@kafka3:9093
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 2
+  # Internal topics default to 50 partitions each. On three brokers that is ~450 replicas
+  # whose under-replicated count would bury the six partitions of payments.main on the
+  # KR4 dashboard the moment a broker dies. Only settable before the topics are created.
+  KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 3
+  KAFKA_TRANSACTION_STATE_LOG_NUM_PARTITIONS: 3
+  KAFKA_SHARE_COORDINATOR_STATE_TOPIC_NUM_PARTITIONS: 3
+  # Pinned because their defaults decide experiment outcomes instead of Kafka doing it:
+  # auto leader rebalance fires on a 300 s timer and would move leadership in the middle
+  # of a recovery measurement (exp-04/exp-13) — preferred election is invoked explicitly
+  # instead; the retention check also runs every 300 s, which makes exp-03 look broken.
+  KAFKA_AUTO_LEADER_REBALANCE_ENABLE: "false"
+  KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 5000
+  KAFKA_LOG_CLEANER_BACKOFF_MS: 5000
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+  KAFKA_LOG_DIRS: /var/lib/kafka/data
+
+services:
+  kafka1:
+    <<: *broker
+    hostname: kafka1
+    container_name: kafka-lab-kafka1
+    ports:
+      - "127.0.0.1:19092:19092"
+    environment:
+      <<: *broker-env
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:19092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:9092,EXTERNAL://localhost:19092
+    volumes:
+      - kafka1-data:/var/lib/kafka/data
+
+  kafka2:
+    <<: *broker
+    hostname: kafka2
+    container_name: kafka-lab-kafka2
+    ports:
+      - "127.0.0.1:29092:29092"
+    environment:
+      <<: *broker-env
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:9092,EXTERNAL://localhost:29092
+    volumes:
+      - kafka2-data:/var/lib/kafka/data
+
+  kafka3:
+    <<: *broker
+    hostname: kafka3
+    container_name: kafka-lab-kafka3
+    ports:
+      - "127.0.0.1:39092:39092"
+    environment:
+      <<: *broker-env
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:39092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:9092,EXTERNAL://localhost:39092
+    volumes:
+      - kafka3-data:/var/lib/kafka/data
+
+volumes:
+  kafka1-data:
+  kafka2-data:
+  kafka3-data:

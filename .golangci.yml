@@ -1,0 +1,111 @@
+# CANONICAL golangci-lint config (v2) — the staff-grade baseline every Go repo should adopt.
+#
+# WHY THIS FILE EXISTS: golangci-lint reads config from the REPO ROOT, never from $HOME, so
+# context/leak linters cannot be enforced globally through a hook — each project must carry
+# them. This is the reference to copy into a new repo's `.golangci.yml` (adjust module path
+# in goimports.local-prefixes and any tool-class gosec exclusions).
+#
+# The point of this baseline over golangci defaults: the linters that make context handling,
+# goroutine/resource leaks, and error-wrapping DETERMINISTIC instead of relying on a
+# reviewer's memory (which is lost after a context compact). These are the enforcement
+# mechanism for CLAUDE.md's context/concurrency/error doctrine.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # --- context correctness (the doctrine's "context — закон", deterministic) ---
+    - contextcheck    # a function must propagate the parent ctx, not break the chain
+    - containedctx    # no context.Context stored inside a struct field
+    - fatcontext      # no context created/derived inside a loop body (leak + perf)
+    - noctx           # no HTTP/SQL call without a ctx-carrying variant
+    # govet below includes `lostcancel`: WithCancel/WithTimeout whose cancel() is never called
+
+    # --- resource & goroutine leaks ---
+    - bodyclose       # http.Response.Body always closed
+    - rowserrcheck    # sql.Rows.Err() checked
+    - sqlclosecheck   # sql.Rows/Stmt closed
+    - makezero        # append to a make([]T, n) slice (silent zero-value bug)
+    # goroutine leaks are NOT a linter — enforce with goleak.VerifyTestMain in tests
+    # (see CLAUDE.md TESTING). No static linter catches a leaked goroutine.
+
+    # --- error discipline (stdlib errors, %w, sentinel) ---
+    - errcheck        # no ignored errors
+    - errorlint       # %w wrapping, errors.Is/As over == / type assertion
+    - nilerr          # `if err != nil { return nil }` — swallowed error
+    - err113          # dynamic errors via errors.New at call site (allow-list %w wraps)
+
+    # --- correctness / dead code / perf ---
+    - govet           # includes lostcancel, copylocks, loopclosure, printf, ...
+    - staticcheck
+    - ineffassign
+    - unused
+    - unparam
+    - wastedassign
+    - prealloc
+    - unconvert
+    - copyloopvar
+    - gocritic
+
+    # --- complexity budgets (CLAUDE.md: cognitive/cyclomatic <= 10) ---
+    - gocyclo
+    - gocognit
+
+    # --- security & hygiene ---
+    - gosec
+    - forbidigo       # ban fmt.Print*/log.* — structured logging only
+    - depguard        # ban archived/forbidden deps
+    - misspell
+
+  settings:
+    gocyclo:
+      min-complexity: 10
+    gocognit:
+      min-complexity: 10
+    contextcheck: {}
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: github.com/pkg/errors
+              desc: archived since 2021 — use stdlib errors
+            - pkg: github.com/stretchr/testify
+              desc: stdlib testing + go-cmp only
+            - pkg: github.com/onsi/ginkgo
+              desc: stdlib testing only
+            - pkg: github.com/onsi/gomega
+              desc: stdlib testing only
+    forbidigo:
+      forbid:
+        - pattern: ^fmt\.Print(|f|ln)$
+          msg: no stdout printing — use slog/zap (observability doctrine)
+        - pattern: ^log\.(Print|Fatal|Panic)(|f|ln)$
+          msg: no stdlib log — errors flow up as values; log only at the final boundary
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+
+  exclusions:
+    rules:
+      # Tests build large table literals and helper closures; relax complexity/sec there.
+      - path: _test\.go
+        linters:
+          - gocognit
+          - gocyclo
+          - prealloc
+          - gosec
+          - err113
+      # Sentinel errors and %w wraps are the sanctioned dynamic-error forms.
+      - linters:
+          - err113
+        text: "do not define dynamic errors"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/DmytroLysenko1/Kafka-lab
