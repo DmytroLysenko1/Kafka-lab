@@ -30,6 +30,7 @@ func (p partition) leaderless() bool {
 // health is the cluster's answer to "can I still write, and is anything degraded".
 type health struct {
 	Partitions      int
+	Replicas        int
 	UnderReplicated int
 	Leaderless      int
 	OffPreferred    int
@@ -45,6 +46,7 @@ func inspect(partitions []partition) health {
 }
 
 func (h *health) count(p partition) {
+	h.Replicas = max(h.Replicas, len(p.Replicas))
 	if p.underReplicated() {
 		h.UnderReplicated++
 	}

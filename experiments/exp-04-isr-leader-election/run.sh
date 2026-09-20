@@ -22,7 +22,12 @@ make exp-topics EXP="$(basename "$here")"
 # baseline is supposed to be a baseline of.
 make reset-topic TOPIC=exp04.isr
 
-exp04() { go run ./experiments/exp-04-isr-leader-election -records "$records" "$@"; }
+# Built once, outside the measured window: `go run` compiles on the first call, and on a
+# cold build cache that compile would land inside the interval being timed.
+binary="$(mktemp -d)/exp04"
+trap 'rm -rf "$(dirname "$binary")"' EXIT
+go build -o "$binary" ./experiments/exp-04-isr-leader-election
+exp04() { "$binary" -records "$records" "$@"; }
 
 {
   echo "exp-04 — ISR, leader election and recovery"
@@ -37,6 +42,12 @@ exp04() { go run ./experiments/exp-04-isr-leader-election -records "$records" "$
     1|2|3) ;;
     *) echo "exp-04: could not read the leader of partition 0 from the baseline"; exit 1 ;;
   esac
+
+  # A phase between the kill and the restart can fail — a deadline, a client error — and
+  # `set -e` would end the run with the broker still dead, leaving every later experiment
+  # measuring a degraded stand. docker start on a running container is a no-op, so this is
+  # safe to arm unconditionally.
+  trap 'docker start "kafka-lab-kafka$victim" >/dev/null 2>&1 || true' EXIT
 
   # kill, not stop: SIGTERM gives Kafka a controlled shutdown, which hands leadership over
   # politely and measures the good case. A crash is the case worth measuring.

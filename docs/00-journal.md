@@ -135,7 +135,7 @@ to change rather than sleeping for a guessed while.
 | Topic | Before cleaning | After cleaning |
 |---|---|---|
 | compacted | 2 010 records, 40 live keys, 10 tombstones | **50 records**, 40 live keys, 10 tombstones |
-| kept 5 s | 2 000 records, log starts at 0 | **0 records readable**, log starts at 2 000, open segment survives |
+| kept 5 s | 2 000 records, log starts at 0 | **0 records readable**, log starts past the last of them; the open segment holds only the instrument's own roll markers |
 
 **What was surprising.** The plan said to squeeze `segment.bytes` down to kilobytes so the
 active segment rolls quickly. Kafka 4.x refuses: the minimum is 1 MiB, confirmed by the
@@ -148,12 +148,18 @@ keeps them for `delete.retention.ms` so that every consumer still reading the lo
 chance to learn that the key is gone. A tombstone is a record that says "deleted", not an
 absence — and it is removed by a later pass, not by the one that compacts the values.
 
-**Retention removed everything and left something.** After cleaning, the log starts at
-offset 2 000: every record produced had aged past 5 seconds and its segments were dropped
-whole. What is still readable is the open segment, which is never deleted however old it
-is. "Retention 5 s" therefore means "closed segments older than 5 s are dropped", and the
-amount of data actually kept depends on how quickly segments roll — not on the setting
-alone.
+**Retention removed everything, and what was left was not what the hypothesis predicted.**
+The hypothesis said a topic holds *more* than its setting suggests, because the open segment
+escapes deletion. The run showed the opposite: all 2 000 records were dropped, the log now
+starts past the last of them, and the only thing still readable is the handful of
+segment-roll markers the instrument itself wrote seconds earlier. So what was demonstrated
+is the clean half — every closed segment aged out and went whole — and not the interesting
+half, because the experiment never produced a record that was older than `retention.ms` and
+still readable. To show that, the open segment has to be closed *late*, trapping aged data
+inside it; this run closes segments continuously, so aged data always lands in a closed
+segment and always goes. "Retention 5 s" means "closed segments older than 5 s are dropped";
+how much a topic actually keeps beyond that is still unmeasured here, and is now listed as
+outstanding in the case file.
 
 **What the instrument got wrong first.** The second run of the experiment reported 41 live
 keys instead of 40: the segment-roll markers the experiment writes were counted as data,
@@ -181,35 +187,56 @@ remain in sync, and once the broker is back everything returns to how it was.
 **Setup.** One topic, 3 partitions, RF 3, `min.insync.replicas=2`,
 `unclean.leader.election.enable=false`; 300 records per phase with `acks=all`. Four
 phases, each a separate process, so the shell can `docker kill` the broker leading
-partition 0 between them and time the cluster's reaction from the kill itself rather than
-from when the next process happened to start. `kill`, not `stop`: SIGTERM gives Kafka a
-controlled shutdown, which hands leadership over politely and measures the good case.
+partition 0 between them and time the cluster's reaction from the kill itself. The binary
+is built once before the first phase: `go run` compiles on first call, and on a cold build
+cache that compile would land inside the interval being timed. `kill`, not `stop`: SIGTERM
+gives Kafka a controlled shutdown, which hands leadership over politely and measures the
+good case. Broker IDs below are whatever the assignment produced on this run — the result
+is the shape, not the identities.
 
 **Result.**
 
 | Phase | Leaders | Smallest ISR | Writes accepted |
 |---|---|---|---|
 | baseline | `[3 1 2]` | 3 of 3 | 300 of 300 |
-| degraded, kafka3 killed | `[1 1 2]` | 2, and `min.insync.replicas` is 2 | 300 of 300 |
+| degraded, kafka3 killed | `[1 1 2]` | 2, with `min.insync.replicas` 2 as the broker reports it | 300 of 300 |
 | recovered, kafka3 back | `[1 1 2]` | 3 of 3 | — |
 | after preferred election | `[3 1 2]` | 3 of 3 | — |
 
-| What | How long |
-|---|---|
-| kill → ISR shrinks and partition 0 has a new leader | **10.9 s** |
-| restart → ISR whole again | **5.3 s** |
-| preferred election → leadership back on the preferred replica | **0.2 s** |
+| What | Within | Of that, spent polling |
+|---|---|---|
+| kill → ISR shrinks and partition 0 has a new leader | **10.1 s** | 10.1 s |
+| restart → ISR whole again | **5.3 s** | 5.3 s |
+| preferred election → leadership back on the preferred replica | **0 s** | 0 s |
 
-**What was surprising.** The reaction took 10.9 s, and the number everyone quotes for
-"a replica leaves the ISR" — `replica.lag.time.max.ms`, 30 s by default — is not the one
-that applies. A crashed broker is not a slow follower. The controller stops receiving its
-heartbeats and fences it after `broker.session.timeout.ms`, which is 9 s with a heartbeat
-every 2 s, and fencing rewrites the ISR of every partition that broker belonged to at once.
-Both defaults were read back off the running broker (`kafka-configs --describe --all`)
-rather than recalled: `broker.session.timeout.ms=9000`, `broker.heartbeat.interval.ms=2000`,
-`replica.lag.time.max.ms=30000`. The lag timer governs a *live* follower that has fallen
-behind; the session timeout governs one that is gone. They are two different failure
-detectors, and only the second one was exercised here.
+Every interval is an upper bound measured from the event the shell timed, and the second
+column is how much of it the measuring process spent actually watching. The first two rows
+are honest intervals: the cluster changed while we were looking. The third is degenerate —
+leadership was already back at the first poll — and that is the whole finding for it. An
+earlier version of this table read 0.2 s there and 10.9 s above; both figures included the
+next process starting up, and the 0.2 s was *nothing but* startup. The instrument now
+prints the polling time next to the bound so a degenerate row cannot be mistaken for a
+measurement.
+
+**What was surprising — and it is an inference, not a measurement.** The reaction took
+10.1 s, and the number everyone quotes for "a replica leaves the ISR",
+`replica.lag.time.max.ms` at 30 s, cannot be the one that applies. The argument is that
+`broker.session.timeout.ms` governs it instead: a crashed broker is not a slow follower, so
+the controller stops receiving its heartbeats and fences it, and fencing rewrites the ISR of
+every partition that broker belonged to at once. The three defaults are committed as
+evidence — [`results/broker-timers.log`](../experiments/exp-04-isr-leader-election/results/broker-timers.log):
+`broker.session.timeout.ms=9000`, `broker.heartbeat.interval.ms=2000`,
+`replica.lag.time.max.ms=30000`.
+
+What is missing is the step that would make this a result rather than an argument: no run
+varies either timer. 10.1 s is consistent with the session timeout and inconsistent with the
+lag timer, which is strong circumstantial evidence and not the same thing as showing the
+reaction move when the setting moves. Reading the config off the live broker, which the
+previous version of this entry offered as its defence, settles the *values* — which nobody
+disputes — and says nothing about the causal step. One more run with
+`broker.session.timeout.ms` raised to, say, 20 s would settle it; it is listed as
+outstanding. The distinction matters here more than usual, because this claim has already
+been quoted elsewhere in the docs as established.
 
 **One dead broker degraded every partition — 3 of 3.** With RF 3 on three brokers, every
 broker holds a replica of every partition, so there is no partition that a failure can

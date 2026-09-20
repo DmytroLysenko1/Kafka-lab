@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -32,9 +33,10 @@ const (
 var phases = []string{"baseline", "degraded", "recovered", "elected"}
 
 var (
-	errPhase   = errors.New("exp-04: -phase must be baseline, degraded, recovered or elected")
-	errShape   = errors.New("exp-04: -records out of range")
-	errNoShift = errors.New("exp-04: the cluster never reached the expected state inside the deadline")
+	errPhase    = errors.New("exp-04: -phase must be baseline, degraded, recovered or elected")
+	errShape    = errors.New("exp-04: -records out of range")
+	errNoShift  = errors.New("exp-04: the cluster never reached the expected state inside the deadline")
+	errNoConfig = errors.New("exp-04: the topic does not report the config the phase needs")
 )
 
 type settings struct {
@@ -117,7 +119,7 @@ func baseline(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *
 		"phase\tbaseline, every broker up",
 		fmt.Sprintf("writes accepted\t%d of %d with acks=all", written, cfg.records),
 		fmt.Sprintf("leaders by partition\t%v", leaders(partitions)),
-		fmt.Sprintf("smallest ISR\t%d of 3 replicas", state.SmallestISR),
+		fmt.Sprintf("smallest ISR\t%d of %d replicas", state.SmallestISR, state.Replicas),
 		fmt.Sprintf("under-replicated\t%d", state.UnderReplicated),
 		// The script reads this line to learn which broker to kill: the one leading partition 0.
 		fmt.Sprintf("LEADER_P0\t%d", leaders(partitions)[0]),
@@ -129,23 +131,31 @@ func baseline(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *
 // matters: with one replica missing and min.insync.replicas=2, can a payment still be written?
 func degraded(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *settings, out io.Writer) error {
 	partitions, waited, err := await(ctx, admin, func(state health) bool {
-		return state.UnderReplicated > 0
+		return state.UnderReplicated > 0 && state.Leaderless == 0
 	})
+	if err != nil {
+		return err
+	}
+	timing := reached(cfg, "noticed", "the kill", waited)
+
+	insync, err := minInsyncReplicas(ctx, admin)
 	if err != nil {
 		return err
 	}
 
 	written, writeErr := write(ctx, client, cfg.records)
 	state := inspect(partitions)
-	lines := []string{
-		"phase\tdegraded, one broker killed",
-		fmt.Sprintf("noticed after\t%s from the kill", since(cfg, waited)),
-		fmt.Sprintf("leaders by partition\t%v", leaders(partitions)),
-		fmt.Sprintf("under-replicated\t%d of %d", state.UnderReplicated, state.Partitions),
-		fmt.Sprintf("smallest ISR\t%d, and min.insync.replicas is 2", state.SmallestISR),
-		fmt.Sprintf("writes accepted\t%d of %d with acks=all%s", written, cfg.records, writeNote(writeErr)),
-	}
-	return render(out, lines)
+	return render(out, slices.Concat(
+		[]string{"phase\tdegraded, one broker killed"},
+		timing,
+		[]string{
+			fmt.Sprintf("leaders by partition\t%v", leaders(partitions)),
+			fmt.Sprintf("leaderless partitions\t%d", state.Leaderless),
+			fmt.Sprintf("under-replicated\t%d of %d", state.UnderReplicated, state.Partitions),
+			fmt.Sprintf("smallest ISR\t%d, with min.insync.replicas %d", state.SmallestISR, insync),
+			fmt.Sprintf("writes accepted\t%d of %d with acks=all%s", written, cfg.records, writeNote(writeErr)),
+		},
+	))
 }
 
 // recovered waits for the replica to catch up again and then reports the part people expect
@@ -157,15 +167,18 @@ func recovered(ctx context.Context, admin *kadm.Client, cfg *settings, out io.Wr
 	if err != nil {
 		return err
 	}
+	timing := reached(cfg, "ISR restored", "the restart", waited)
 
 	state := inspect(partitions)
-	lines := []string{
-		"phase\trecovered, the broker is back",
-		fmt.Sprintf("ISR restored after\t%s from the restart", since(cfg, waited)),
-		fmt.Sprintf("leaders by partition\t%v", leaders(partitions)),
-		fmt.Sprintf("partitions led by a replacement\t%d of %d — auto leader rebalance is off, so leadership stays where the failure put it", state.OffPreferred, state.Partitions),
-	}
-	return render(out, lines)
+	return render(out, slices.Concat(
+		[]string{"phase\trecovered, the broker is back"},
+		timing,
+		[]string{
+			fmt.Sprintf("leaders by partition\t%v", leaders(partitions)),
+			fmt.Sprintf("smallest ISR\t%d of %d replicas", state.SmallestISR, state.Replicas),
+			fmt.Sprintf("partitions led by a replacement\t%d of %d", state.OffPreferred, state.Partitions),
+		},
+	))
 }
 
 // elected reports what an explicit preferred election did, which is the half of recovery
@@ -177,15 +190,18 @@ func elected(ctx context.Context, admin *kadm.Client, cfg *settings, out io.Writ
 	if err != nil {
 		return err
 	}
+	timing := reached(cfg, "leadership back", "the election", waited)
 
 	state := inspect(partitions)
-	lines := []string{
-		"phase\telected, preferred leadership asked for explicitly",
-		fmt.Sprintf("leadership back after\t%s from the election", since(cfg, waited)),
-		fmt.Sprintf("leaders by partition\t%v", leaders(partitions)),
-		fmt.Sprintf("partitions led by a replacement\t%d of %d", state.OffPreferred, state.Partitions),
-	}
-	return render(out, lines)
+	return render(out, slices.Concat(
+		[]string{"phase\telected, preferred leadership asked for explicitly"},
+		timing,
+		[]string{
+			fmt.Sprintf("leaders by partition\t%v", leaders(partitions)),
+			fmt.Sprintf("smallest ISR\t%d of %d replicas", state.SmallestISR, state.Replicas),
+			fmt.Sprintf("partitions led by a replacement\t%d of %d", state.OffPreferred, state.Partitions),
+		},
+	))
 }
 
 func await(ctx context.Context, admin *kadm.Client, reached func(health) bool) ([]partition, time.Duration, error) {
@@ -252,6 +268,43 @@ func writeNote(err error) string {
 		return ""
 	}
 	return fmt.Sprintf(" — refused: %v", err)
+}
+
+// reached reports how long a phase waited, as two numbers that mean different things.
+// The first is measured from the event the shell timed and is an UPPER BOUND: the cluster
+// may have got there while this process was still starting. The second is how long this
+// process actually spent polling — near zero means the cluster was already in the wanted
+// state at the first look, so the bound above is process startup and nothing else.
+func reached(cfg *settings, what, event string, waited time.Duration) []string {
+	return []string{
+		fmt.Sprintf("%s within\t%s of %s", what, since(cfg, waited), event),
+		fmt.Sprintf("  of that, spent polling\t%s", waited.Round(100*time.Millisecond)),
+	}
+}
+
+// minInsyncReplicas asks the cluster rather than trusting the YAML: the number this
+// experiment is about is the one the broker is enforcing, not the one we meant to set.
+func minInsyncReplicas(ctx context.Context, admin *kadm.Client) (int, error) {
+	resources, err := admin.DescribeTopicConfigs(ctx, topic)
+	if err != nil {
+		return 0, fmt.Errorf("exp-04: describe config of %s: %w", topic, err)
+	}
+	resource, err := resources.On(topic, nil)
+	if err != nil {
+		return 0, fmt.Errorf("exp-04: config of %s: %w", topic, err)
+	}
+
+	for _, config := range resource.Configs {
+		if config.Key != "min.insync.replicas" {
+			continue
+		}
+		value, err := strconv.Atoi(config.MaybeValue())
+		if err != nil {
+			return 0, fmt.Errorf("exp-04: min.insync.replicas of %s reads %q: %w", topic, config.MaybeValue(), err)
+		}
+		return value, nil
+	}
+	return 0, fmt.Errorf("%w: min.insync.replicas on %s", errNoConfig, topic)
 }
 
 func since(cfg *settings, waited time.Duration) time.Duration {

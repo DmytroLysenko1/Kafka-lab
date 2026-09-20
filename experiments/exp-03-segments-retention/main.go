@@ -25,7 +25,7 @@ const (
 	retentionTopic = "exp03.retention"
 
 	pollBatch = 500
-	idleWait  = 2 * time.Second
+	readStall = 10 * time.Second
 	settle    = time.Second
 	maxKeys   = 100_000
 )
@@ -34,6 +34,7 @@ var (
 	errShape       = errors.New("exp-03: key or update count out of range")
 	errNoCleaning  = errors.New("exp-03: the log was never cleaned inside the deadline")
 	errUndecodable = errors.New("exp-03: unreadable record key")
+	errShortRead   = errors.New("exp-03: the log went quiet before its last offset")
 )
 
 type settings struct {
@@ -85,7 +86,9 @@ func (cfg *settings) validate() error {
 	switch {
 	case cfg.keys <= 0 || cfg.keys > maxKeys:
 		return fmt.Errorf("%w: -keys is %d, wanted 1 to %d", errShape, cfg.keys, maxKeys)
-	case cfg.updates <= 0 || cfg.keys*cfg.updates > maxKeys*10:
+	// Divide rather than multiply: cfg.keys is already bounded by the case above, so no
+	// operator-supplied magnitude is multiplied by another and the bound cannot wrap.
+	case cfg.updates <= 0 || cfg.updates > maxKeys*10/cfg.keys:
 		return fmt.Errorf("%w: -updates is %d", errShape, cfg.updates)
 	case cfg.tombstones < 0 || cfg.tombstones > cfg.keys:
 		return fmt.Errorf("%w: -tombstones is %d, wanted 0 to %d", errShape, cfg.tombstones, cfg.keys)
@@ -217,21 +220,26 @@ func observe(ctx context.Context, admin *kadm.Client, cfg *settings, topic strin
 		return observation{}, fmt.Errorf("exp-03: end offsets of %s: %w", topic, err)
 	}
 
-	records, err := readAll(ctx, cfg, topic)
+	start, _ := starts.Lookup(topic, 0)
+	end, _ := ends.Lookup(topic, 0)
+
+	records, err := readAll(ctx, cfg, topic, start.Offset, end.Offset)
 	if err != nil {
 		return observation{}, err
 	}
-
-	seen := summarise(records)
-	start, _ := starts.Lookup(topic, 0)
-	end, _ := ends.Lookup(topic, 0)
-	return observation{summary: seen, StartOffset: start.Offset, EndOffset: end.Offset}, nil
+	return observation{summary: summarise(records), StartOffset: start.Offset, EndOffset: end.Offset}, nil
 }
 
-// readAll reads the log from wherever it now starts until nothing arrives for a while: a
-// compacted log has gaps, so "until the end offset" would wait for records that no longer
-// exist.
-func readAll(ctx context.Context, cfg *settings, topic string) ([]record, error) {
+// readAll reads the log from wherever it now starts until it has seen the last offset the
+// broker reported. Stopping on silence instead would be a measurement that cannot fail: a
+// broker stalling mid-read would look exactly like a shorter log, and the short count would
+// be published as the result. The last offset is always readable — the active segment is
+// never cleaned — so a compacted log's gaps do not prevent reaching it.
+func readAll(ctx context.Context, cfg *settings, topic string, start, end int64) ([]record, error) {
+	if start >= end {
+		return nil, nil
+	}
+
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(strings.Split(cfg.brokers, ",")...),
 		kgo.ConsumeTopics(topic),
@@ -244,42 +252,48 @@ func readAll(ctx context.Context, cfg *settings, topic string) ([]record, error)
 
 	var records []record
 	for {
-		batch, done, err := readBatch(ctx, client, topic)
+		batch, last, err := readBatch(ctx, client, topic, end)
 		if err != nil {
 			return nil, err
 		}
 		records = append(records, batch...)
-		if done {
+		if last >= end-1 {
 			return records, nil
 		}
 	}
 }
 
-// readBatch returns the next batch and whether the log has gone quiet. Quiet, rather than
-// "reached the end offset", because a compacted log has gaps: waiting for the last offset
-// would wait for records that no longer exist.
-func readBatch(ctx context.Context, client *kgo.Client, topic string) ([]record, bool, error) {
-	idle, cancel := context.WithTimeout(ctx, idleWait)
+// readBatch returns the next batch and the highest offset in it. Going quiet before the
+// log's last offset is an error, not an ending.
+func readBatch(ctx context.Context, client *kgo.Client, topic string, end int64) ([]record, int64, error) {
+	idle, cancel := context.WithTimeout(ctx, readStall)
 	defer cancel()
 
 	fetches := client.PollRecords(idle, pollBatch)
 	if err := fetches.Err0(); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-			return nil, true, nil
+			return nil, 0, fmt.Errorf("%w: %s, wanted up to %d", errShortRead, topic, end-1)
 		}
-		return nil, false, fmt.Errorf("exp-03: read %s: %w", topic, err)
+		return nil, 0, fmt.Errorf("exp-03: read %s: %w", topic, err)
+	}
+	// Err0 only reports the first partition, which is enough to spot a cancel but would
+	// hide a fetch error on any other partition if these topics ever gained one.
+	if err := fetches.Err(); err != nil {
+		return nil, 0, fmt.Errorf("exp-03: read %s: %w", topic, err)
 	}
 
 	batch := make([]record, 0, pollBatch)
+	last := int64(-1)
 	var failure error
 	fetches.EachRecord(func(polled *kgo.Record) {
 		if len(polled.Key) == 0 {
 			failure = fmt.Errorf("%w: %s offset %d", errUndecodable, topic, polled.Offset)
 			return
 		}
+		last = max(last, polled.Offset)
 		batch = append(batch, record{Key: string(polled.Key), Tombstone: polled.Value == nil})
 	})
-	return batch, false, failure
+	return batch, last, failure
 }
 
 func report(out io.Writer, cfg *settings, compaction, retention *[2]observation) error {

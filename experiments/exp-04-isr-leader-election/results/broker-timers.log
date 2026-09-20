@@ -1,0 +1,6 @@
+# exp-04 — the failure-detection timers, read off the running broker 2026-09-20
+# Reproduce: kafka-configs.sh --describe --all --entity-type brokers --entity-name 1
+
+  broker.heartbeat.interval.ms=2000 sensitive=false synonyms={DEFAULT_CONFIG:broker.heartbeat.interval.ms=2000}
+  broker.session.timeout.ms=9000 sensitive=false synonyms={DEFAULT_CONFIG:broker.session.timeout.ms=9000}
+  replica.lag.time.max.ms=30000 sensitive=false synonyms={DEFAULT_CONFIG:replica.lag.time.max.ms=30000}

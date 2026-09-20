@@ -80,7 +80,9 @@ There is no mechanism to delete part of a segment. A record survives until the s
 containing it is **closed** and then fully aged out, so effective retention is always
 longer than `retention.ms` suggests. On a low-traffic topic with the default 1 GB
 segment the difference is weeks, not minutes — this is a capacity-planning surprise, not
-a trivia item.
+a trivia item. It is also the one claim on this page that exp-03 does **not** back: that
+run rolls segments every second, so nothing of its data ever sat in an open segment past
+its retention, and everything was duly dropped (exp-03d below).
 
 Deleting by size (`retention.bytes`) works the same way and is per partition, not per
 topic: a topic with 6 partitions and `retention.bytes=1GB` holds up to 6 GB.
@@ -109,8 +111,35 @@ is wrong:** the consumer needs the sequence of what happened. Compaction destroy
 intermediate values by design — after it runs, "the payment was authorised then
 captured" is no longer in the log.
 
-## To be measured
+## Measured
+
+`make exp-03` · [journal](../00-journal.md#exp-03--what-the-cleaner-keeps) ·
+[run log](../../experiments/exp-03-segments-retention/results/run-2026-09-20-154030.log)
+
+| Topic | Before cleaning | After cleaning |
+|---|---|---|
+| compacted, 50 keys × 40 updates, 10 deleted | 2 010 records, 40 live keys, 10 tombstones | **50 records** — the last value of each surviving key plus the 10 tombstones compaction keeps |
+| kept 5 s, 2 000 records | 2 000 records, log starts at 0 | **0 readable**; the log now starts past the last of them |
+
+**`segment.bytes` below 1 MiB is refused on Kafka 4.x** —
+[captured](../../experiments/exp-03-segments-retention/results/segment-bytes-rejected.log):
+`Invalid value 4096 for configuration segment.bytes: Value must be at least 1048576`. The
+standard advice to shrink it for a demo no longer works; roll by `segment.ms` instead.
+
+**The tombstones survived, which is the correct answer.** They are kept for
+`delete.retention.ms` so every consumer still reading gets a chance to learn the key is
+gone. A tombstone is a record saying "deleted", not an absence.
+
+## Still to be measured
+
+The exp-03 row here originally promised three things this run does not deliver. They are
+listed rather than quietly dropped:
 
 | Run | What it shows | Status |
 |---|---|---|
-| exp-03 | compaction, tombstones and what retention actually removes | **Compaction: 2 010 records became 50 — the last value of each of the 40 surviving keys, plus the 10 tombstones, which compaction keeps. Retention: 2 000 records kept for 5 s left 0 readable and a log starting at offset 2 000, while the open segment survived regardless of age.** [run](../../experiments/exp-03-segments-retention/results/) |
+| exp-03b | **segment geometry from a real log dump** (`kafka-dump-log.sh`): base offsets, segment sizes, what the index files hold | TBD — exp-03 reads the log as a consumer, so it sees records, never segment boundaries |
+| exp-03c | **tombstone removal** after `delete.retention.ms` elapses — the second cleaner pass, not the one that compacts values | TBD — `exp03.compact.yaml` sets `delete.retention.ms: 1000` expecting them to vanish inside the run, and in every run so far all 10 survived |
+| exp-03d | **data outliving `retention.ms`** because it is trapped in an open segment | TBD — this is the "a topic holds more than its setting says" claim in the section above, and exp-03 showed the opposite: it rolls segments continuously, so aged data always lands in a closed segment and is always dropped |
+
+exp-03d is the one that matters for the retention section: until it runs, "effective
+retention is always longer than `retention.ms` suggests" is reasoning, not a measurement.

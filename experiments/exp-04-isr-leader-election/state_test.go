@@ -27,7 +27,7 @@ func TestInspect(t *testing.T) {
 				{ID: 1, Leader: 2, Replicas: []int32{2, 3, 1}, ISR: []int32{2, 3, 1}},
 			}},
 			want: want{
-				state:   health{Partitions: 2, SmallestISR: 3},
+				state:   health{Partitions: 2, Replicas: 3, SmallestISR: 3},
 				leaders: []int32{1, 2},
 			},
 		},
@@ -41,6 +41,7 @@ func TestInspect(t *testing.T) {
 			want: want{
 				state: health{
 					Partitions:      3,
+					Replicas:        3,
 					UnderReplicated: 3,
 					OffPreferred:    1,
 					SmallestISR:     2,
@@ -56,6 +57,7 @@ func TestInspect(t *testing.T) {
 			want: want{
 				state: health{
 					Partitions:      1,
+					Replicas:        3,
 					UnderReplicated: 1,
 					Leaderless:      1,
 					SmallestISR:     0,
@@ -79,7 +81,7 @@ func TestInspect(t *testing.T) {
 				{ID: 1, Leader: 2, Replicas: []int32{2, 3, 1}, ISR: []int32{2, 3, 1}},
 			}},
 			want: want{
-				state:   health{Partitions: 3, SmallestISR: 3},
+				state:   health{Partitions: 3, Replicas: 3, SmallestISR: 3},
 				leaders: []int32{1, 2, 3},
 			},
 		},

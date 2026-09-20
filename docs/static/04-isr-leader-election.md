@@ -125,29 +125,39 @@ partition 0, then a restart, then an explicit preferred election.
 | Phase | Leaders | Smallest ISR | Writes accepted, `acks=all` |
 |---|---|---|---|
 | baseline | `[3 1 2]` | 3 of 3 | 300 of 300 |
-| kafka3 killed | `[1 1 2]` | **2**, and `min.insync.replicas` is 2 | **300 of 300** |
+| kafka3 killed | `[1 1 2]` | **2**, with `min.insync.replicas` 2 as the broker reports it | **300 of 300** |
 | kafka3 back | `[1 1 2]` | 3 of 3 | — |
 | after preferred election | `[3 1 2]` | 3 of 3 | — |
 
-| What | How long |
-|---|---|
-| kill → ISR shrinks, partition 0 has a new leader | **10.9 s** |
-| restart → ISR whole again | **5.3 s** |
-| preferred election → leadership back on the preferred replica | **0.2 s** |
+| What | Within | Of that, spent polling |
+|---|---|---|
+| kill → ISR shrinks, partition 0 has a new leader | **10.1 s** | 10.1 s |
+| restart → ISR whole again | **5.3 s** | 5.3 s |
+| preferred election → leadership back on the preferred replica | **0 s** | 0 s |
 
-**The detector is the heartbeat session, not the lag timer.** `replica.lag.time.max.ms`
-(30 s) is the figure usually quoted for a replica leaving the ISR, and it is the wrong one
-for a crash: the controller fences a broker whose heartbeats stop after
-`broker.session.timeout.ms` — 9 s, heartbeats every 2 s — and fencing rewrites the ISR of
-every partition that broker was in. The lag timer is for a live follower that has fallen
-behind. Two detectors, and only one of them fires here.
+Each interval is an upper bound from the event the shell timed; the second column is how
+much of it the measuring process spent watching. The first two rows are real intervals. The
+third is degenerate — leadership was already back at the first poll — so all this instrument
+can say about a preferred election is that it finishes faster than a process can start and
+ask.
+
+**The detector is the heartbeat session, not the lag timer — argued, not shown.**
+`replica.lag.time.max.ms` (30 s) is the figure usually quoted for a replica leaving the
+ISR, and 10.1 s cannot be it. The explanation is that a crashed broker is not a slow
+follower: the controller fences a broker whose heartbeats stop after
+`broker.session.timeout.ms` — 9 s, heartbeats every 2 s, both
+[read off the running broker](../../experiments/exp-04-isr-leader-election/results/broker-timers.log)
+— and fencing rewrites the ISR of every partition that broker was in. The lag timer is for a
+live follower that has fallen behind. That is two detectors and a good argument for which
+one fired; it is not a measurement, because no run here varies either timer. One run with
+the session timeout raised would settle it, and is listed below.
 
 **One dead broker, every partition degraded.** RF 3 on three brokers means every broker
 holds a replica of every partition, so the under-replicated count went straight to 3 of 3.
 On a stand this size that metric is effectively binary.
 
 **Zero margin, and nothing said so.** The degraded window ran with `ISR = min.insync.replicas
-= 2`: every write succeeded, and the next failure is the one that returns
+= 2` (the instrument reads that setting off the cluster rather than trusting the YAML): every write succeeded, and the next failure is the one that returns
 `NOT_ENOUGH_REPLICAS` (exp-08). The alert worth having is on the margin, not on the writes.
 
 **Recovery restores replication, never leadership.** The replica was back in 5.3 s;
@@ -160,6 +170,7 @@ whoever restarts a broker — skipped after each restart, leadership drifts onto
 | Run | What it shows | Status |
 |---|---|---|
 | exp-04b | `unclean.leader.election.enable=true`: acknowledged records missing after promotion, counted | blocked — see below |
+| exp-04c | the same kill with `broker.session.timeout.ms` raised to 20 s: does the reaction time move with it | TBD — this is what turns the detector claim above from an argument into a result |
 | exp-08 | `acks=1` vs `acks=all` with `min.insync.replicas=2` under the same kill | TBD |
 
 exp-04b cannot run on this stand. Promoting an out-of-sync replica requires the ISR to
