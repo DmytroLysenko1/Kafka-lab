@@ -1,0 +1,19 @@
+meta:
+  name: exp03.retention
+  cluster: kafka-lab
+  environment: lab
+  region: local
+  description: >-
+    exp-03, retention: the same one partition, kept for five seconds. Deletion happens a
+    whole segment at a time, so what survives is never exactly what the setting says.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    cleanup.policy: delete
+    retention.ms: 5000
+    segment.ms: 1000

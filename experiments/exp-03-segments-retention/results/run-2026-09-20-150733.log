@@ -1,0 +1,10 @@
+exp-03 — segments, retention and compaction
+date: 2026-09-20-150733
+
+compacted topic    50 keys × 40 updates, then 10 of the keys deleted
+  before cleaning  2010 records readable, 40 live keys, 10 tombstones, log starts at 0
+  after cleaning   52 records readable, 41 live keys, 10 tombstones, log starts at 0
+
+retention topic    2000 records, kept for 5s
+  before cleaning  2000 records readable, log starts at 0, ends at 2000
+  after cleaning   2 records readable, log starts at 2001, ends at 2003

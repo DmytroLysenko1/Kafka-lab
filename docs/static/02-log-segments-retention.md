@@ -93,10 +93,10 @@ and all four have to be defeated at once for a demo to show anything (exp-03):
 
 | Trap | Default | Why nothing happens |
 |---|---|---|
-| the active segment is never compacted | `segment.bytes=1GB` | with default sizes a demo writes into one open segment and sees no compaction ever |
+| the active segment is never compacted | `segment.bytes=1GB` | with default sizes a demo writes into one open segment and sees no compaction ever. **And on Kafka 4.x you cannot shrink your way out: `segment.bytes` is refused below 1 MiB, so a demo has to roll segments by `segment.ms` instead (exp-03)** |
 | `min.cleanable.dirty.ratio` | `0.5` | cleaning does not start until half the log is superseded |
 | `min.compaction.lag.ms` | `0` | but combined with segment roll timing it still delays the first pass |
-| `delete.retention.ms` | 24 h | tombstones (`value=nil`) stay visible for a day, so "the key is still there" looks like a bug |
+| `delete.retention.ms` | 24 h | tombstones (`value=nil`) stay visible for a day, so "the key is still there" looks like a bug. They are not a leftover: the window exists so every consumer gets a chance to see the delete, and compaction keeps them until it passes (exp-03 saw all 10 survive the first pass) |
 
 Compaction is also what makes `__consumer_offsets` bounded: the latest offset per
 group/topic/partition is kept, everything older is cleaned. Consumer group progress is
@@ -113,4 +113,4 @@ captured" is no longer in the log.
 
 | Run | What it shows | Status |
 |---|---|---|
-| exp-03 | log dump before and after compaction, tombstone disappearance, real vs configured retention | TBD |
+| exp-03 | compaction, tombstones and what retention actually removes | **Compaction: 2 010 records became 50 — the last value of each of the 40 surviving keys, plus the 10 tombstones, which compaction keeps. Retention: 2 000 records kept for 5 s left 0 readable and a log starting at offset 2 000, while the open segment survived regardless of age.** [run](../../experiments/exp-03-segments-retention/results/) |

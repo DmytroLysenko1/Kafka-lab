@@ -115,3 +115,56 @@ different partitions and breaks the ordering those keys used to have (exp-01).
 
 **Carried into:** [`static/03-read-path.md`](static/03-read-path.md), step 7 and its
 measurement table.
+
+## exp-03 — what the cleaner keeps
+
+Date: 2026-09-20 · [run logs](../experiments/exp-03-segments-retention/results/) ·
+`make exp-03`
+
+**Hypothesis.** A compacted topic keeps the last value of each key rather than the history,
+and it only shows that once a segment is closed. Retention deletes whole segments, so a
+topic always holds more than its setting says.
+
+**Setup.** Two single-partition topics, RF 3. The compacted one takes 50 keys × 40 updates
+and then a tombstone for 10 of those keys; the retention one takes 2 000 records and is
+kept for 5 seconds. Both roll segments on `segment.ms=1000`, and the run waits for the log
+to change rather than sleeping for a guessed while.
+
+**Result.**
+
+| Topic | Before cleaning | After cleaning |
+|---|---|---|
+| compacted | 2 010 records, 40 live keys, 10 tombstones | **50 records**, 40 live keys, 10 tombstones |
+| kept 5 s | 2 000 records, log starts at 0 | **0 records readable**, log starts at 2 000, open segment survives |
+
+**What was surprising.** The plan said to squeeze `segment.bytes` down to kilobytes so the
+active segment rolls quickly. Kafka 4.x refuses: the minimum is 1 MiB, confirmed by the
+broker rejecting 4 096 with "Value must be at least 1048576". Rolling has to be driven by
+`segment.ms` instead. A piece of advice that was true for years is now simply invalid, and
+the only way to find that out was to run it.
+
+**The tombstones did not disappear**, and that is correct rather than a failure: compaction
+keeps them for `delete.retention.ms` so that every consumer still reading the log gets a
+chance to learn that the key is gone. A tombstone is a record that says "deleted", not an
+absence — and it is removed by a later pass, not by the one that compacts the values.
+
+**Retention removed everything and left something.** After cleaning, the log starts at
+offset 2 000: every record produced had aged past 5 seconds and its segments were dropped
+whole. What is still readable is the open segment, which is never deleted however old it
+is. "Retention 5 s" therefore means "closed segments older than 5 s are dropped", and the
+amount of data actually kept depends on how quickly segments roll — not on the setting
+alone.
+
+**What the instrument got wrong first.** The second run of the experiment reported 41 live
+keys instead of 40: the segment-roll markers the experiment writes were counted as data,
+and records from the previous run were still in the log. The markers are now counted apart,
+and the run resets its own topics before measuring — the same lesson as exp-01, in a
+different shape: an experiment that reads a log has to own the log it reads.
+
+**Conclusion.** Compaction is a snapshot of state, not a history, and it is worth taking
+only when the reader wants current values — which is the shape event-carried state transfer
+needs. Neither policy is instant: both act on closed segments, and the open one is always
+exempt.
+
+**Carried into:** [`static/02-log-segments-retention.md`](static/02-log-segments-retention.md),
+its compaction traps table and measurement row.

@@ -1,0 +1,23 @@
+meta:
+  name: exp03.compact
+  cluster: kafka-lab
+  environment: lab
+  region: local
+  description: >-
+    exp-03, compaction: one partition so the log is readable by hand. Segments roll by
+    time, not size — Kafka 4.x refuses a segment.bytes below 1 MiB — and the cleaner is
+    told to work on an almost-clean log so a demo-sized run is enough to trigger it.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    cleanup.policy: compact
+    segment.ms: 1000
+    min.cleanable.dirty.ratio: 0.01
+    min.compaction.lag.ms: 0
+    max.compaction.lag.ms: 5000
+    delete.retention.ms: 1000
