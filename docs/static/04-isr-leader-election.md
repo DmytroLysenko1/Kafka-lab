@@ -131,8 +131,8 @@ partition 0, then a restart, then an explicit preferred election.
 
 | What | Within | Of that, spent polling |
 |---|---|---|
-| kill → ISR shrinks, partition 0 has a new leader | **10.1 s** | 10.1 s |
-| restart → ISR whole again | **5.3 s** | 5.3 s |
+| kill → ISR shrinks and no partition is leaderless | **10.6 s** | 10.6 s |
+| restart → ISR whole again | **5.1 s** | 5.1 s |
 | preferred election → leadership back on the preferred replica | **0 s** | 0 s |
 
 Each interval is an upper bound from the event the shell timed; the second column is how
@@ -143,7 +143,7 @@ ask.
 
 **The detector is the heartbeat session, not the lag timer — argued, not shown.**
 `replica.lag.time.max.ms` (30 s) is the figure usually quoted for a replica leaving the
-ISR, and 10.1 s cannot be it. The explanation is that a crashed broker is not a slow
+ISR, and the 10.1 s and 10.6 s measured here cannot be it. The explanation is that a crashed broker is not a slow
 follower: the controller fences a broker whose heartbeats stop after
 `broker.session.timeout.ms` — 9 s, heartbeats every 2 s, both
 [read off the running broker](../../experiments/exp-04-isr-leader-election/results/broker-timers.log)
@@ -160,9 +160,10 @@ On a stand this size that metric is effectively binary.
 = 2` (the instrument reads that setting off the cluster rather than trusting the YAML): every write succeeded, and the next failure is the one that returns
 `NOT_ENOUGH_REPLICAS` (exp-08). The alert worth having is on the margin, not on the writes.
 
-**Recovery restores replication, never leadership.** The replica was back in 5.3 s;
-partition 0 stayed with its replacement until a preferred election was asked for, which took
-0.2 s. `auto.leader.rebalance.enable` is off here on purpose, so that step belongs to
+**Recovery restores replication, never leadership.** The replica was back in 5.1 s;
+partition 0 stayed with its replacement until a preferred election was asked for, which was
+already done at the first poll — see the table above. `auto.leader.rebalance.enable` is off
+here on purpose, so that step belongs to
 whoever restarts a broker — skipped after each restart, leadership drifts onto the survivors.
 
 ## Still to be measured

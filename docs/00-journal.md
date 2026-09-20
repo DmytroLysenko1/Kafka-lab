@@ -9,7 +9,7 @@ Numbers here are the source; the case files under [`static/`](static/) quote the
 ## exp-01 — the key decides the order a payment is handled in
 
 Date: 2026-09-20 · [run logs](../experiments/exp-01-partition-keys/results/) ·
-`make exp-01`
+`make exp-01` — three sequential runs, each on freshly reset topics
 
 **Hypothesis.** Without a key, the events of one payment scatter across partitions and lose
 their business order. With `key=payment_id` they stay in one partition and the order holds.
@@ -23,32 +23,47 @@ Postgres in handling order; violations are counted in Go over that order, not ov
 
 | Run | Payments split across partitions | Order violations |
 |---|---|---|
-| keyless | 100 of 100, every time | **6 448 · 7 838 · 7 964** of 10 000 |
+| keyless | 100 of 100, every time | **7 964 · 7 964 · 8 721** of 10 000 |
 | keyed | 0 | **0 · 0 · 0** |
 
 **What was surprising, twice.**
 
 *The magnitude.* The plan predicted roughly 4 000 violations for the keyless run and the
 cluster produced between six and eight thousand — up to four in five events. The estimate
-had assumed a payment straddles two partitions; in fact every one of the 100 payments had
-its events spread over all six, because the producer switches partition once 64 KiB have
-gone to the current one and each payment contributes only ~10 KB. The consumer then drains
+had assumed a payment straddles two partitions; in fact all 100 were spread across several
+of the six, because the producer switches partition once 64 KiB have gone to the current one
+and each payment contributes only ~10 KB. (The instrument counts how many payments span more
+than one partition, not how many partitions each spans, so "several" is as far as the
+evidence goes — the exact spread is not measured.) The consumer then drains
 partition by partition, so almost every event of a payment arrives after a later one.
 
-*The spread.* The keyless number is not a constant — 6 448, 7 838 and 7 964 across three
-runs of identical input. Partition switching and the order in which a fetch returns
-partitions both vary, so this is a shape, not a figure: "most events, unpredictably how
-many". The keyed column, by contrast, is exactly zero every time, which is what a guarantee
-looks like next to a tendency.
+*The spread.* The keyless number is not a constant — 7 964, 7 964 and 8 721 across three
+sequential runs of identical input on freshly reset topics. Partition switching and the
+order in which a fetch returns partitions both vary, so this is a shape, not a figure:
+"most events, unpredictably how many". Two of the three landing on the same number is part
+of the same picture — the variation is real but not large. The keyed column, by contrast, is
+exactly zero every time, which is what a guarantee looks like next to a tendency.
 
-**What the instrument got wrong first.** The first version of the experiment would have
-reported a rerun as if it were a fresh run: it read the topic from offset 0 and stopped
-after N records, so a second `make exp-01` would have counted the *previous* run's events
-while the new ones sat unread past the cursor — a plausible, self-consistent, wrong number.
-Every event now carries a run id, the consumer counts only its own and refuses to report
-unless the count matches exactly. The fix is visible in the numbers above: two runs
-executed back to back returned 6 448 and 7 964, where the broken version would have
-returned the same figure twice.
+**What the instrument got wrong, twice over.** The first version would have reported a
+rerun as if it were a fresh run: it read the topic from offset 0 and stopped after N
+records, so a second `make exp-01` would have counted the *previous* run's events while the
+new ones sat unread past the cursor — a plausible, self-consistent, wrong number. Every
+event now carries a run id, the consumer counts only its own, and the run refuses to report
+unless the count matches exactly.
+
+The run id was not enough. It keeps a rerun from *counting* the previous run's events; it
+does not keep those events out of the partitions whose handling order is the thing being
+measured. The three runs published before this one were taken on topics that were never
+reset, and two of them overlapped in time on the same two topics — their numbers were
+measured while another producer was writing into the same partitions. They are kept in
+[`results/superseded/`](../experiments/exp-01-partition-keys/results/superseded/) with what
+is wrong with each. `run.sh` now resets both topics first, which is the rule the later
+experiments were built on: an experiment that reads a log has to own the log it reads.
+
+The count is also no longer computed from a slice in memory. The consumer writes each
+handled event to Postgres with a `handled_seq`, and the report is computed from
+`SELECT ... ORDER BY handled_seq` — so the number rests on the table the design has always
+claimed it rests on.
 
 **Conclusion.** The key is not a detail of throughput, it is the ordering unit. Ordering
 survives only inside one partition, so "ordered" means "keyed by the entity whose order you
@@ -60,7 +75,7 @@ measurement table.
 
 ## exp-02 — a hot key, and what adding consumers buys
 
-Date: 2026-09-20 · [run logs](../experiments/exp-02-hot-partition/results/) ·
+Date: 2026-09-20 · [run log](../experiments/exp-02-hot-partition/results/run-2026-09-20-200615.log) ·
 `make exp-02`
 
 **Hypothesis.** Key skew turns one partition into the bottleneck, and adding consumers does
@@ -75,15 +90,15 @@ consumer groups of 1, 2, 3, 6 and 7 members, each group reading the topic from t
 
 | Consumers | Time to drain | Idle members | How the work fell |
 |---|---|---|---|
-| 1 | 6.03 s | 0 | one member took all 20 000 |
-| 2 | 5.49 s | 0 | 18 105 / 1 895 |
-| 3 | 5.47 s | 0 | 17 894 / 1 053 / 1 053 |
-| 6 | 5.19 s | 0 | 17 052 on one member, 211–842 on the rest |
-| 7 | 5.06 s | 1 | same, and the seventh handled nothing |
+| 1 | 5.63 s | 0 | one member took all 20 000 |
+| 2 | 5.12 s | 0 | 18 105 / 1 895 |
+| 3 | 4.95 s | 0 | 17 894 / 1 053 / 1 053 |
+| 6 | 4.81 s | 0 | 17 052 on one member, 211–842 on the rest |
+| 7 | 4.76 s | 1 | same, and the seventh handled nothing |
 
 The keys put 17 052 of 20 000 records — 85% — on partition 3.
 
-**What this says.** Seven times the consumers bought 16%. Perfect spreading would have
+**What this says.** Seven times the consumers bought 15%. Perfect spreading would have
 drained in about a sixth of the single-consumer time; the floor here is the hot partition,
 because a partition is handled by exactly one member of a group however many members there
 are. The seventh consumer is the other half of the same rule: with six partitions there was
@@ -97,16 +112,24 @@ partition 3 as well — and the cold keys spread 5/4/4/3/2/1 across the six part
 evenly, because hashing nineteen keys onto six slots has no reason to be fair. Key skew and
 partition skew are different numbers, and it is the second one that decides the drain.
 
-**What the instrument got wrong first.** The first version of this experiment never
-committed an offset. A consumer group with no committed offsets resets to the start of the
-partition on *every* assignment, so a partition that moved between members during the join
-would have been handled twice — the strict "handled exactly what was produced" check would
-then have failed the whole run, discarding the group sizes already measured. It now commits
-as it works, so a reassignment resumes, and a failed drain still prints the measurements
-made before it. The commits cost about half a second per drain: the earlier, unsafe
-instrument read 5.67 s down to 4.18 s, where the trustworthy one reads 6.03 s down to
-5.06 s. The ratio is what the experiment is about, and it did not improve — it got worse,
-from 26% to 16%.
+**What the instrument got wrong, twice over.** The first version never committed an offset.
+A consumer group with no committed offsets resets to the start of the partition on *every*
+assignment, so a partition that moved between members during the join would have been
+handled twice — the strict "handled exactly what was produced" check would then have failed
+the whole run, discarding the group sizes already measured. It now commits as it works, so a
+reassignment resumes, and a failed drain still prints the measurements made before it.
+
+The second fault was the topic. Every drain reads from the start, so a topic that is never
+reset makes each run fetch and decode every earlier run's records before reaching its own:
+the drain times grow run by run, and the previously published seconds (6.03 down to 5.06)
+were measured on a topic carrying twice the data of the run before it. The comparison drawn
+from that — "the commits cost about half a second per drain" — was measuring commit cost
+and extra scanning together, and is withdrawn. The run now resets its topic, and the clean
+figures are 5.63 down to 4.76.
+
+What did not change is the thing the experiment is about. The ratio was 16% on the dirty
+topic and 15% on the clean one, and the partition distribution is identical to the record —
+17 052 on p3 both times — because `murmur2` over the same keys is deterministic.
 
 **Conclusion.** Parallelism is capped by partitions, and *useful* parallelism is capped by
 the busiest partition. Two remedies, both with a price: change the key so the weight
@@ -118,7 +141,7 @@ measurement table.
 
 ## exp-03 — what the cleaner keeps
 
-Date: 2026-09-20 · [run logs](../experiments/exp-03-segments-retention/results/) ·
+Date: 2026-09-20 · [run log](../experiments/exp-03-segments-retention/results/run-2026-09-20-200653.log) ·
 `make exp-03`
 
 **Hypothesis.** A compacted topic keeps the last value of each key rather than the history,
@@ -161,10 +184,11 @@ segment and always goes. "Retention 5 s" means "closed segments older than 5 s a
 how much a topic actually keeps beyond that is still unmeasured here, and is now listed as
 outstanding in the case file.
 
-**What the instrument got wrong first.** The second run of the experiment reported 41 live
-keys instead of 40: the segment-roll markers the experiment writes were counted as data,
-and records from the previous run were still in the log. The markers are now counted apart,
-and the run resets its own topics before measuring — the same lesson as exp-01, in a
+**What the instrument got wrong first.** Two faults, one per run. The first run counted the
+segment-roll markers the experiment writes as data, and reported 41 live keys plus 10
+deleted — 51 keys out of a possible 50, which is how it was noticed. The second inherited
+the previous run's log, its retention topic starting exactly where the first one ended. The
+markers are now counted apart, and the run resets its own topics before measuring — the same lesson as exp-01, in a
 different shape: an experiment that reads a log has to own the log it reads.
 
 **Conclusion.** Compaction is a snapshot of state, not a history, and it is worth taking
@@ -177,7 +201,7 @@ its compaction traps table and measurement row.
 
 ## exp-04 — what a dead broker costs, and what recovery does not do
 
-Date: 2026-09-20 · [run logs](../experiments/exp-04-isr-leader-election/results/) ·
+Date: 2026-09-20 · [run log](../experiments/exp-04-isr-leader-election/results/run-2026-09-20-200722.log) ·
 `make exp-04`
 
 **Hypothesis.** Killing the broker that leads a partition costs a pause, not data: a
@@ -198,15 +222,15 @@ is the shape, not the identities.
 
 | Phase | Leaders | Smallest ISR | Writes accepted |
 |---|---|---|---|
-| baseline | `[3 1 2]` | 3 of 3 | 300 of 300 |
-| degraded, kafka3 killed | `[1 1 2]` | 2, with `min.insync.replicas` 2 as the broker reports it | 300 of 300 |
-| recovered, kafka3 back | `[1 1 2]` | 3 of 3 | — |
-| after preferred election | `[3 1 2]` | 3 of 3 | — |
+| baseline | `[2 3 1]` | 3 of 3 | 300 of 300 |
+| degraded, kafka2 killed | `[3 3 1]` | 2, with `min.insync.replicas` 2 as the broker reports it | 300 of 300 |
+| recovered, kafka2 back | `[3 3 1]` | 3 of 3 | — |
+| after preferred election | `[2 3 1]` | 3 of 3 | — |
 
 | What | Within | Of that, spent polling |
 |---|---|---|
-| kill → ISR shrinks and partition 0 has a new leader | **10.1 s** | 10.1 s |
-| restart → ISR whole again | **5.3 s** | 5.3 s |
+| kill → ISR shrinks and no partition is leaderless | **10.6 s** | 10.6 s |
+| restart → ISR whole again | **5.1 s** | 5.1 s |
 | preferred election → leadership back on the preferred replica | **0 s** | 0 s |
 
 Every interval is an upper bound measured from the event the shell timed, and the second
@@ -219,7 +243,7 @@ prints the polling time next to the bound so a degenerate row cannot be mistaken
 measurement.
 
 **What was surprising — and it is an inference, not a measurement.** The reaction took
-10.1 s, and the number everyone quotes for "a replica leaves the ISR",
+10.6 s — 10.1 s on the run before it — and the number everyone quotes for "a replica leaves the ISR",
 `replica.lag.time.max.ms` at 30 s, cannot be the one that applies. The argument is that
 `broker.session.timeout.ms` governs it instead: a crashed broker is not a slow follower, so
 the controller stops receiving its heartbeats and fences it, and fencing rewrites the ISR of
@@ -229,7 +253,7 @@ evidence — [`results/broker-timers.log`](../experiments/exp-04-isr-leader-elec
 `replica.lag.time.max.ms=30000`.
 
 What is missing is the step that would make this a result rather than an argument: no run
-varies either timer. 10.1 s is consistent with the session timeout and inconsistent with the
+varies either timer. Ten-odd seconds is consistent with the session timeout and inconsistent with the
 lag timer, which is strong circumstantial evidence and not the same thing as showing the
 reaction move when the setting moves. Reading the config off the live broker, which the
 previous version of this entry offered as its defence, settles the *values* — which nobody
@@ -250,11 +274,12 @@ every one of the 300 records, which is the good news, and one more failure would
 turned the same `acks=all` call into `NOT_ENOUGH_REPLICAS`, which is exp-08. A dashboard
 showing "writes fine" during this phase is telling the truth and hiding the important part.
 
-**Recovery did only half of what recovery sounds like.** The replica rejoined the ISR 5.3 s
+**Recovery did only half of what recovery sounds like.** The replica rejoined the ISR 5.1 s
 after the restart, and partition 0 was still led by the broker that replaced it, and stayed
 that way. `auto.leader.rebalance.enable` is off on this stand deliberately — its 300 s timer
 would move leadership in the middle of a measurement — so the preferred election is a step
-someone has to run. It took 0.2 s. Left undone after each restart, leadership drifts onto
+someone has to run. It was already done at the first poll — see the table above. Left undone
+after each restart, leadership drifts onto
 whichever brokers happened to survive, and a cluster that looks healthy is quietly serving
 its partitions from two machines instead of three.
 
@@ -265,8 +290,9 @@ produce then hangs instead of failing, which demonstrates nothing about the flag
 constraint already forced the redesign of exp-08.
 
 **Conclusion.** RF 3 with `min.insync.replicas=2` survives exactly one broker, loudly for
-about eleven seconds and silently after that. The failure is detected by the heartbeat
-session, not by the lag timer; recovery restores replication by itself and leadership never;
+about ten seconds and silently after that. The reaction time fits the heartbeat session and
+cannot fit the lag timer — the argument of this entry, not a result of it, until exp-04c
+runs; recovery restores replication by itself and leadership never;
 and the margin during the degraded window is zero, which is the number worth alerting on —
 not the writes, which keep succeeding right up until they do not.
 

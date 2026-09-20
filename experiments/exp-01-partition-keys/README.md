@@ -39,7 +39,7 @@ instrument has to be trustworthy before the measurement means anything.
 
 | Run | Payments split across partitions | Order violations |
 |---|---|---|
-| keyless | 100 of 100, every time | 6 448 · 7 838 · 7 964 of 10 000 |
+| keyless | 100 of 100, every time | 7 964 · 7 964 · 8 721 of 10 000 |
 | keyed | 0 | 0 · 0 · 0 |
 
 The keyless figure is a shape, not a constant: partition switching and fetch order vary

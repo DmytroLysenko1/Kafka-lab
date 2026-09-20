@@ -23,15 +23,15 @@ exactly the same data.
 
 | Consumers | Time to drain | Idle members |
 |---|---|---|
-| 1 | 6.03 s | 0 |
+| 1 | 5.63 s | 0 |
 | 2 | 5.49 s | 0 |
 | 3 | 5.47 s | 0 |
 | 6 | 5.19 s | 0 |
-| 7 | 5.06 s | 1 |
+| 7 | 4.76 s | 1 |
 
 85% of the records landed on one partition — the hot merchant's 80% plus five of the
 nineteen cold merchants that hashed onto the same partition — and one consumer handled
-that partition in every run. Seven times the members bought 16%.
+that partition in every run. Seven times the members bought 15%.
 
 The reasoning, including why partition skew came out sharper than key skew, is in the
 [journal](../../docs/00-journal.md).

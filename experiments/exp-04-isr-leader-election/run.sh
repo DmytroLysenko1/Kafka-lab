@@ -32,6 +32,7 @@ exp04() { "$binary" -records "$records" "$@"; }
 {
   echo "exp-04 — ISR, leader election and recovery"
   echo "date: $stamp"
+  echo "client: franz-go $(go list -m github.com/twmb/franz-go | awk '{print $2}')"
   echo
 
   baseline="$(exp04 -phase baseline)"

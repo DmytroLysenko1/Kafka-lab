@@ -81,5 +81,5 @@ the write-up, not in an assumption.
 
 | Run | What it shows | Status |
 |---|---|---|
-| exp-02 | one merchant sending four events in five, then more consumers | **85% of the topic landed on one partition. Draining it took 6.03 s with one consumer and 5.06 s with seven — 16% faster for seven times the members, because the hot partition is handled by exactly one of them. The seventh handled nothing.** [run](../../experiments/exp-02-hot-partition/results/) |
+| exp-02 | one merchant sending four events in five, then more consumers | **85% of the topic landed on one partition. Draining it took 5.63 s with one consumer and 4.76 s with seven — 15% faster for seven times the members, because the hot partition is handled by exactly one of them. The seventh handled nothing.** [run](../../experiments/exp-02-hot-partition/results/run-2026-09-20-200615.log) |
 | exp-16 | slow handler, lag spike, and what the client actually does about it — in three phases: lag on one partition, eviction from the group, and a deliberate pause ([07](07-retry-dlq.md)) | TBD |

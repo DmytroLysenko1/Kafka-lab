@@ -15,9 +15,10 @@ says why.
 | `payments-consumer.retry.10m` | retry tier 3 | 6 | 3 | 2 | 7 days | LogAppendTime |
 | `payments-consumer.dlq` | dead letters of the group, bytes verbatim | 6 | 3 | 2 | 30 days | LogAppendTime |
 
-All five declare `unclean.leader.election.enable=false` explicitly, so the contrast with
-exp-04, where it is `true`, is visible in the files rather than inherited from a broker
-default.
+All five declare `unclean.leader.election.enable=false` explicitly, so the setting is
+visible in the files rather than inherited from a broker default. The `true` contrast is
+exp-04b, which this stand cannot run: collapsing an ISR onto a stale replica needs two of
+three combined broker/controller nodes dead, and that takes the KRaft quorum with it.
 
 ## Why these numbers
 
@@ -97,9 +98,9 @@ the shape the service runs on, and `make check` keeps checking only that.
 | Experiment | Topic | Why not the catalog |
 |---|---|---|
 | exp-01 keys and ordering | own, keyless and keyed, 6 partitions | 10 000 test events would sit in `payments.main` for a week and be consumed by the service |
-| exp-02 hot partition | own, keyed by `merchant_id`, then more partitions in its own YAML | needs a different key, and adding partitions would permanently rekey `payments.main` |
+| exp-02 hot partition | own, six partitions fed a deliberately skewed key | needs a key that concentrates load, which `payments.main` must not have |
 | exp-03 segments and compaction | own, `cleanup.policy=compact`, small segments | reshapes the log itself |
-| exp-04 ISR and unclean election | own, `unclean.leader.election.enable=true` | the catalog pins `false` |
+| exp-04 ISR and leader election | own, 3 partitions so a single kill is easy to read | gets killed under; the catalog topics should not |
 | exp-05…07 delivery semantics | own | counted duplicates and losses must not mix with any other traffic |
 | exp-08 acks and min.insync | own, `min.insync.replicas=3` | one dead broker has to drop the ISR below the threshold without losing the KRaft quorum ([04](../../docs/static/04-isr-leader-election.md)) |
 | exp-09 producer idempotence | own | runs a deliberately unsafe producer |

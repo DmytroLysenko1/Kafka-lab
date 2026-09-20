@@ -13,6 +13,13 @@ log="$here/results/run-$stamp.log"
 cd "$repo"
 make exp-topics EXP="$(basename "$here")"
 
+# Each run owns the log it reads. The run id already keeps a rerun from counting the
+# previous run's events, but it does not keep the previous run's records out of the
+# partitions this one is measuring the handling order of.
+for topic in exp01.keyless exp01.keyed; do
+  make reset-topic TOPIC="$topic"
+done
+
 {
   echo "exp-01 — partition keys, ordering and parallelism"
   echo "date: $stamp"

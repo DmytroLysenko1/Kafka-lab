@@ -23,7 +23,7 @@ below 1 MiB**, so the advice to shrink it to kilobytes no longer works.
 
 ## Result — 2026-09-20
 
-[run log](results/run-2026-09-20-154030.log). Two earlier runs under
+[run log](results/run-2026-09-20-200653.log). Two earlier runs under
 [`results/superseded/`](results/superseded/) were produced by a broken instrument and back
 no number here.
 

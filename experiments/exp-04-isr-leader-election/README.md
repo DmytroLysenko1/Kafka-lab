@@ -29,20 +29,21 @@ measuring.
 
 ## Result — 2026-09-20
 
-[run log](results/run-2026-09-20-154106.log) · broker IDs are whatever the assignment
-produced on this run; the result is the shape, `[a b c]` → `[b b c]` → `[a b c]`.
+[run log](results/run-2026-09-20-200722.log) · broker IDs are whatever the assignment
+produced on this run — the previous run killed kafka3, this one kafka2. The result is the
+shape, `[a b c]` → `[b b c]` → `[a b c]`.
 
 | Phase | Leaders | Smallest ISR | Writes accepted |
 |---|---|---|---|
-| baseline | `[3 1 2]` | 3 of 3 | 300 of 300 |
-| degraded, kafka3 killed | `[1 1 2]` | **2**, with `min.insync.replicas` 2 | **300 of 300** |
-| recovered, kafka3 back | `[1 1 2]` | 3 of 3 | — |
-| after preferred election | `[3 1 2]` | 3 of 3 | — |
+| baseline | `[2 3 1]` | 3 of 3 | 300 of 300 |
+| degraded, kafka2 killed | `[3 3 1]` | **2**, with `min.insync.replicas` 2 | **300 of 300** |
+| recovered, kafka2 back | `[3 3 1]` | 3 of 3 | — |
+| after preferred election | `[2 3 1]` | 3 of 3 | — |
 
 | What | Within | Of that, spent polling |
 |---|---|---|
-| kill → ISR shrinks, partition 0 has a new leader | **10.1 s** | 10.1 s |
-| restart → ISR whole again | **5.3 s** | 5.3 s |
+| kill → ISR shrinks and no partition is leaderless | **10.6 s** | 10.6 s |
+| restart → ISR whole again | **5.1 s** | 5.1 s |
 | preferred election → leadership back | **0 s** | 0 s |
 
 Every interval is an upper bound measured from the event the shell timed, so the second
@@ -54,10 +55,10 @@ and ask. Fast enough not to measure is still the answer to "should I wait for it
 
 **The reaction time is consistent with a session timeout, not with the lag timer.** This is
 an inference, not a measurement, and the difference is worth stating plainly: nothing in the
-run varies either setting. What was measured is one interval of 10.1 s. What is argued is
+run varies either setting. What was measured is 10.6 s here and 10.1 s on the run before. What is argued is
 that `broker.session.timeout.ms` governs it — 9 s, heartbeats every 2 s — rather than
 `replica.lag.time.max.ms`, the 30 s figure usually quoted for a replica leaving the ISR.
-10.1 s fits the first and cannot fit the second, and a crashed broker is not a slow
+Ten-odd seconds fits the first and cannot fit the second, and a crashed broker is not a slow
 follower: the controller stops receiving heartbeats and fences it, which rewrites the ISR of
 every partition it was in. The three defaults are [read off the running
 broker](results/broker-timers.log), not recalled. Turning the argument into a measurement
@@ -72,7 +73,7 @@ cluster, not a bug: the ratio only improves when there are more brokers than rep
 broker reports `min.insync.replicas` 2 — exactly the threshold. The next failure is the one
 that turns `acks=all` into `NOT_ENOUGH_REPLICAS`; that is exp-08.
 
-**Leadership did not come back on its own.** The replica rejoined in 5.3 s, but partition 0
+**Leadership did not come back on its own.** The replica rejoined in 5.1 s, but partition 0
 was still led by its replacement, and stayed that way until asked. `auto.leader.rebalance.enable`
 is off on this stand, so the preferred election is a step someone has to run. Left undone,
 every restart leaves the cluster a little more lopsided.

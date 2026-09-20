@@ -35,6 +35,8 @@ var (
 	errNoCleaning  = errors.New("exp-03: the log was never cleaned inside the deadline")
 	errUndecodable = errors.New("exp-03: unreadable record key")
 	errShortRead   = errors.New("exp-03: the log went quiet before its last offset")
+	errIncomplete  = errors.New("exp-03: the log before cleaning does not hold what was produced")
+	errNoConfig    = errors.New("exp-03: the topic does not report the config the report needs")
 )
 
 type settings struct {
@@ -115,7 +117,16 @@ func measure(ctx context.Context, cfg *settings, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return report(out, cfg, &compaction, &retention)
+
+	policy, err := setting(ctx, admin, compactTopic, "cleanup.policy")
+	if err != nil {
+		return err
+	}
+	kept, err := setting(ctx, admin, retentionTopic, "retention.ms")
+	if err != nil {
+		return err
+	}
+	return report(out, cfg, policy, kept, &compaction, &retention)
 }
 
 // compact writes many updates per key, deletes some of them, and waits for the cleaner to
@@ -143,6 +154,13 @@ func compact(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *s
 
 	before, err := observe(ctx, admin, cfg, compactTopic)
 	if err != nil {
+		return stages, err
+	}
+	// Refuse to report a "before" the cleaner already touched. segment.ms is a second here,
+	// so a pass can fire during the produce, and a reduced "before" would make the very
+	// first check in awaitCleaning succeed — two mid-compaction readings, self-consistent
+	// and wrong. exp-01 and exp-02 refuse a short read for the same reason.
+	if err := whole(before, len(records), compactTopic); err != nil {
 		return stages, err
 	}
 
@@ -174,12 +192,42 @@ func expire(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *se
 	if err != nil {
 		return stages, err
 	}
+	if err := whole(before, len(records), retentionTopic); err != nil {
+		return stages, err
+	}
 
 	after, err := awaitCleaning(ctx, client, admin, cfg, retentionTopic, before)
 	if err != nil {
 		return stages, err
 	}
 	return [2]observation{before, after}, nil
+}
+
+// setting asks the broker what it is enforcing rather than trusting the YAML: change the
+// topic config and the report follows, instead of quietly printing what we meant to set.
+func setting(ctx context.Context, admin *kadm.Client, topic, key string) (string, error) {
+	resources, err := admin.DescribeTopicConfigs(ctx, topic)
+	if err != nil {
+		return "", fmt.Errorf("exp-03: describe config of %s: %w", topic, err)
+	}
+	resource, err := resources.On(topic, nil)
+	if err != nil {
+		return "", fmt.Errorf("exp-03: config of %s: %w", topic, err)
+	}
+
+	for _, config := range resource.Configs {
+		if config.Key == key {
+			return config.MaybeValue(), nil
+		}
+	}
+	return "", fmt.Errorf("%w: %s on %s", errNoConfig, key, topic)
+}
+
+func whole(before observation, produced int, topic string) error {
+	if got := before.Records - before.Rolls; got != produced {
+		return fmt.Errorf("%w: %s holds %d of the %d produced", errIncomplete, topic, got, produced)
+	}
+	return nil
 }
 
 // awaitCleaning rolls the active segment — nothing is ever cleaned while it is open — and
@@ -296,19 +344,19 @@ func readBatch(ctx context.Context, client *kgo.Client, topic string, end int64)
 	return batch, last, failure
 }
 
-func report(out io.Writer, cfg *settings, compaction, retention *[2]observation) error {
+func report(out io.Writer, cfg *settings, policy, kept string, compaction, retention *[2]observation) error {
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 
 	lines := []string{
-		fmt.Sprintf("compacted topic\t%d keys × %d updates, then %d of the keys deleted", cfg.keys, cfg.updates, cfg.tombstones),
-		fmt.Sprintf("  before cleaning\t%d records readable, %d live keys, %d tombstones, log starts at %d",
-			compaction[0].Records-compaction[0].Rolls, compaction[0].LiveKeys, compaction[0].Tombstones, compaction[0].StartOffset),
-		fmt.Sprintf("  after cleaning\t%d records readable, %d live keys, %d tombstones, log starts at %d",
-			compaction[1].Records-compaction[1].Rolls, compaction[1].LiveKeys, compaction[1].Tombstones, compaction[1].StartOffset),
+		fmt.Sprintf("compacted topic\t%d keys × %d updates, then %d of the keys deleted, cleanup.policy %s", cfg.keys, cfg.updates, cfg.tombstones, policy),
+		fmt.Sprintf("  before cleaning\t%d records readable (plus %d segment-roll markers), %d live keys, %d tombstones, log starts at %d",
+			compaction[0].Records-compaction[0].Rolls, compaction[0].Rolls, compaction[0].LiveKeys, compaction[0].Tombstones, compaction[0].StartOffset),
+		fmt.Sprintf("  after cleaning\t%d records readable (plus %d segment-roll markers), %d live keys, %d tombstones, log starts at %d",
+			compaction[1].Records-compaction[1].Rolls, compaction[1].Rolls, compaction[1].LiveKeys, compaction[1].Tombstones, compaction[1].StartOffset),
 		"",
-		fmt.Sprintf("retention topic\t%d records, kept for 5s", cfg.records),
-		fmt.Sprintf("  before cleaning\t%d records readable, log starts at %d, ends at %d",
-			retention[0].Records-retention[0].Rolls, retention[0].StartOffset, retention[0].EndOffset),
+		fmt.Sprintf("retention topic\t%d records, retention.ms %s as the broker reports it", cfg.records, kept),
+		fmt.Sprintf("  before cleaning\t%d records readable (plus %d segment-roll markers), log starts at %d, ends at %d",
+			retention[0].Records-retention[0].Rolls, retention[0].Rolls, retention[0].StartOffset, retention[0].EndOffset),
 		fmt.Sprintf("  after cleaning\t%d records readable (plus %d segment-roll markers), log starts at %d, ends at %d",
 			retention[1].Records-retention[1].Rolls, retention[1].Rolls, retention[1].StartOffset, retention[1].EndOffset),
 	}

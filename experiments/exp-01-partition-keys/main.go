@@ -129,9 +129,16 @@ func measure(ctx context.Context, cfg settings, out io.Writer) error {
 		return err
 	}
 
-	handled, err := consume(ctx, client, pool, runID, cfg)
+	if _, err := consume(ctx, client, pool, runID, cfg); err != nil {
+		return err
+	}
+
+	handled, err := handledOrder(ctx, pool, cfg.mode, runID)
 	if err != nil {
 		return err
+	}
+	if len(handled) != cfg.events {
+		return fmt.Errorf("exp-01: %w: read back %d of %d handled events", errIncomplete, len(handled), cfg.events)
 	}
 	return report(out, cfg, handled)
 }

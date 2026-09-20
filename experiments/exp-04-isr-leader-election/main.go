@@ -207,9 +207,16 @@ func elected(ctx context.Context, admin *kadm.Client, cfg *settings, out io.Writ
 func await(ctx context.Context, admin *kadm.Client, reached func(health) bool) ([]partition, time.Duration, error) {
 	started := time.Now()
 
+	// The last observation error is carried to the deadline: without it a topic that is
+	// missing, or a cluster that cannot be reached at all, is reported as the cluster
+	// failing to change — an instrument fault described as a finding.
+	var last error
 	for ctx.Err() == nil {
 		partitions, err := observe(ctx, admin)
-		if err == nil && reached(inspect(partitions)) {
+		switch {
+		case err != nil:
+			last = err
+		case reached(inspect(partitions)):
 			return partitions, time.Since(started), nil
 		}
 
@@ -217,6 +224,9 @@ func await(ctx context.Context, admin *kadm.Client, reached func(health) bool) (
 		case <-ctx.Done():
 		case <-time.After(pollEvery):
 		}
+	}
+	if last != nil {
+		return nil, 0, fmt.Errorf("%w: last observation failed: %w", errNoShift, last)
 	}
 	return nil, 0, errNoShift
 }

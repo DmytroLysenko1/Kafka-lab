@@ -21,6 +21,7 @@ done
 {
   echo "exp-03 — segments, retention and compaction"
   echo "date: $stamp"
+  echo "client: franz-go $(go list -m github.com/twmb/franz-go | awk '{print $2}')"
   echo
   go run ./experiments/exp-03-segments-retention \
     -keys "${KEYS:-50}" -updates "${UPDATES:-40}" \

@@ -33,6 +33,32 @@ func prepare(ctx context.Context, pool *pgxpool.Pool, mode string) error {
 	return nil
 }
 
+// handledOrder reads the run back in the order it was handled. The report is computed from
+// this, not from the slice the consumer kept, so handled_seq is what the published number
+// actually rests on rather than a claim made about a table nobody reads.
+func handledOrder(ctx context.Context, pool *pgxpool.Pool, mode, runID string) ([]processed, error) {
+	rows, err := pool.Query(ctx,
+		`SELECT payment_id, seq, partition FROM exp01_events
+		 WHERE run = $1 AND run_id = $2 ORDER BY handled_seq`, mode, runID)
+	if err != nil {
+		return nil, fmt.Errorf("exp-01: read back the %s run: %w", mode, err)
+	}
+	defer rows.Close()
+
+	var handled []processed
+	for rows.Next() {
+		var event processed
+		if err := rows.Scan(&event.PaymentID, &event.Seq, &event.Partition); err != nil {
+			return nil, fmt.Errorf("exp-01: scan handled event: %w", err)
+		}
+		handled = append(handled, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("exp-01: read back the %s run: %w", mode, err)
+	}
+	return handled, nil
+}
+
 func store(ctx context.Context, pool *pgxpool.Pool, mode, runID string, events []processed) error {
 	if len(events) == 0 {
 		return nil

@@ -12,9 +12,14 @@ log="$here/results/run-$stamp.log"
 cd "$repo"
 make exp-topics EXP="$(basename "$here")"
 
+# Every drain reads the topic from the start, so records left by an earlier run are fetched
+# and decoded before this run's begin: the drain times would grow run by run.
+make reset-topic TOPIC=exp02.hotkey
+
 {
   echo "exp-02 — hot partition: skewed keys against a consumer group"
   echo "date: $stamp"
+  echo "client: franz-go $(go list -m github.com/twmb/franz-go | awk '{print $2}')"
   echo
   go run ./experiments/exp-02-hot-partition \
     -events "${EVENTS:-20000}" -hot-share "${HOT_SHARE:-80}" \

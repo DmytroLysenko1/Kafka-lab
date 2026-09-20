@@ -7,8 +7,9 @@ import (
 	"go.uber.org/goleak"
 )
 
-// The package runs consumer groups in goroutines, so a leak here would mean a member that
-// outlived the measurement it belongs to.
+// The package runs consumer groups in goroutines, so a leak would mean a member that
+// outlived the measurement it belongs to. No test here starts one yet, so this currently
+// guards the next test that does.
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
 }

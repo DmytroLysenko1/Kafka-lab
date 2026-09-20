@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -116,8 +117,8 @@ func (cfg *settings) validate() error {
 func groupSizes(list string) ([]int, error) {
 	sizes := make([]int, 0, strings.Count(list, ",")+1)
 	for field := range strings.SplitSeq(list, ",") {
-		var size int
-		if _, err := fmt.Sscanf(strings.TrimSpace(field), "%d", &size); err != nil || size <= 0 || size > maxConsumers {
+		size, err := strconv.Atoi(strings.TrimSpace(field))
+		if err != nil || size <= 0 || size > maxConsumers {
 			return nil, fmt.Errorf("%w: %q, wanted 1 to %d", errGroupSizes, field, maxConsumers)
 		}
 		sizes = append(sizes, size)
@@ -325,7 +326,7 @@ func report(out io.Writer, cfg *settings, perPartition map[int32]int, drains []d
 	lines = append(lines,
 		fmt.Sprintf("events\t%d over %d merchants, %d%% to one of them", cfg.events, cfg.merchants, cfg.hotShare),
 		fmt.Sprintf("partitions\t%s", formatShares(distribution(perPartition))),
-		fmt.Sprintf("hottest partition\tp%d with %d records (%.0f%%), handled by one consumer whatever the group size", hot.Partition, hot.Records, hot.Percent),
+		fmt.Sprintf("hottest partition\tp%d with %d records (%.0f%%)", hot.Partition, hot.Records, hot.Percent),
 		"",
 		"consumers\ttime to drain\tidle members\tper consumer",
 	)
