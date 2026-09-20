@@ -115,10 +115,56 @@ trade-off down explicitly is more valuable than the setting itself.
 demonstrates nothing — the interesting behaviour only appears when the process dies
 without warning.
 
-## To be measured
+## Measured
+
+`make exp-04` · [journal](../00-journal.md#exp-04--what-a-dead-broker-costs-and-what-recovery-does-not-do)
+
+One topic, 3 partitions, RF 3, `min.insync.replicas=2`; `docker kill` on the broker leading
+partition 0, then a restart, then an explicit preferred election.
+
+| Phase | Leaders | Smallest ISR | Writes accepted, `acks=all` |
+|---|---|---|---|
+| baseline | `[3 1 2]` | 3 of 3 | 300 of 300 |
+| kafka3 killed | `[1 1 2]` | **2**, and `min.insync.replicas` is 2 | **300 of 300** |
+| kafka3 back | `[1 1 2]` | 3 of 3 | — |
+| after preferred election | `[3 1 2]` | 3 of 3 | — |
+
+| What | How long |
+|---|---|
+| kill → ISR shrinks, partition 0 has a new leader | **10.9 s** |
+| restart → ISR whole again | **5.3 s** |
+| preferred election → leadership back on the preferred replica | **0.2 s** |
+
+**The detector is the heartbeat session, not the lag timer.** `replica.lag.time.max.ms`
+(30 s) is the figure usually quoted for a replica leaving the ISR, and it is the wrong one
+for a crash: the controller fences a broker whose heartbeats stop after
+`broker.session.timeout.ms` — 9 s, heartbeats every 2 s — and fencing rewrites the ISR of
+every partition that broker was in. The lag timer is for a live follower that has fallen
+behind. Two detectors, and only one of them fires here.
+
+**One dead broker, every partition degraded.** RF 3 on three brokers means every broker
+holds a replica of every partition, so the under-replicated count went straight to 3 of 3.
+On a stand this size that metric is effectively binary.
+
+**Zero margin, and nothing said so.** The degraded window ran with `ISR = min.insync.replicas
+= 2`: every write succeeded, and the next failure is the one that returns
+`NOT_ENOUGH_REPLICAS` (exp-08). The alert worth having is on the margin, not on the writes.
+
+**Recovery restores replication, never leadership.** The replica was back in 5.3 s;
+partition 0 stayed with its replacement until a preferred election was asked for, which took
+0.2 s. `auto.leader.rebalance.enable` is off here on purpose, so that step belongs to
+whoever restarts a broker — skipped after each restart, leadership drifts onto the survivors.
+
+## Still to be measured
 
 | Run | What it shows | Status |
 |---|---|---|
-| exp-04 | leader killed under load: under-replicated partitions, new leader, ISR recovery time | TBD |
-| exp-04b | `unclean.leader.election.enable=true`: acknowledged records missing after promotion, counted | TBD |
+| exp-04b | `unclean.leader.election.enable=true`: acknowledged records missing after promotion, counted | blocked — see below |
 | exp-08 | `acks=1` vs `acks=all` with `min.insync.replicas=2` under the same kill | TBD |
+
+exp-04b cannot run on this stand. Promoting an out-of-sync replica requires the ISR to
+collapse onto one, which on three combined broker/controller nodes means killing two of
+them — and with no quorum the controller cannot rewrite an ISR at all, so the produce hangs
+instead of demonstrating the flag. Showing it honestly needs controllers separate from
+brokers, or five nodes; until then the branch stays a documented consequence rather than a
+measured one.

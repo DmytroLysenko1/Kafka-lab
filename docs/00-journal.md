@@ -168,3 +168,80 @@ exempt.
 
 **Carried into:** [`static/02-log-segments-retention.md`](static/02-log-segments-retention.md),
 its compaction traps table and measurement row.
+
+## exp-04 — what a dead broker costs, and what recovery does not do
+
+Date: 2026-09-20 · [run logs](../experiments/exp-04-isr-leader-election/results/) ·
+`make exp-04`
+
+**Hypothesis.** Killing the broker that leads a partition costs a pause, not data: a
+replica from the ISR takes over, `acks=all` keeps being honoured because two replicas
+remain in sync, and once the broker is back everything returns to how it was.
+
+**Setup.** One topic, 3 partitions, RF 3, `min.insync.replicas=2`,
+`unclean.leader.election.enable=false`; 300 records per phase with `acks=all`. Four
+phases, each a separate process, so the shell can `docker kill` the broker leading
+partition 0 between them and time the cluster's reaction from the kill itself rather than
+from when the next process happened to start. `kill`, not `stop`: SIGTERM gives Kafka a
+controlled shutdown, which hands leadership over politely and measures the good case.
+
+**Result.**
+
+| Phase | Leaders | Smallest ISR | Writes accepted |
+|---|---|---|---|
+| baseline | `[3 1 2]` | 3 of 3 | 300 of 300 |
+| degraded, kafka3 killed | `[1 1 2]` | 2, and `min.insync.replicas` is 2 | 300 of 300 |
+| recovered, kafka3 back | `[1 1 2]` | 3 of 3 | — |
+| after preferred election | `[3 1 2]` | 3 of 3 | — |
+
+| What | How long |
+|---|---|
+| kill → ISR shrinks and partition 0 has a new leader | **10.9 s** |
+| restart → ISR whole again | **5.3 s** |
+| preferred election → leadership back on the preferred replica | **0.2 s** |
+
+**What was surprising.** The reaction took 10.9 s, and the number everyone quotes for
+"a replica leaves the ISR" — `replica.lag.time.max.ms`, 30 s by default — is not the one
+that applies. A crashed broker is not a slow follower. The controller stops receiving its
+heartbeats and fences it after `broker.session.timeout.ms`, which is 9 s with a heartbeat
+every 2 s, and fencing rewrites the ISR of every partition that broker belonged to at once.
+Both defaults were read back off the running broker (`kafka-configs --describe --all`)
+rather than recalled: `broker.session.timeout.ms=9000`, `broker.heartbeat.interval.ms=2000`,
+`replica.lag.time.max.ms=30000`. The lag timer governs a *live* follower that has fallen
+behind; the session timeout governs one that is gone. They are two different failure
+detectors, and only the second one was exercised here.
+
+**One dead broker degraded every partition — 3 of 3.** With RF 3 on three brokers, every
+broker holds a replica of every partition, so there is no partition that a failure can
+miss. That is the shape of a small cluster rather than a fault: the ratio only improves
+once there are more brokers than replicas. It is also why the under-replicated metric on a
+three-node stand is binary in practice — it reads 0 or everything.
+
+**Writes never stopped, and there was no margin left.** The smallest ISR was 2 and
+`min.insync.replicas` is 2 — exactly at the threshold, not above it. The cluster answered
+every one of the 300 records, which is the good news, and one more failure would have
+turned the same `acks=all` call into `NOT_ENOUGH_REPLICAS`, which is exp-08. A dashboard
+showing "writes fine" during this phase is telling the truth and hiding the important part.
+
+**Recovery did only half of what recovery sounds like.** The replica rejoined the ISR 5.3 s
+after the restart, and partition 0 was still led by the broker that replaced it, and stayed
+that way. `auto.leader.rebalance.enable` is off on this stand deliberately — its 300 s timer
+would move leadership in the middle of a measurement — so the preferred election is a step
+someone has to run. It took 0.2 s. Left undone after each restart, leadership drifts onto
+whichever brokers happened to survive, and a cluster that looks healthy is quietly serving
+its partitions from two machines instead of three.
+
+**What this run does not show.** Unclean leader election needs the ISR to collapse onto a
+replica that is behind, and on three combined broker/controller nodes that means killing
+two — which destroys the KRaft quorum, so the controller cannot rewrite an ISR at all. The
+produce then hangs instead of failing, which demonstrates nothing about the flag. The same
+constraint already forced the redesign of exp-08.
+
+**Conclusion.** RF 3 with `min.insync.replicas=2` survives exactly one broker, loudly for
+about eleven seconds and silently after that. The failure is detected by the heartbeat
+session, not by the lag timer; recovery restores replication by itself and leadership never;
+and the margin during the degraded window is zero, which is the number worth alerting on —
+not the writes, which keep succeeding right up until they do not.
+
+**Carried into:** [`static/04-isr-leader-election.md`](static/04-isr-leader-election.md),
+its measurement table.

@@ -1,0 +1,32 @@
+exp-04 — ISR, leader election and recovery
+date: 2026-09-20-151858
+
+phase                 baseline, every broker up
+writes accepted       300 of 300 with acks=all
+leaders by partition  [3 1 2]
+smallest ISR          3 of 3 replicas
+under-replicated      0
+LEADER_P0             3
+
+killing kafka3, the broker leading partition 0
+
+phase                 degraded, one broker killed
+noticed after         10.9s from the kill
+leaders by partition  [1 1 2]
+under-replicated      3 of 3
+smallest ISR          2, and min.insync.replicas is 2
+writes accepted       300 of 300 with acks=all
+
+starting kafka3 again
+
+phase                            recovered, the broker is back
+ISR restored after               5.3s from the restart
+leaders by partition             [1 1 2]
+partitions led by a replacement  1 of 3 — auto leader rebalance is off, so leadership stays where the failure put it
+
+asking for a preferred leader election
+
+phase                            elected, preferred leadership asked for explicitly
+leadership back after            200ms from the election
+leaders by partition             [3 1 2]
+partitions led by a replacement  0 of 3

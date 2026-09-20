@@ -14,7 +14,7 @@ architecture diagram is labelled accordingly rather than quietly implying otherw
 
 | KR (PDP) | Deliverable | Where it lives | State |
 |---|---|---|---|
-| Fundamentals and internals | cheat sheet with write and read path diagrams | [`docs/static/`](docs/static/) — index plus cases 01–04 | diagrams done; exp-01 and exp-02 measured (a key is worth 6 448 – 7 964 ordering violations per 10 000 events; a skewed key makes seven consumers only 16% faster than one), exp-03 and exp-04 outstanding |
+| Fundamentals and internals | cheat sheet with write and read path diagrams | [`docs/static/`](docs/static/) — index plus cases 01–04 | **Stage 1 complete** — diagrams plus exp-01…04 measured: a key is worth 6 448 – 7 964 ordering violations per 10 000 events; a skewed key makes seven consumers only 16% faster than one; compaction turned 2 010 records into 50; a killed broker is noticed in 10.9 s and never gives its leadership back |
 | Delivery guarantees and tuning | notes on semantics plus a tuning checklist | cases 05, 08, 10; [`docs/tuning-checklist.md`](docs/tuning-checklist.md) | mechanics and checklist written; every measured number waits on exp-05…10, 16, 17 |
 | Production-shaped Go app | working repo, README, architecture diagram | `cmd/`, `internal/` (created at the service stage), this file | no Go code yet; the service is the next stage |
 | Operate, observe, stress | Compose, Grafana dashboard, failure report, runbook | [`deploy/`](deploy/), `docs/failure-report.md`, `docs/runbook.md` | three-broker Compose runs; metrics stack and exp-13…16 outstanding |

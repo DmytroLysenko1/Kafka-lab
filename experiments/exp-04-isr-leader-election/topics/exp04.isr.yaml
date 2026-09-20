@@ -1,0 +1,19 @@
+meta:
+  name: exp04.isr
+  cluster: kafka-lab
+  environment: lab
+  region: local
+  description: >-
+    exp-04, ISR and leader election: three partitions so every broker leads one, and
+    min.insync.replicas=2 so a single loss is survivable and a second one would not be.
+    unclean.leader.election stays false here — the catalog's setting, and the contrast
+    an unclean run would need.
+
+spec:
+  partitions: 3
+  replicationFactor: 3
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false
