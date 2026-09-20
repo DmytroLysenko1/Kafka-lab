@@ -1,0 +1,85 @@
+package main
+
+import (
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"go.uber.org/goleak"
+)
+
+// The package runs consumer groups in goroutines, so a leak here would mean a member that
+// outlived the measurement it belongs to.
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
+
+func TestDistributionPutsTheHotPartitionFirst(t *testing.T) {
+	tests := []struct {
+		name         string
+		perPartition map[int32]int
+		want         []share
+	}{
+		{
+			name:         "one partition holds four events in five",
+			perPartition: map[int32]int{0: 100, 3: 800, 5: 100},
+			want: []share{
+				{Partition: 3, Records: 800, Percent: 80},
+				{Partition: 0, Records: 100, Percent: 10},
+				{Partition: 5, Records: 100, Percent: 10},
+			},
+		},
+		{
+			name:         "an even spread still sorts by partition, so runs compare",
+			perPartition: map[int32]int{1: 50, 0: 50},
+			want: []share{
+				{Partition: 0, Records: 50, Percent: 50},
+				{Partition: 1, Records: 50, Percent: 50},
+			},
+		},
+		{
+			name:         "nothing produced",
+			perPartition: map[int32]int{},
+			want:         []share{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if diff := cmp.Diff(tt.want, distribution(tt.perPartition)); diff != "" {
+				t.Errorf("distribution mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestHottestIsTheFloorUnderAnyDrain(t *testing.T) {
+	got := hottest(map[int32]int{0: 100, 3: 800, 5: 100})
+	want := share{Partition: 3, Records: 800, Percent: 80}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("hottest mismatch (-want +got):\n%s", diff)
+	}
+
+	if empty := hottest(map[int32]int{}); empty != (share{}) {
+		t.Errorf("hottest of nothing = %+v, want the zero share", empty)
+	}
+}
+
+func TestIdleCountsMembersThatHandledNothing(t *testing.T) {
+	tests := []struct {
+		name        string
+		perConsumer []int
+		want        int
+	}{
+		{name: "every member did some work", perConsumer: []int{10, 10, 10}, want: 0},
+		{name: "a seventh member on six partitions waits", perConsumer: []int{10, 10, 10, 10, 10, 10, 0}, want: 1},
+		{name: "one member took the lot", perConsumer: []int{1000, 0, 0}, want: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := idle(tt.perConsumer); got != tt.want {
+				t.Errorf("idle = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

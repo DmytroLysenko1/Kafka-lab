@@ -1,0 +1,13 @@
+exp-02 — hot partition: skewed keys against a consumer group
+date: 2026-09-20-021443
+
+events             20000 over 20 merchants, 80% to one of them
+partitions         p3:17052 (85%)  p1:842 (4%)  p2:842 (4%)  p0:632 (3%)  p4:421 (2%)  p5:211 (1%)
+hottest partition  p3 with 17052 records (85%), handled by one consumer whatever the group size
+
+consumers  time to drain  idle members  per consumer
+1          5.67s          0             [20000]
+2          4.83s          0             [18105 1895]
+3          4.45s          0             [17894 1053 1053]
+6          4.23s          0             [632 842 842 421 17052 211]
+7          4.18s          1             [632 421 17052 842 842 0 211]

@@ -1,0 +1,17 @@
+meta:
+  name: exp02.hotkey
+  cluster: kafka-lab
+  environment: lab
+  region: local
+  description: >-
+    exp-02, hot partition: the same six partitions as payments.main, fed a key
+    distribution where one merchant sends four events out of five. Its own topic
+    because the key here is merchant_id, not payment_id.
+
+spec:
+  partitions: 6
+  replicationFactor: 3
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2

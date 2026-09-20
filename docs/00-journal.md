@@ -57,3 +57,61 @@ number there would have meant the counter, not Kafka, was broken.
 
 **Carried into:** [`static/01-write-path.md`](static/01-write-path.md) step 4 and its
 measurement table.
+
+## exp-02 — a hot key, and what adding consumers buys
+
+Date: 2026-09-20 · [run logs](../experiments/exp-02-hot-partition/results/) ·
+`make exp-02`
+
+**Hypothesis.** Key skew turns one partition into the bottleneck, and adding consumers does
+not fix it.
+
+**Setup.** One topic of 6 partitions, RF 3; 20 000 events over 20 merchants with 80% of
+them keyed to a single merchant. Each record costs the handler a fixed 200 µs, so the drain
+time measures handling capacity rather than the network. The same data is then drained by
+consumer groups of 1, 2, 3, 6 and 7 members, each group reading the topic from the start.
+
+**Result.**
+
+| Consumers | Time to drain | Idle members | How the work fell |
+|---|---|---|---|
+| 1 | 6.03 s | 0 | one member took all 20 000 |
+| 2 | 5.49 s | 0 | 18 105 / 1 895 |
+| 3 | 5.47 s | 0 | 17 894 / 1 053 / 1 053 |
+| 6 | 5.19 s | 0 | 17 052 on one member, 211–842 on the rest |
+| 7 | 5.06 s | 1 | same, and the seventh handled nothing |
+
+The keys put 17 052 of 20 000 records — 85% — on partition 3.
+
+**What this says.** Seven times the consumers bought 16%. Perfect spreading would have
+drained in about a sixth of the single-consumer time; the floor here is the hot partition,
+because a partition is handled by exactly one member of a group however many members there
+are. The seventh consumer is the other half of the same rule: with six partitions there was
+nothing left to give it, so it sat idle while one of its peers worked through 85% of the
+topic.
+
+**What was surprising.** The skew came out sharper than the keys suggest: 80% of the events
+were addressed to one merchant, but 85% of the records landed on one partition. The extra
+1 052 records are five of the nineteen cold merchants that `murmur2` happened to place on
+partition 3 as well — and the cold keys spread 5/4/4/3/2/1 across the six partitions, not
+evenly, because hashing nineteen keys onto six slots has no reason to be fair. Key skew and
+partition skew are different numbers, and it is the second one that decides the drain.
+
+**What the instrument got wrong first.** The first version of this experiment never
+committed an offset. A consumer group with no committed offsets resets to the start of the
+partition on *every* assignment, so a partition that moved between members during the join
+would have been handled twice — the strict "handled exactly what was produced" check would
+then have failed the whole run, discarding the group sizes already measured. It now commits
+as it works, so a reassignment resumes, and a failed drain still prints the measurements
+made before it. The commits cost about half a second per drain: the earlier, unsafe
+instrument read 5.67 s down to 4.18 s, where the trustworthy one reads 6.03 s down to
+5.06 s. The ratio is what the experiment is about, and it did not improve — it got worse,
+from 26% to 16%.
+
+**Conclusion.** Parallelism is capped by partitions, and *useful* parallelism is capped by
+the busiest partition. Two remedies, both with a price: change the key so the weight
+spreads (`merchant_id` plus a bucket), or add partitions — which moves existing keys to
+different partitions and breaks the ordering those keys used to have (exp-01).
+
+**Carried into:** [`static/03-read-path.md`](static/03-read-path.md), step 7 and its
+measurement table.

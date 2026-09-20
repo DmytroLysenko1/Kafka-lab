@@ -3,8 +3,11 @@ module github.com/DmytroLysenko1/Kafka-lab
 go 1.26.4
 
 require (
+	github.com/google/go-cmp v0.7.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/twmb/franz-go v1.22.0
+	go.uber.org/goleak v1.3.0
+	golang.org/x/sync v0.23.0
 )
 
 require (
@@ -14,6 +17,5 @@ require (
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.30 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.14.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
