@@ -1,0 +1,21 @@
+meta:
+  name: exp08.acks1
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-08, first half: what acks=1 acknowledges and then loses. One partition, so there
+    is exactly one leader to kill and the count is unambiguous. RF 3 so the record has
+    somewhere it could have been replicated to, and min.insync.replicas 2 to match the
+    catalog — it has no effect here, because min.insync.replicas is only consulted for
+    acks=all, which is half the point being made.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

@@ -1,0 +1,22 @@
+meta:
+  name: exp08.isr3
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-08, second half: acks=all refusing rather than losing. min.insync.replicas 3 on
+    three brokers, so a single dead broker drops the ISR below the threshold — the
+    reproducible shape of this test, because killing two of three combined broker and
+    controller nodes takes the KRaft quorum with it and the produce then hangs instead of
+    being refused. One partition, so the refusal is not diluted across partitions that
+    still have a full ISR.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 3
+    unclean.leader.election.enable: false

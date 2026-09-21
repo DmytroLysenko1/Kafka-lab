@@ -414,3 +414,87 @@ stop at the database boundary.
 
 **Carried into:** [`static/05-delivery-semantics.md`](static/05-delivery-semantics.md),
 its measurement table.
+
+
+## exp-08 — what `acks` promises, and what it only implies
+
+Date: 2026-09-21 · `make exp-08` · run logs:
+[acks=1](../experiments/transaction_guarantee/exp-08-acks/results/acks-one-2026-09-21-183122.log) ·
+[acks=all](../experiments/transaction_guarantee/exp-08-acks/results/acks-all-2026-09-21-183122.log)
+
+**Hypothesis.** `acks=1` acknowledges a record the moment the leader has it, so killing the
+leader afterwards loses a record the caller was told was safe. `acks=all` on a topic whose
+`min.insync.replicas` is above the number of live replicas refuses the write instead —
+failing loudly rather than lying quietly.
+
+**Setup.** Two single-partition topics, RF 3. `exp08.acks1` takes 2 000 records of 4 KB
+with `acks=1`; its leader is then killed. `exp08.isr3` declares `min.insync.replicas=3`,
+takes the same 2 000 records with `acks=all` while every broker is up, and then the same
+again with one broker killed — one, because killing two of three combined broker and
+controller nodes takes the KRaft quorum with it and the produce hangs instead of being
+refused.
+
+**Result — the second half, which is the one that matters operationally.**
+
+| Cluster | `acks=all`, `min.insync.replicas=3` |
+|---|---|
+| every broker up | **2 000 of 2 000 accepted** |
+| one broker down | **0 of 2 000 accepted — `NOT_ENOUGH_REPLICAS`** |
+
+Not one record was written and not one was lost, because not one was accepted. The producer
+was told no. That is the whole value of the setting: `acks=all` without
+`min.insync.replicas` above one means "everyone currently in the in-sync set", and an
+in-sync set of one is one machine — so the guarantee that reads as the strongest available
+is exactly as strong as the number you did not set.
+
+**Result — the first half, which did not happen.**
+
+| | |
+|---|---|
+| acknowledged with `acks=1` | 2 000 of 2 000 |
+| readable after the leader was killed | **2 000** |
+| lost | **0** |
+
+The window is real and it did not open. The followers had fetched all 8 MB before the kill
+landed, so the new leader had everything. This is the honest shape of `acks=1`: it does not
+lose records often, it loses them rarely — and a failure mode that fires rarely and reports
+nothing is worse to operate than one that fires predictably. The plan anticipated exactly
+this ("at the first run there were no losses, it had time to replicate") and it is still
+the right call to record the negative rather than tune the run until it produces the
+expected answer.
+
+**What was tried to open the window, and why it cannot work.** A race is a lottery, not an
+experiment, so the first version of this run held the followers back with Kafka's own
+replication throttle — `leader.replication.throttled.replicas` and
+`follower.replication.throttled.replicas` on the topic, with the broker rates set to one
+byte per second. The configs applied and were read back from the cluster. Replication was
+untouched: an 8.3 MB log reached all three replicas instantly. Replication quotas exist for
+reassignment traffic, where the destination replica is not in the in-sync set; they do not
+restrain replicas that already are. That is a mechanism worth knowing before planning any
+test around throttling, and it is stated here as the explanation for an observation, not as
+something this run verified in Kafka's source.
+
+**Something the throttle attempt exposed on the way.** The first padded run wrote 2 000
+records of 4 KB and produced a 616 KB log. franz-go compresses with snappy by default,
+unlike the Java client, and 4 KB of repeated characters compresses to nearly nothing — so
+the whole log fitted in a single fetch, which would have made any throttle irrelevant even
+if throttles applied. The producer here now disables compression explicitly. It is the
+same default the tuning checklist already flags as a franz-go/Java divergence, met in the
+wild rather than read off a page.
+
+**What the instrument got wrong first.** The count phase asked for the log's end offset and
+ignored the per-partition error in the reply. A leader mid-election answers with
+`OFFSET_NOT_AVAILABLE` and an offset of −1, the read loop then ran zero times, and the
+report printed "0 records readable" — which is precisely this experiment's claimed finding,
+manufactured by the instrument rather than by Kafka. It now refuses to report until the
+partition gives usable offsets. The first run of half one printed that false zero, and it
+would have been published as a loss.
+
+**Conclusion.** `acks=all` is not a guarantee on its own; it is a guarantee about a set
+whose size you choose with `min.insync.replicas`. Set it above one and the cluster refuses
+writes it cannot make durable — an outage instead of silent loss, which for payments is the
+trade you want. Set it to one, or use `acks=1`, and you are relying on replication winning
+a race nobody measures and nobody alerts on.
+
+**Carried into:** [`static/01-write-path.md`](static/01-write-path.md) and
+[`static/04-isr-leader-election.md`](static/04-isr-leader-election.md).

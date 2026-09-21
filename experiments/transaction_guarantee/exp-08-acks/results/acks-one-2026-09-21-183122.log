@@ -1,0 +1,21 @@
+exp-08a — what acks=1 acknowledges, and whether it survives
+date: 2026-09-21-183122
+client: franz-go v1.22.0
+records: 2000 of 4096 bytes, uncompressed
+
+LEADER_P0         3
+in-sync replicas  [3 1 2] of [3 1 2]
+
+acks          1, the leader answers on its own append
+acknowledged  2000 of 2000
+
+killing kafka3, the leader that acknowledged them
+in-sync set shrank after  15.6s
+in-sync replicas          [1 2] of [3 1 2]
+
+LEADER_P0         1
+in-sync replicas  [1 2] of [3 1 2]
+
+readable now  2000 records
+lost          0 of the 2000 that were acknowledged
+log           starts at 0, ends at 2000

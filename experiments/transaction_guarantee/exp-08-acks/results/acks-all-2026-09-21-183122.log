@@ -1,0 +1,23 @@
+exp-08b — acks=all with min.insync.replicas=3 refuses instead of losing
+date: 2026-09-21-183122
+
+LEADER_P0         1
+in-sync replicas  [1 2 3] of [1 2 3]
+
+every broker up:
+acks              all, every replica in the in-sync set
+accepted          2000 of 2000
+refused outright  no
+
+readable now  2000 records
+lost          0 of the 2000 that were acknowledged
+log           starts at 0, ends at 2000
+
+killing kafka1, dropping the in-sync set below min.insync.replicas
+in-sync set shrank after  15.7s
+in-sync replicas          [2 3] of [1 2 3]
+
+one broker down:
+acks              all, every replica in the in-sync set
+accepted          0 of 2000 — NOT_ENOUGH_REPLICAS: Messages are rejected since there are fewer in-sync replicas than required.
+refused outright  yes, NOT_ENOUGH_REPLICAS
