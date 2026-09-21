@@ -21,10 +21,36 @@ func TestTrackerKnowsWhenTheWholeLogHasBeenRead(t *testing.T) {
 	tests := []struct {
 		name          string
 		extent        map[int32]Span
+		committed     map[int32]int64
 		reads         []read
 		wantDone      bool
 		wantRemaining int64
 	}{
+		{
+			// The defect exp-05's first live run found. A consumer replacing a killed one
+			// is never sent the records its predecessor committed, so a partition the
+			// predecessor finished would hold the run open forever.
+			name:      "a partition a predecessor finished is already read for its replacement",
+			extent:    map[int32]Span{0: {Start: 0, End: 10}, 1: {Start: 0, End: 10}},
+			committed: map[int32]int64{0: 10, 1: 6},
+			reads:     []read{{1, 6}, {1, 7}, {1, 8}, {1, 9}},
+			wantDone:  true,
+		},
+		{
+			name:          "a predecessor committed part of a partition and the rest is still owed",
+			extent:        map[int32]Span{0: {Start: 0, End: 10}},
+			committed:     map[int32]int64{0: 6},
+			wantRemaining: 4,
+		},
+		{
+			// A transactional log ends in a commit or abort marker. A read_committed
+			// reader is only handed it with control records kept; without that the last
+			// offset is never seen and the read would end in a false short-read error.
+			name:     "a transaction marker at the last offset finishes the partition",
+			extent:   map[int32]Span{0: {Start: 0, End: 4}},
+			reads:    []read{{0, 0}, {0, 1}, {0, 2}, {0, 3}},
+			wantDone: true,
+		},
 		{
 			name:          "nothing read",
 			extent:        map[int32]Span{0: {Start: 0, End: 3}},
@@ -72,15 +98,18 @@ func TestTrackerKnowsWhenTheWholeLogHasBeenRead(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			progress := newTracker(tt.extent)
+			progress := NewTracker(tt.extent)
+			for partition, next := range tt.committed {
+				progress.Seed(partition, next)
+			}
 			for _, r := range tt.reads {
-				progress.saw(r.partition, r.offset)
+				progress.Saw(r.partition, r.offset)
 			}
-			if got := progress.done(); got != tt.wantDone {
-				t.Errorf("done() = %v, want %v", got, tt.wantDone)
+			if got := progress.Done(); got != tt.wantDone {
+				t.Errorf("Done() = %v, want %v", got, tt.wantDone)
 			}
-			if got := progress.remaining(); got != tt.wantRemaining {
-				t.Errorf("remaining() = %d, want %d", got, tt.wantRemaining)
+			if got := progress.Remaining(); got != tt.wantRemaining {
+				t.Errorf("Remaining() = %d, want %d", got, tt.wantRemaining)
 			}
 		})
 	}

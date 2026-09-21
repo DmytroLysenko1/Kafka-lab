@@ -1,0 +1,12 @@
+exp-10b — the same crash with a Postgres write in the loop: the row survives the abort
+date: 2026-09-21-185649
+client: franz-go v1.22.0
+payments: 1000, processor killed mid-transaction after handling 525
+
+2026/09/21 18:57:05 WARN exp-10b: killing the processor mid-transaction handled=550
+experiments/transaction_guarantee/exp-10b-database-boundary/run.sh: line 25: 61389 Killed: 9               "$binary" -run-id "$run_id" -payments "$payments" "$@"
+payments          1000 seeded
+read_committed    1000 rows, 1000 distinct, 0 duplicated
+read_uncommitted  1050 rows, 1000 distinct, 50 duplicated
+postgres          1050 rows, 1000 distinct, 50 duplicated
+claim             the Kafka output exactly once, and the database rows duplicated — as expected

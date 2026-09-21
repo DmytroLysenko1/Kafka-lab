@@ -156,11 +156,10 @@ row were inserted in its own statement, a crash between the claim and the write 
 a payment permanently unwritable: the claim exists, so every retry is refused. That is why
 `recordOnce` does both inside one transaction and nothing else.
 
-## Still to be measured
-
-| Run | What it shows | Expected shape | Status |
-|---|---|---|---|
-| exp-10 | Kafka EOS read-process-write, then the same run with an external DB write | EOS holds inside Kafka, not across the boundary | TBD |
+**Kafka transactions do not close the gap either** — exp-10b ran the same crash through a
+transactional loop: the Kafka output stayed at exactly 1 000, and the Postgres rows written
+in the same loop came out at 1 050 ([case 10](10-transactions-eos.md#measured)). The inbox
+is what makes the database write safe; the transaction only makes the Kafka side safe.
 
 A small number is the dangerous result here, not a large one: a handful of silently lost
 or doubled payments does not look like an incident, it looks like normal traffic.

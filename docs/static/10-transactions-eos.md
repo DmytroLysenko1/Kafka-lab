@@ -99,7 +99,7 @@ explosion, and a rebalance that fences the wrong things.
 | Cost | Detail |
 |---|---|
 | latency | records are invisible until the markers land, so the pipeline's end-to-end latency has the transaction length added to it |
-| a stalled LSO | one hung transaction pins the LSO of its partitions until `transaction.timeout.ms` expires — franz-go's `TransactionTimeout` defaults to 40 s, Java's to 1 min, and the broker caps both at `transaction.max.timeout.ms`, 15 min. Symptom: `read_committed` consumers show lag while `read_uncommitted` consumers are fine |
+| a stalled LSO | one hung transaction pins the LSO of its partitions until `transaction.timeout.ms` expires, plus up to the coordinator's 10 s cleanup interval — exp-10d held an unrelated producer's records back for 23.2 s behind a 20 s timeout — franz-go's `TransactionTimeout` defaults to 40 s, Java's to 1 min, and the broker caps both at `transaction.max.timeout.ms`, 15 min. Symptom: `read_committed` consumers show lag while `read_uncommitted` consumers are fine |
 | cluster state | `__transaction_state` needs `transaction.state.log.replication.factor=3` and `transaction.state.log.min.isr=2`, or transactions will not start on a three-broker lab and the error will not say so |
 | the wrong reach | none of it extends past Kafka |
 
@@ -123,11 +123,46 @@ for them to protect a database write is the single most expensive misreading of 
 feature, because it looks like it works right up until the process dies in the wrong
 millisecond.
 
-## To be measured
+## Measured
 
-| Run | What it shows | Status |
-|---|---|---|
-| exp-10a | read-process-write under `kill -9`, `read_committed`: output records and consumed offsets both roll back | TBD |
-| exp-10b | the same run with a Postgres write inside the loop: the row survives the abort | TBD |
-| exp-10c | the same consumer switched to `read_uncommitted`: aborted records delivered, counted | TBD |
-| exp-10d | a transaction left open under load: LSO stall and `read_committed` lag until `transaction.timeout.ms` | TBD |
+[journal](../00-journal.md#exp-10--what-a-kafka-transaction-covers-and-where-it-stops)
+
+1 000 payments through a read-process-write loop, one transaction per batch of 50, the
+processor killed with `SIGKILL` after producing a batch and before committing it. The
+replacement presents the same transactional id, which is how the broker learns the old
+transaction is dead and aborts it.
+
+| Run | `read_committed` output | `read_uncommitted` output | Postgres | Log |
+|---|---|---|---|---|
+| exp-10a — rollback | **1 000, 1 000 distinct** | 1 050 | — | [run](../../experiments/transaction_guarantee/exp-10a-rollback/results/run-2026-09-21-185537.log) |
+| exp-10b — database in the loop | **1 000, 1 000 distinct** | 1 050 | **1 050 rows, 50 duplicated** | [run](../../experiments/transaction_guarantee/exp-10b-database-boundary/results/run-2026-09-21-185649.log) |
+| exp-10c — `read_uncommitted` | 1 000, 1 000 distinct | **1 050 — the aborted batch delivered** | — | [run](../../experiments/transaction_guarantee/exp-10c-read-uncommitted/results/run-2026-09-21-185751.log) |
+
+**The transaction held exactly where it claims to and nowhere else.** The output records
+of the killed batch and its consumed offsets rolled back together, so the replacement
+reprocessed the batch and a `read_committed` reader saw every payment once. The Postgres
+rows written for the same batch did not roll back, because nothing told the database a
+transaction existed — 50 payments recorded twice. That is exp-10b in one line: EOS is a
+property of Kafka's partitions, and a database write inside the loop is outside it.
+
+**The aborted records are in the log.** exp-10c read the same output with
+`read_uncommitted` and was handed all 50 of them. A transaction does not stop records being
+written; it stops `read_committed` readers being given them.
+
+### exp-10d — a transaction left open — [run](../../experiments/transaction_guarantee/exp-10d-hanging-transaction/results/run-2026-09-21-190032.log)
+
+| | |
+|---|---|
+| stuck producer | one record in a transaction, never ended, `TransactionTimeout` 20 s |
+| unrelated producer | 100 records written after it, **no transaction at all** |
+| high watermark / last stable offset | **101 / 0** — 101 records reported as lag, none deliverable |
+| `read_uncommitted` saw the 100 after | **0 s** |
+| `read_committed` saw them after | **23.2 s** |
+
+An unrelated producer with no transaction was held back for the full life of someone
+else's. The stall is not the timeout alone: the coordinator looks for expired transactions
+every `transaction.abort.timed.out.transaction.cleanup.interval.ms`, 10 s by default
+([read off the broker](../../experiments/transaction_guarantee/exp-10d-hanging-transaction/results/broker-transaction-timers.log)), so a
+20 s timeout releases readers somewhere between 20 and 30 s — 23.2 s here. With
+franz-go's default of 40 s that window is 40–50 s, and the broker lets a producer ask for
+up to `transaction.max.timeout.ms`, 15 minutes.

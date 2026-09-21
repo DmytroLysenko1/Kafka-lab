@@ -1,0 +1,11 @@
+exp-10a — a crash mid-transaction rolls back the output and the consumed offsets together
+date: 2026-09-21-185537
+client: franz-go v1.22.0
+payments: 1000, processor killed mid-transaction after handling 525
+
+2026/09/21 18:55:55 WARN exp-10a: killing the processor mid-transaction handled=550
+experiments/transaction_guarantee/exp-10a-rollback/run.sh: line 25: 60597 Killed: 9               "$binary" -run-id "$run_id" -payments "$payments" "$@"
+payments          1000 seeded
+read_committed    1000 rows, 1000 distinct, 0 duplicated
+read_uncommitted  1050 rows, 1000 distinct, 50 duplicated
+claim             read_committed sees every payment exactly once — as expected

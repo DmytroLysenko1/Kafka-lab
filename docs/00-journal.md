@@ -565,3 +565,92 @@ later experiment. The clean-up now thaws all three brokers unconditionally.
 
 **Carried into:** [`static/01-write-path.md`](static/01-write-path.md) and the idempotence
 and in-flight rows of [`tuning-checklist.md`](tuning-checklist.md).
+
+
+## exp-10 — what a Kafka transaction covers, and where it stops
+
+Date: 2026-09-21 · `make exp-10a` … `make exp-10d` · run logs:
+[10a](../experiments/transaction_guarantee/exp-10a-rollback/results/run-2026-09-21-185537.log) · [10b](../experiments/transaction_guarantee/exp-10b-database-boundary/results/run-2026-09-21-185649.log) · [10c](../experiments/transaction_guarantee/exp-10c-read-uncommitted/results/run-2026-09-21-185751.log) · [10d](../experiments/transaction_guarantee/exp-10d-hanging-transaction/results/run-2026-09-21-190032.log)
+
+**Hypothesis.** A Kafka transaction makes a read-process-write loop exactly-once: the
+output records and the consumed offsets commit together or not at all. It does not reach
+anything outside Kafka — a database write in the same loop survives the abort — and it has
+a cost that lands on readers who never asked for transactions.
+
+**Setup.** Three experiments share one loop: 1 000 payments on an input topic, consumed in
+batches of 50, each batch one transaction that writes the payments to an output topic and
+commits the consumed offsets with it. After producing the eleventh batch and before ending
+its transaction, the processor sends itself `SIGKILL`. A replacement starts with the same
+transactional id — which is how the broker learns the old transaction is dead and aborts it
+— resumes from the last committed offsets, and finishes. exp-10b also writes each payment
+to Postgres inside the loop. The output is read back twice, `read_committed` and
+`read_uncommitted`. exp-10d is separate: one producer opens a transaction and never ends it,
+another writes after it with no transaction, and both isolation levels are timed.
+
+**Result.**
+
+| Run | `read_committed` | `read_uncommitted` | Postgres |
+|---|---|---|---|
+| 10a — rollback | **1 000, 1 000 distinct** | 1 050 | — |
+| 10b — database in the loop | **1 000, 1 000 distinct** | 1 050 | **1 050, 50 duplicated** |
+| 10c — `read_uncommitted` | 1 000, 1 000 distinct | **1 050** | — |
+
+| 10d — a transaction left open | |
+|---|---|
+| high watermark / last stable offset | 101 / 0 |
+| `read_uncommitted` saw the unrelated records after | 0 s |
+| `read_committed` saw them after | **23.2 s**, with a 20 s transaction timeout |
+
+**The transaction held exactly where it claims to.** The killed batch's 50 output records
+and its consumed offsets rolled back as one: the replacement reprocessed the batch, and a
+`read_committed` reader saw every payment once. That is the whole of what Kafka's
+exactly-once promises, and it kept the promise under a real crash.
+
+**And not one step further.** exp-10b is the same run with a Postgres write in the loop.
+The Kafka output is still exactly 1 000. The database holds 1 050 rows: the 50 written for
+the killed batch survived the abort, because nothing ever told Postgres a transaction
+existed, and the replacement wrote them again. This is the misreading case 10 exists to
+prevent — reaching for Kafka transactions to protect a database write — and it looks
+correct right up until the process dies in the wrong millisecond. What makes the database
+side safe is the inbox (exp-07); what makes the Kafka side safe is the transaction. Neither
+covers the other.
+
+**The aborted records were written; they were only withheld.** exp-10c read the same output
+`read_uncommitted` and got all 50 aborted records. A consumer left on the default isolation
+level — which is `read_uncommitted` in both clients — processes work that never happened.
+
+**A stuck transaction blocks everyone.** In exp-10d the producer that wrote after the stuck
+transaction used no transaction at all, and its 100 records were still invisible to
+`read_committed` readers for 23.2 seconds: they sat behind the last stable offset, which
+cannot pass an open transaction. The high watermark had moved, so every dashboard showed
+101 records of lag, and nothing could be read — the "lag without messages" symptom, made on
+purpose.
+
+**What was surprising: the stall is longer than the timeout.** 20 s configured, 23.2 s
+measured. The coordinator does not abort a transaction the instant it expires; it scans for
+expired ones every `transaction.abort.timed.out.transaction.cleanup.interval.ms`, 10 s by
+default — [read off the broker](../experiments/transaction_guarantee/exp-10d-hanging-transaction/results/broker-transaction-timers.log),
+not recalled. So the real window is timeout plus up to ten seconds. franz-go defaults the
+timeout to 40 s (Java to 60 s), which makes a hung producer's reach 40–50 s by default, and
+`transaction.max.timeout.ms` lets a producer ask for up to 15 minutes. The clock starts at
+the transaction's first record, not at `Begin`.
+
+**What the instrument got right first, because it was fixed before it could bite.** A
+transactional topic ends in a commit or abort marker, and a `read_committed` reader is never
+handed that marker. The shared reader waited to see a partition's last offset, so on these
+topics it would have waited forever and reported a short read. It now keeps control records
+for its offset arithmetic and drops them from what it returns. And `RequireStableFetchOffsets`,
+which the design planned to set, is a no-op in franz-go 1.22 — stable offset fetch is always
+on — which the linter caught before it could sit in the code implying otherwise.
+
+**Conclusion.** Kafka transactions are the right tool for exactly one shape: Kafka in,
+Kafka out. They make that stage exactly-once under a real crash. They do nothing for a
+database write, they leave aborted records readable to anyone on the default isolation
+level, and one hung producer stalls every `read_committed` reader of its partitions for the
+timeout plus the coordinator's scan — including readers of producers who never used a
+transaction.
+
+**Carried into:** [`static/10-transactions-eos.md`](static/10-transactions-eos.md),
+[`static/06-transactional-outbox.md`](static/06-transactional-outbox.md),
+[`static/05-delivery-semantics.md`](static/05-delivery-semantics.md) and the isolation row
+of [`tuning-checklist.md`](tuning-checklist.md).

@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+
+	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 )
 
 // consume reads the run and writes it to Postgres. Which of the three semantics it
@@ -28,16 +31,16 @@ func consume(ctx context.Context, cfg *Settings, db *store) error {
 	}
 	defer client.Close()
 
-	drained, err := endOffsets(ctx, cfg, group)
+	drained, err := labkit.GroupProgress(ctx, kadm.NewClient(client), cfg.Topic, group)
 	if err != nil {
 		return err
 	}
 
 	run := &consumer{cfg: cfg, db: db, client: client}
-	for !drained.reached() {
+	for !drained.Done() {
 		fetches := client.PollRecords(ctx, PollBatch)
 		if err := fetches.Err(); err != nil {
-			return fmt.Errorf("%s: read %s with %d left: %w", cfg.Name, cfg.Topic, drained.remaining(), err)
+			return fmt.Errorf("%s: read %s with %d left: %w", cfg.Name, cfg.Topic, drained.Remaining(), err)
 		}
 
 		batch, err := decode(fetches, cfg)
@@ -47,7 +50,7 @@ func consume(ctx context.Context, cfg *Settings, db *store) error {
 		if err := run.apply(ctx, fetches, batch); err != nil {
 			return err
 		}
-		fetches.EachRecord(func(record *kgo.Record) { drained.saw(record.Partition, record.Offset) })
+		fetches.EachRecord(func(record *kgo.Record) { drained.Saw(record.Partition, record.Offset) })
 	}
 
 	// Reaching the end with nothing left to commit still has to commit: the last batch of
@@ -86,7 +89,7 @@ func (c *consumer) writeAll(ctx context.Context, batch []Payment) error {
 		}
 		c.handled++
 		if c.shouldDie(i == len(batch)-1) {
-			die(c.cfg, c.handled)
+			labkit.Crash(c.cfg.Name+": killing this consumer", "mode", c.cfg.Mode, "handled", c.handled)
 		}
 	}
 	return nil

@@ -1,0 +1,20 @@
+meta:
+  name: exp10d.stream
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-10d, a transaction left open: one producer begins a transaction and never ends it,
+    another writes after it without one. One partition, because the last stable offset is
+    per partition and a stuck transaction blocks exactly the partition it wrote to — with
+    one partition, what is blocked is everything.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

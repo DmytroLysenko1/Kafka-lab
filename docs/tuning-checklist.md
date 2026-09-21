@@ -61,7 +61,7 @@ able to name.
 | `partition.assignment.strategy` (`kgo.Balancers`) | Java `[range, cooperative-sticky]`, which negotiates down to eager `range`; franz-go `CooperativeStickyBalancer` | Cooperative rebalancing stops only the partitions that move, instead of every partition in the group. The two clients differ out of the box, so an eager-versus-cooperative comparison has to configure eager explicitly (exp-14) |
 | `session.timeout.ms` / `heartbeat.interval.ms` | 45 s / 3 s in both | How long a dead member goes unnoticed. Shorter detects failure sooner and rebalances on transient pauses |
 | `max.poll.interval.ms` vs `kgo.RebalanceTimeout` | Java 5 min; **franz-go has no poll watchdog**, its rebalance timeout is 60 s | A slow handler is not noticed until a rebalance happens, and then it has 60 s rather than Java's 300 s. Budget the handler against that, or raise it deliberately (exp-16b) |
-| `isolation.level` (`kgo.FetchIsolationLevel`) | `read_uncommitted` | Set `read_committed` for any consumer reading a transactional topic, or it sees aborted records. Cost: reads stop at the LSO, so an open transaction blocks progress until it commits or times out (exp-10) |
+| `isolation.level` (`kgo.FetchIsolationLevel`) | `read_uncommitted` | Set `read_committed` for any consumer reading a transactional topic, or it sees aborted records. Cost: reads stop at the LSO, so an open transaction blocks progress until it commits or times out — and blocks *everyone* on the partition, including producers with no transaction: exp-10d held 100 unrelated records back for 23.2 s behind one stuck transaction with a 20 s timeout, while `read_uncommitted` saw them at once |
 
 ## 6. Backpressure: slowing the flow on purpose
 

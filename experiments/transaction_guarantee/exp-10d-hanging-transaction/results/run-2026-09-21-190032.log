@@ -1,0 +1,11 @@
+exp-10d — a transaction left open
+date: 2026-09-21-190032
+client: franz-go v1.22.0
+
+stuck transaction                one record, never ended, transaction.timeout.ms 20s
+unrelated records                100, written after it by a producer with no transaction
+high watermark                   101
+last stable offset               0 — 101 records reported as lag and not deliverable
+read_uncommitted saw them after  0s
+read_committed saw them after    23.2s
+claim                            read_committed held back until the stuck transaction was aborted — as expected

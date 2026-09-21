@@ -108,5 +108,5 @@ mechanism.
 
 | Run | What it shows | Status |
 |---|---|---|
-| exp-10 | Kafka EOS covers Kafka only; the same run with a Postgres write needs outbox plus inbox | TBD |
+| exp-10 | Kafka EOS covers Kafka only; the same run with a Postgres write needs outbox plus inbox | **measured (exp-10b)**: a crash mid-transaction left the Kafka output at exactly 1 000 and the Postgres rows at 1 050 — the abort rolled back the records and offsets, not the database [run](../../experiments/transaction_guarantee/exp-10b-database-boundary/results/run-2026-09-21-185649.log) |
 | exp-13 | broker killed under load: outbox backlog grows, API keeps answering, relay drains afterwards | TBD |

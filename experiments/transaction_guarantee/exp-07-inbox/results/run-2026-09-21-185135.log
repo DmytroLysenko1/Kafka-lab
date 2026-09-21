@@ -1,0 +1,11 @@
+exp-07 — effectively-once, the claim and the write in one transaction
+date: 2026-09-21-185135
+client: franz-go v1.22.0
+payments: 1000, consumer killed after handling 500
+
+2026/09/21 18:51:43 WARN exp-07: killing this consumer mode=inbox handled=500
+experiments/transaction_guarantee/exp-07-inbox/run.sh: line 29: 57081 Killed: 9               "$binary" -run-id "$run_id" -payments "$payments" "$@"
+inbox         produced 1000, rows 1000, distinct 1000
+  lost        0
+  duplicated  0
+  outcome     every payment exactly once — as expected

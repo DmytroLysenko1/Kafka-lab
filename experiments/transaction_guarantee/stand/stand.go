@@ -67,11 +67,10 @@ const (
 var phases = []string{"produce", "consume", "verify"}
 
 var (
-	ErrPhase    = errors.New("stand: -phase must be produce, consume or verify")
-	ErrRunID    = errors.New("stand: -run-id is required, so a rerun cannot read an earlier run's rows")
-	ErrShape    = errors.New("stand: -payments out of range")
-	ErrDatabase = errors.New("stand: postgres")
-	ErrPartial  = errors.New("stand: the cluster did not accept every payment")
+	ErrPhase   = errors.New("stand: -phase must be produce, consume or verify")
+	ErrRunID   = errors.New("stand: -run-id is required, so a rerun cannot read an earlier run's rows")
+	ErrShape   = errors.New("stand: -payments out of range")
+	ErrPartial = errors.New("stand: the cluster did not accept every payment")
 )
 
 // Settings is one phase of one run.
@@ -130,14 +129,4 @@ func (cfg *Settings) validate() error {
 		return fmt.Errorf("%w: -die-after is %d", ErrShape, cfg.DieAfter)
 	}
 	return nil
-}
-
-// die kills this process the way a crash would. SIGKILL cannot be caught, so nothing here
-// tidies up: that is the point, and it is why the kill is delivered rather than returned.
-func die(cfg *Settings, handled int) {
-	slog.Warn(cfg.Name+": killing this consumer", "mode", cfg.Mode, "handled", handled)
-	if err := syscall.Kill(os.Getpid(), syscall.SIGKILL); err != nil {
-		os.Exit(137)
-	}
-	select {} // unreachable: SIGKILL is delivered before the next statement runs
 }

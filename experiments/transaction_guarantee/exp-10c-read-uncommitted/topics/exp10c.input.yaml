@@ -1,0 +1,20 @@
+meta:
+  name: exp10c.input
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-10c, input of the read-process-write loop. Owned by this experiment alone, and
+    reset before every run, so no earlier run's transactions — committed or aborted — are
+    in the log being counted. One partition, so the crash lands in one transaction and the
+    size of what is rolled back is one batch.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

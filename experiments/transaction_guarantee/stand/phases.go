@@ -8,8 +8,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
+
+	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 )
 
 // Payment is the event on the topic. Seq is the payment's position in the run, which makes
@@ -21,7 +22,7 @@ type Payment struct {
 }
 
 func measure(ctx context.Context, cfg *Settings, out io.Writer) error {
-	pool, err := connect(ctx, cfg.Database)
+	pool, err := labkit.Postgres(ctx, cfg.Database)
 	if err != nil {
 		return err
 	}
@@ -40,26 +41,6 @@ func measure(ctx context.Context, cfg *Settings, out io.Writer) error {
 	default:
 		return verify(ctx, cfg, db, out)
 	}
-}
-
-// connect builds the pool from a parsed config, so that no error message can carry the
-// password out of the connection string and into a log line.
-func connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	config, err := pgxpool.ParseConfig(url)
-	if err != nil {
-		return nil, fmt.Errorf("%w: -database-url is not a valid connection string", ErrDatabase)
-	}
-
-	pool, err := pgxpool.NewWithConfig(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("%w: connect to %s:%d/%s", ErrDatabase,
-			config.ConnConfig.Host, config.ConnConfig.Port, config.ConnConfig.Database)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("%w: ping %s:%d/%s", ErrDatabase,
-			config.ConnConfig.Host, config.ConnConfig.Port, config.ConnConfig.Database)
-	}
-	return pool, nil
 }
 
 func produce(ctx context.Context, cfg *Settings) error {
