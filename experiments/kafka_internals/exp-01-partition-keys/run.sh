@@ -6,12 +6,12 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo="$(cd "$here/../.." && pwd)"
+repo="$(cd "$here/../../.." && pwd)"
 stamp="$(date +%Y-%m-%d-%H%M%S)"
 log="$here/results/run-$stamp.log"
 
 cd "$repo"
-make exp-topics EXP="$(basename "$here")"
+make exp-topics EXP="${here#"$repo"/experiments/}"
 
 # Each run owns the log it reads. The run id already keeps a rerun from counting the
 # previous run's events, but it does not keep the previous run's records out of the
@@ -26,7 +26,7 @@ done
   echo "events: ${EVENTS:-10000} over ${PAYMENTS:-100} payments, 6 partitions, franz-go $(go list -m github.com/twmb/franz-go | awk '{print $2}')"
   echo
   for mode in keyless keyed; do
-    go run ./experiments/exp-01-partition-keys -mode "$mode" \
+    go run ./experiments/kafka_internals/exp-01-partition-keys -mode "$mode" \
       -events "${EVENTS:-10000}" -payments "${PAYMENTS:-100}"
     echo
   done

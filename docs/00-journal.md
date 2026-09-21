@@ -8,7 +8,7 @@ Numbers here are the source; the case files under [`static/`](static/) quote the
 
 ## exp-01 — the key decides the order a payment is handled in
 
-Date: 2026-09-20 · [run logs](../experiments/exp-01-partition-keys/results/) ·
+Date: 2026-09-20 · [run logs](../experiments/kafka_internals/exp-01-partition-keys/results/) ·
 `make exp-01` — three sequential runs, each on freshly reset topics
 
 **Hypothesis.** Without a key, the events of one payment scatter across partitions and lose
@@ -56,7 +56,7 @@ does not keep those events out of the partitions whose handling order is the thi
 measured. The three runs published before this one were taken on topics that were never
 reset, and two of them overlapped in time on the same two topics — their numbers were
 measured while another producer was writing into the same partitions. They are kept in
-[`results/superseded/`](../experiments/exp-01-partition-keys/results/superseded/) with what
+[`results/superseded/`](../experiments/kafka_internals/exp-01-partition-keys/results/superseded/) with what
 is wrong with each. `run.sh` now resets both topics first, which is the rule the later
 experiments were built on: an experiment that reads a log has to own the log it reads.
 
@@ -75,7 +75,7 @@ measurement table.
 
 ## exp-02 — a hot key, and what adding consumers buys
 
-Date: 2026-09-20 · [run log](../experiments/exp-02-hot-partition/results/run-2026-09-20-200615.log) ·
+Date: 2026-09-20 · [run log](../experiments/kafka_internals/exp-02-hot-partition/results/run-2026-09-20-200615.log) ·
 `make exp-02`
 
 **Hypothesis.** Key skew turns one partition into the bottleneck, and adding consumers does
@@ -141,7 +141,7 @@ measurement table.
 
 ## exp-03 — what the cleaner keeps
 
-Date: 2026-09-20 · [run log](../experiments/exp-03-segments-retention/results/run-2026-09-20-200653.log) ·
+Date: 2026-09-20 · [run log](../experiments/kafka_internals/exp-03-segments-retention/results/run-2026-09-20-200653.log) ·
 `make exp-03`
 
 **Hypothesis.** A compacted topic keeps the last value of each key rather than the history,
@@ -201,7 +201,7 @@ its compaction traps table and measurement row.
 
 ## exp-04 — what a dead broker costs, and what recovery does not do
 
-Date: 2026-09-20 · [run log](../experiments/exp-04-isr-leader-election/results/run-2026-09-20-200722.log) ·
+Date: 2026-09-20 · [run log](../experiments/kafka_internals/exp-04-isr-leader-election/results/run-2026-09-20-200722.log) ·
 `make exp-04`
 
 **Hypothesis.** Killing the broker that leads a partition costs a pause, not data: a
@@ -248,7 +248,7 @@ cannot be the one that applies. A crashed broker is not a slow follower: the con
 stops receiving its heartbeats and fences it after `broker.session.timeout.ms`, and fencing
 rewrites the ISR of every partition that broker belonged to at once. The three defaults are
 committed as evidence —
-[`results/broker-timers.log`](../experiments/exp-04-isr-leader-election/results/broker-timers.log):
+[`results/broker-timers.log`](../experiments/kafka_internals/exp-04-isr-leader-election/results/broker-timers.log):
 `broker.session.timeout.ms=9000`, `broker.heartbeat.interval.ms=2000`,
 `replica.lag.time.max.ms=30000`.
 
@@ -295,7 +295,7 @@ its measurement table.
 
 ## exp-04c — the same kill, with the session timeout moved
 
-Date: 2026-09-21 · [run log](../experiments/exp-04-isr-leader-election/results/exp-04c-2026-09-21-172333.log) ·
+Date: 2026-09-21 · [run log](../experiments/kafka_internals/exp-04-isr-leader-election/results/exp-04c-2026-09-21-172333.log) ·
 `make exp-04c`
 
 **Hypothesis.** exp-04 explained its ten-second reaction by `broker.session.timeout.ms`

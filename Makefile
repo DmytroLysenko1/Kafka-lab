@@ -3,7 +3,7 @@ COMPOSE := docker compose -f deploy/docker-compose.yml
 TOPICCTL := go run github.com/segmentio/topicctl/cmd/topicctl@v1.23.1
 CLUSTER_CONFIG := deploy/topicctl/cluster.yaml
 CATALOG := deploy/topics/*.yaml
-TOPIC_YAMLS := $(wildcard deploy/topics/*.yaml experiments/*/topics/*.yaml)
+TOPIC_YAMLS := $(wildcard deploy/topics/*.yaml experiments/*/*/topics/*.yaml)
 
 # Override when an experiment killed this broker: make lag GROUP=g KAFKA_CONTAINER=kafka-lab-kafka2
 KAFKA_CONTAINER ?= kafka-lab-kafka1
@@ -39,10 +39,11 @@ logs:
 topics:
 	$(TOPICCTL) apply --cluster-config $(CLUSTER_CONFIG) --skip-confirm $(CATALOG)
 
-# Experiment topics live in experiments/<exp>/topics/, outside the catalog that
-# `make topics` creates for good and `make check` keeps checking.
+# Experiment topics live in experiments/<group>/<exp>/topics/, outside the catalog that
+# `make topics` creates for good and `make check` keeps checking. EXP is the path under
+# experiments/, group included, because the same experiment number can only be found once.
 exp-topics: topic-lint
-	$(if $(EXP),,$(error EXP is required, e.g. make exp-topics EXP=exp-08-acks))
+	$(if $(EXP),,$(error EXP is required, e.g. make exp-topics EXP=transaction_guarantee/exp-08-acks))
 	@echo "note: apply elects the preferred leader on the topics it touches"
 	$(TOPICCTL) apply --cluster-config $(CLUSTER_CONFIG) --skip-confirm experiments/$(EXP)/topics/*.yaml
 
@@ -63,7 +64,7 @@ topic-lint:
 # applied, so no other topic gets its leaders moved.
 reset-topic:
 	$(if $(TOPIC),,$(error TOPIC is required, e.g. make reset-topic TOPIC=payments-consumer.dlq))
-	$(eval TOPIC_YAML := $(firstword $(wildcard deploy/topics/$(TOPIC).yaml experiments/*/topics/$(TOPIC).yaml)))
+	$(eval TOPIC_YAML := $(firstword $(wildcard deploy/topics/$(TOPIC).yaml experiments/*/*/topics/$(TOPIC).yaml)))
 	$(if $(TOPIC_YAML),,$(error no YAML declares $(TOPIC), refusing to delete a topic that cannot be recreated))
 	$(KAFKA_BIN)/kafka-topics.sh $(BOOTSTRAP) --delete --topic '$(TOPIC)'
 	@until ! $(KAFKA_BIN)/kafka-topics.sh $(BOOTSTRAP) --list | grep -qx '$(TOPIC)'; do sleep 1; done
@@ -75,15 +76,16 @@ elect-preferred:
 
 # exp-04c is not a plain experiment directory: it recreates the brokers with a raised
 # broker.session.timeout.ms and puts the default back afterwards. An explicit rule wins over
-# the pattern rule below, which would look for experiments/exp-04c-* and find nothing.
+# the pattern rule below, which would look for experiments/*/exp-04c-* and find nothing.
 exp-04c: check
-	experiments/exp-04-isr-leader-election/run-session-timeout.sh
+	experiments/kafka_internals/exp-04-isr-leader-election/run-session-timeout.sh
 
-# make exp-01 runs experiments/exp-01-*/run.sh, and only after check has agreed that the
-# cluster still matches the catalog — a measurement on a drifted stand is a wrong number.
+# make exp-01 finds experiments/<group>/exp-01-*/run.sh whichever group it was filed under,
+# and runs it only after check has agreed that the cluster still matches the catalog — a
+# measurement on a drifted stand is a wrong number.
 exp-%: check
-	$(eval EXP_DIR := $(firstword $(wildcard experiments/exp-$*-*)))
-	$(if $(EXP_DIR),,$(error no experiment matches experiments/exp-$*-*))
+	$(eval EXP_DIR := $(firstword $(wildcard experiments/*/exp-$*-*)))
+	$(if $(EXP_DIR),,$(error no experiment matches experiments/*/exp-$*-*))
 	$(EXP_DIR)/run.sh
 
 describe:

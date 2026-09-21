@@ -114,7 +114,7 @@ captured" is no longer in the log.
 ## Measured
 
 `make exp-03` · [journal](../00-journal.md#exp-03--what-the-cleaner-keeps) ·
-[run log](../../experiments/exp-03-segments-retention/results/run-2026-09-20-154030.log)
+[run log](../../experiments/kafka_internals/exp-03-segments-retention/results/run-2026-09-20-154030.log)
 
 | Topic | Before cleaning | After cleaning |
 |---|---|---|
@@ -122,7 +122,7 @@ captured" is no longer in the log.
 | kept 5 s, 2 000 records | 2 000 records, log starts at 0 | **0 readable**; the log now starts past the last of them |
 
 **`segment.bytes` below 1 MiB is refused on Kafka 4.x** —
-[captured](../../experiments/exp-03-segments-retention/results/segment-bytes-rejected.log):
+[captured](../../experiments/kafka_internals/exp-03-segments-retention/results/segment-bytes-rejected.log):
 `Invalid value 4096 for configuration segment.bytes: Value must be at least 1048576`. The
 standard advice to shrink it for a demo no longer works; roll by `segment.ms` instead.
 

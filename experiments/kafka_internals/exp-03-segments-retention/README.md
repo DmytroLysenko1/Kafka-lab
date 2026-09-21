@@ -41,12 +41,12 @@ run produced none: it rolls segments every second, so aged data always lands in 
 segment and is always dropped. All that survives is the roll markers the instrument itself
 wrote seconds earlier. What was shown is the clean half — closed segments age out whole.
 The other half is listed as outstanding in
-[case 02](../../docs/static/02-log-segments-retention.md#still-to-be-measured).
+[case 02](../../../docs/static/02-log-segments-retention.md#still-to-be-measured).
 
 `segment.bytes` below 1 MiB is refused by Kafka 4.x — the rejection is
 [captured](results/segment-bytes-rejected.log) rather than quoted from memory.
 
-The reasoning is in the [journal](../../docs/00-journal.md).
+The reasoning is in the [journal](../../../docs/00-journal.md).
 
 ## Cleaning up
 

@@ -34,7 +34,7 @@ nineteen cold merchants that hashed onto the same partition — and one consumer
 that partition in every run. Seven times the members bought 15%.
 
 The reasoning, including why partition skew came out sharper than key skew, is in the
-[journal](../../docs/00-journal.md).
+[journal](../../../docs/00-journal.md).
 
 ## Cleaning up
 

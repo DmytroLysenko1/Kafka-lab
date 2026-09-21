@@ -48,7 +48,7 @@ a guarantee and a tendency — and it is also the control on the instrument, sin
 number there would mean the counter was broken rather than Kafka.
 
 The full story, including where the estimate in the plan was wrong, is in the
-[journal](../../docs/00-journal.md).
+[journal](../../../docs/00-journal.md).
 
 ## Cleaning up
 

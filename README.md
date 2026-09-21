@@ -38,9 +38,9 @@ make down                        # stop and wipe the brokers' data
 Topics are declared, not scripted: one YAML file per topic, applied by
 [topicctl](https://github.com/segmentio/topicctl). The permanent catalog lives in
 [`deploy/topics/`](deploy/topics/). An experiment's own topics — `min.insync.replicas=3`
-for exp-08, a compacted one for exp-03 — live in `experiments/<exp>/topics/` and are
-applied with `make exp-topics EXP=<exp>`, so they neither become part of the catalog nor
-keep being checked after the experiment is over.
+for exp-08, a compacted one for exp-03 — live in `experiments/<group>/<exp>/topics/` and
+are applied with `make exp-topics EXP=<group>/<exp>`, so they neither become part of the
+catalog nor keep being checked after the experiment is over.
 
 Every YAML states `min.insync.replicas` explicitly, and `make check` refuses to run
 otherwise. With eligible leader replicas (KIP-966, on by default in Kafka 4.x) the
@@ -157,7 +157,8 @@ the difference between two pictures.
 **[`docs/00-journal.md`](docs/00-journal.md)** — the lab journal: one entry per run, with
 what was expected, what the cluster did and what was surprising. The case files quote its
 numbers; it is where they come from. Each run lives in
-[`experiments/`](experiments/) and is reproducible with `make exp-NN`.
+[`experiments/`](experiments/), grouped by the KR it answers, and is reproducible with
+`make exp-NN` whichever group it was filed under.
 
 **[`docs/tuning-checklist.md`](docs/tuning-checklist.md)** — every setting that matters,
 what it buys, what it costs, and the defaults where franz-go and the Java client disagree.

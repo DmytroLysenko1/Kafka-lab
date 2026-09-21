@@ -6,7 +6,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo="$(cd "$here/../.." && pwd)"
+repo="$(cd "$here/../../.." && pwd)"
 stamp="$(date +%Y-%m-%d-%H%M%S)"
 log="$here/results/run-$stamp.log"
 records="${RECORDS:-300}"
@@ -16,7 +16,7 @@ records="${RECORDS:-300}"
 now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
 
 cd "$repo"
-make exp-topics EXP="$(basename "$here")"
+make exp-topics EXP="${here#"$repo"/experiments/}"
 
 # A fresh topic starts with leadership on the preferred replicas, which is what the
 # baseline is supposed to be a baseline of.
@@ -26,7 +26,7 @@ make reset-topic TOPIC=exp04.isr
 # cold build cache that compile would land inside the interval being timed.
 binary="$(mktemp -d)/exp04"
 trap 'rm -rf "$(dirname "$binary")"' EXIT
-go build -o "$binary" ./experiments/exp-04-isr-leader-election
+go build -o "$binary" ./experiments/kafka_internals/exp-04-isr-leader-election
 exp04() { "$binary" -records "$records" "$@"; }
 
 {

@@ -10,7 +10,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo="$(cd "$here/../.." && pwd)"
+repo="$(cd "$here/../../.." && pwd)"
 stamp="$(date +%Y-%m-%d-%H%M%S)"
 log="$here/results/exp-04c-$stamp.log"
 records="${RECORDS:-300}"
@@ -28,13 +28,13 @@ trap restore EXIT
 
 cd "$repo"
 binary="$(mktemp -d)/exp04"
-go build -o "$binary" ./experiments/exp-04-isr-leader-election
+go build -o "$binary" ./experiments/kafka_internals/exp-04-isr-leader-election
 exp04() { "$binary" -records "$records" "$@"; }
 
 # Recreating the containers keeps the named volumes, so the topic and its data survive.
 echo "raising broker.session.timeout.ms to $raised and recreating the brokers"
 KAFKA_BROKER_SESSION_TIMEOUT_MS="$raised" compose up -d --wait >/dev/null
-make exp-topics EXP="$(basename "$here")" >/dev/null
+make exp-topics EXP="${here#"$repo"/experiments/}" >/dev/null
 make elect-preferred >/dev/null
 
 {

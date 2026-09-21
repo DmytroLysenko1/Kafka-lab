@@ -99,9 +99,9 @@ every restart leaves the cluster a little more lopsided.
 replica that is behind, which on three combined broker/controller nodes means killing two of
 them — and that destroys the KRaft quorum, so the controller cannot rewrite an ISR at all.
 The same constraint is written up in
-[04](../../docs/static/04-isr-leader-election.md#the-three-ways-an-acknowledged-record-dies).
+[04](../../../docs/static/04-isr-leader-election.md#the-three-ways-an-acknowledged-record-dies).
 
-The reasoning is in the [journal](../../docs/00-journal.md).
+The reasoning is in the [journal](../../../docs/00-journal.md).
 
 ## exp-04c — varying the timer
 

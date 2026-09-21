@@ -146,7 +146,7 @@ argued.** `replica.lag.time.max.ms` (30 s) is the figure usually quoted for a re
 leaving the ISR, and the 10.1 s and 10.6 s measured here cannot be it. A crashed broker is
 not a slow follower: the controller fences a broker whose heartbeats stop after
 `broker.session.timeout.ms` — 9 s, heartbeats every 2 s, both
-[read off the running broker](../../experiments/exp-04-isr-leader-election/results/broker-timers.log)
+[read off the running broker](../../experiments/kafka_internals/exp-04-isr-leader-election/results/broker-timers.log)
 — and fencing rewrites the ISR of every partition that broker was in. The lag timer is for a
 live follower that has fallen behind.
 
@@ -159,7 +159,7 @@ exp-04c raises the session timeout to 20 s, changes nothing else, and kills the 
 
 The reaction moved with the session timeout across an 11-second change while the lag timer
 sat at 30 s throughout — `make exp-04c`,
-[log](../../experiments/exp-04-isr-leader-election/results/exp-04c-2026-09-21-172333.log).
+[log](../../experiments/kafka_internals/exp-04-isr-leader-election/results/exp-04c-2026-09-21-172333.log).
 ISR recovery after the restart stayed at 5.1 s, which is the returning replica catching up
 and has nothing to do with fencing: a control that would have moved too, had the change been
 something broader than the timer under test.

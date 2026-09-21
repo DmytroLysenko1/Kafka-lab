@@ -87,7 +87,7 @@ guarantee ends — that boundary is why the service still needs an outbox and an
 
 | Run | What it shows | Status |
 |---|---|---|
-| exp-01 | `key=nil` vs `key=payment_id`: ordering violations per 10 000 events | **keyless: 7 964 – 8 721 violations over three runs, all 100 payments split across partitions every time. Keyed: 0 violations, 0 split.** [runs](../../experiments/exp-01-partition-keys/results/) |
+| exp-01 | `key=nil` vs `key=payment_id`: ordering violations per 10 000 events | **keyless: 7 964 – 8 721 violations over three runs, all 100 payments split across partitions every time. Keyed: 0 violations, 0 split.** [runs](../../experiments/kafka_internals/exp-01-partition-keys/results/) |
 | exp-08 | `acks=1` plus leader kill vs `acks=all` with `min.insync.replicas=2` (exp-08 runs both halves: the loss under `acks=1`, and the refusal on a topic with `min.insync.replicas=3` when one broker dies) | TBD |
 | exp-09 | idempotence off, five in-flight requests, injected network failure: reordering | TBD |
 | exp-17 | `linger` × batch size × codec sweep: throughput against p99 produce latency, and what the franz-go defaults already cost | TBD |
