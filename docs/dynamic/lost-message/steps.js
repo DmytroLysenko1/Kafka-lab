@@ -15,12 +15,12 @@ Walkthrough.register({
 
     { kind: "msg", from: "c", to: "k", label: "CommitOffsets(43)", warn: true,
       t: "Act I — commit first",
-      d: "The consumer tells Kafka it is finished before it has done anything. This is what enable.auto.commit does by default: on a timer, in the background, without asking whether the handler ever ran." },
+      d: "The consumer tells Kafka it is finished before it has done anything. Autocommit does not do this by default, since it commits only what the previous poll returned; it does when the handler hands records to another goroutine and polls on, or with franz-go's AutoCommitGreedy." },
 
     { kind: "note", at: ["c", "db"], warn: true, lines: ["kill -9 in this window"],
       t: "The loss window",
       d: "The process dies between the commit and the database write. On restart the group resumes at offset 43, record 42 is never delivered again, and payment 7f3a exists nowhere.",
-      r: "exp-05 will measure how many of 1000 payments disappear. Expect a small number — which is worse than a large one, because small silent losses do not look like an incident." },
+      r: "exp-05 measured it: 49 of 1000 payments disappeared, the rest of one batch. A small number — which is worse than a large one, because small silent losses do not look like an incident." },
 
     { kind: "msg", from: "c", to: "db", label: "INSERT payment 7f3a", ghost: true,
       t: "The write that never happened",
@@ -62,7 +62,7 @@ Walkthrough.register({
     { kind: "msg", from: "c", to: "db", label: "0 rows → skip INSERT; COMMIT", ghost: true,
       t: "The write that must not happen twice",
       d: "Drawn faded because it belongs to the redelivery run, not the first one. Zero rows means the payment is already recorded, so the consumer skips the business write entirely and goes straight to the offset.",
-      r: "This is the branch exp-07 has to prove: 1000 payments, redelivered under kill -9, still 1000 rows in the database and zero duplicates." },
+      r: "This is the branch exp-07 measured: 1000 payments, 50 of them redelivered after kill -9 and refused by the inbox, still 1000 rows in the database and zero duplicates." },
 
     { kind: "msg", from: "c", to: "k", label: "CommitOffsets(43)",
       t: "Exactly-once effect, at-least-once delivery",

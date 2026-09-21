@@ -1,4 +1,4 @@
-# exp-09 — reordering, and what franz-go does instead
+# exp-09 — reordering, and where the duplicates actually came from
 
 **Hypothesis.** With idempotence off and more than one request in flight, a retried batch
 can land after a later one, so a refund is recorded before the capture it refunds. With
@@ -9,9 +9,15 @@ make exp-09
 ```
 
 A steady two-minute stream of captures and refunds into one partition of a
-`min.insync.replicas=3` topic. A follower is frozen and thawed three times, so every
-`acks=all` request is refused with `NOT_ENOUGH_REPLICAS` and retried at each edge. Then
-the partition is read back and checked. Run twice, one log each.
+`min.insync.replicas=3` topic. A follower is frozen and thawed three times. While it is
+frozen but still in the in-sync set, `acks=all` requests are appended by the leader and then
+wait for it until the produce timeout (10 s) answers them `REQUEST_TIMED_OUT`; once the
+controller drops it from the set — 10 to 30 s in across these runs, and longer than the 9 s
+broker session timeout, presumably, when the frozen node was also the active controller
+(not checked; one flap in run 3 read 0 s, also not investigated) — new requests are refused `NOT_ENOUGH_REPLICAS` before anything is written. Then
+the partition is read back and checked. Each producer counts its own retries by error code,
+read from franz-go's per-response debug summary, because the client retries a retriable
+error silently at every other log level.
 
 | Knob | Default | Why |
 |---|---|---|
@@ -22,22 +28,41 @@ the partition is read back and checked. Run twice, one log each.
 
 | Producer | Produced | Read back | Out of order | Duplicated | Log |
 |---|---|---|---|---|---|
-| idempotence off, 5 in flight | 217 840 | 218 131 | **0** | **291** | [run](results/plain-2026-09-21-184103.log) |
-| idempotent | 266 980 | 266 980 | 0 | 0 | [run](results/idempotent-2026-09-21-184103.log) |
+| idempotence off, 5 in flight | 217 840 | 218 131 | **0** | **291** | [run 1](results/plain-2026-09-21-184103.log) |
+| idempotence off, 5 in flight | 248 680 | 248 760 | **0** | **80** | [run 2](results/plain-2026-09-21-194744.log) |
+| idempotence off, 5 in flight | 338 440 | 338 520 | **0** | **80** | [run 3, retries counted](results/plain-2026-09-22-000803.log) |
+| idempotent | 266 980 / 217 200 / 207 420 | the same | 0 | 0 | [1](results/idempotent-2026-09-21-184103.log) · [2](results/idempotent-2026-09-21-194744.log) · [3](results/idempotent-2026-09-22-000803.log) |
 
-**franz-go did not reorder. It duplicated.** On a retriable failure it rewinds the partition
-to its oldest pending batch and stops pipelining it until a request succeeds, so everything
-after the failed batch is resent after it, in order — including batches the broker had
-already written. The order survives; exactly-once does not.
+What the third run's producers retried, by the error that caused the retry:
 
-The textbook failure is Java-shaped. Anyone hunting for reordered events with this client
-would find none, conclude the configuration was fine, and still be charging customers twice.
-The conclusion is the same — leave idempotence on — but the symptom is different.
+| | `REQUEST_TIMED_OUT` — appended, then refused | `NOT_ENOUGH_REPLICAS` — refused before the append | resent by a rewind after a success |
+|---|---|---|---|
+| idempotence off | 2 batches, **80 records** | 8 batches, 262 records | 0 |
+| idempotent | 3 batches, 100 records | 13 batches, 328 records | 0 |
 
-**Not shown:** that franz-go can never reorder. Its own documentation says it "may", and
-three refusal windows are three chances. What was shown is that a retriable refusal from
-the leader turns the reordering into duplication. The reasoning is in the
-[journal](../../../docs/00-journal.md).
+**The duplicates were the timeout, not the client.** The plain producer duplicated 80
+records and retried exactly 80 that the leader had already appended before answering
+`REQUEST_TIMED_OUT`. None came from franz-go rewinding past a batch that had succeeded. Any
+producer without idempotence, Java included, writes those records twice: the broker has
+them, the client was told the request failed, and a retry cannot be told apart from a new
+write. The idempotent producer met the same failure — 100 appended records retried — and the
+broker dropped every retry by its sequence number, so it read back exactly what it produced.
+
+**Nothing was reordered in any run.** In run 3, 262 records refused with
+`NOT_ENOUGH_REPLICAS` were retried, and not one landed behind a later record. The likely reason is franz-go's own:
+after an error on a partition it keeps one request in flight until a request succeeds
+(`okOnSink` in `sink.go`), so nothing later is on the wire to overtake the retry. That is
+read from the source, not isolated by this run.
+
+**Duplicates vary with the timing, and the order does not.** 291, 80 and 80 across three
+runs: how many records are appended inside a timeout window depends on where the freeze
+lands against the stream. The three runs agree on the conclusion, not on the number.
+
+**Not shown:** that franz-go never reorders — its documentation says it "may", and a batch
+refused before the append while the next one is already accepted, from a healthy pipeline
+of five, is the case this failure does not produce. Not shown either: the same run with the
+Java client. The first two runs had no retry counter, so their duplicates are attributed by
+analogy with the third. The reasoning is in the [journal](../../../docs/00-journal.md).
 
 ## Cleaning up
 

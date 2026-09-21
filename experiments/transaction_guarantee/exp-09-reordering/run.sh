@@ -3,8 +3,9 @@
 #
 # The same stream of captures and refunds, produced twice: once with idempotence off and
 # five requests in flight, once idempotent. Each time a follower of a min.insync.replicas=3
-# topic is frozen and thawed several times, so acks=all requests are refused and retried
-# at the edges where the in-sync set shrinks and comes back.
+# topic is frozen and thawed several times: acks=all requests time out after the append while
+# it is still in the in-sync set, are refused before the append once it has been dropped,
+# and are retried either way.
 #
 # Usage: make exp-09
 set -euo pipefail

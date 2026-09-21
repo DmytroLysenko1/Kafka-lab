@@ -5,10 +5,10 @@ meta:
   environment: lab
   description: |
     exp-09, reordering: a steady stream of captures and refunds while a follower is frozen
-    and thawed. min.insync.replicas 3 on three brokers, so freezing a single follower makes
-    every acks=all request fail with NOT_ENOUGH_REPLICAS — a retriable error, which is what
-    makes the producer retry, and the edge where the in-sync set comes back is where an
-    earlier request can fail while a later one lands. One partition, so every request goes
+    and thawed. min.insync.replicas 3 on three brokers: while the frozen follower is still
+    in the in-sync set, acks=all requests are appended and then time out (REQUEST_TIMED_OUT);
+    once it is dropped, they are refused before the append (NOT_ENOUGH_REPLICAS). Both are
+    retriable, which is what makes the producer retry. One partition, so every request goes
     to the same leader and the order is a single sequence to check.
 
 spec:

@@ -66,17 +66,17 @@ the defaults that decide an outcome on their own.
 
 | Setting | Default | Why it matters here |
 |---|---|---|
-| `acks` | `all` — Java since 3.0, and `AllISRAcks` in franz-go | with `1` a leader crash loses acknowledged records (exp-08) |
+| `acks` | `all` — Java since 3.0, and `AllISRAcks` in franz-go | with `1` a leader crash inside the replication window loses acknowledged records — exp-08 held the window open and lost 2 000 of 2 000 |
 | `min.insync.replicas` | `1` | a **topic** setting, not a producer one. At `1`, `acks=all` protects nothing |
 | `replica.lag.time.max.ms` | 30 s | how long a **live but lagging** follower stays in the ISR — a GC pause or a slow disk, not a crash |
 | `broker.session.timeout.ms` | 9 s, with heartbeats every 2 s | what actually removes a **dead** broker from every ISR: the KRaft controller fences it when its session expires. The two timers get conflated constantly, and they answer different questions. exp-04 measured 10.1 s and 10.6 s for a crash, and exp-04c raised this timer to 20 s and measured 20.3 s while the lag timer stayed at 30 s — the reaction tracks this one |
-| `enable.auto.commit` | `true` — franz-go autocommits every 5 s when group consuming | the at-most-once default nobody chose (exp-05) |
+| `enable.auto.commit` | `true` — franz-go autocommits every 5 s when group consuming | at-least-once, not at-most-once: both clients commit only what the *previous* poll returned. It loses records only when handling is asynchronous or franz-go's `AutoCommitGreedy` is on — a commit before the work, which is what exp-05 counts with a manual commit |
 | `auto.offset.reset`, part 1: where a **new group** starts | `latest` in Java, **`AtStart` (earliest) in franz-go** (`ConsumeStartOffset`) | the two clients default in opposite directions: a new group either replays all history or silently skips it |
 | `auto.offset.reset`, part 2: what happens to a **committed offset that fell out of retention** | `latest` or `earliest` in Java, **`RewindOffset(1 minute)` in franz-go** (`ConsumeResetOffset`) | franz-go's own docs say it plainly: *Kafka has no equivalent*. The Go consumer resumes a minute back instead of jumping to either end — one Java setting, two franz-go options, and a third behaviour that does not exist in Java at all. The best entry there is for the "Java parameter → franz-go equivalent" column of the tuning checklist |
 | `compression.type` | `none` in Java, **snappy in franz-go** | the Go producer compresses before you ask it to — 2.1× to 3.3× on payment events depending on how full the batches are (exp-17) |
 | `partition.assignment.strategy` | `[range, cooperative-sticky]` in Java — which negotiates down to eager `range` — **`CooperativeStickyBalancer` in franz-go** | the two clients rebalance differently out of the box. exp-14 has to configure the eager balancer explicitly, or it measures cooperative twice ([08](08-rebalance.md)) |
 | rebalance timeout | `max.poll.interval.ms` 5 min in Java, **`RebalanceTimeout` 60 s in franz-go** | the budget a slow handler gets before the group gives up on it differs by 5× ([03](03-read-path.md)) |
-| `linger.ms` / `batch.size` | 5 ms (0 before Kafka 4.0) / 16 KB in Java, **10 ms / ≈1 MB in franz-go** | franz-go has already traded latency for batching before any tuning happens: 34 records per batch and ~8.5 ms median at 20 000 records/s, against 22 and ~7 ms with Java's 5 ms (exp-17) |
+| `linger.ms` / `batch.size` | 5 ms (0 before Kafka 4.0) / 16 KB in Java, **10 ms / ≈1 MB in franz-go** | franz-go has already traded latency for batching before any tuning happens: 34 records per batch and ~8.5 ms median at 20 000 records/s, against 22 and ~7 ms with franz-go set to Java's 5 ms (exp-17; no Java client was run) |
 | `segment.bytes` / `segment.ms` | 1 GB / 7 days | the active segment is never compacted or deleted |
 | `min.cleanable.dirty.ratio` | `0.5` | compaction does not start until half the log is superseded |
 | `delete.retention.ms` | 24 h | how long tombstones stay visible |

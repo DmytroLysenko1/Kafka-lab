@@ -31,9 +31,11 @@ type views struct {
 }
 
 // judge holds a run to its experiment's claim. Each claim has two halves: the thing Kafka's
-// transaction is supposed to guarantee, and — for 10b and 10c — the thing it is shown not to
-// reach. A run satisfying only the first half would read as a success while demonstrating
-// nothing, so both are required.
+// transaction is supposed to guarantee, and the evidence that the run gave it something to
+// guarantee — for 10a an aborted batch still sitting in the log, for 10b the database rows it
+// did not reach, for 10c the aborted records a read_uncommitted reader is handed. A run
+// satisfying only the first half would read as a success while demonstrating nothing: one
+// whose crash never landed mid-transaction is exact too. So both halves are required.
 func judge(claim Claim, v views) (bool, string) {
 	kafkaExact := v.Committed.exact(v.Produced)
 	switch claim {
@@ -44,7 +46,8 @@ func judge(claim Claim, v views) (bool, string) {
 		return kafkaExact && v.Uncommitted.duplicated() > 0,
 			"read_committed exactly once, and read_uncommitted handed the aborted records"
 	default:
-		return kafkaExact, "read_committed sees every payment exactly once"
+		return kafkaExact && v.Uncommitted.duplicated() > 0,
+			"read_committed exactly once, although a batch was aborted mid-transaction"
 	}
 }
 

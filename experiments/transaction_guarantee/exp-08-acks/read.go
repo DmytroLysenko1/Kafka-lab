@@ -23,9 +23,15 @@ func count(ctx context.Context, cfg *settings, out io.Writer) error {
 		return err
 	}
 
+	// Counted by key, not by length: the acks=1 producer retries without idempotence, so
+	// a duplicated record could otherwise stand in for a lost one and net the loss away.
+	distinct := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		distinct[string(record.Key)] = struct{}{}
+	}
 	return render(out, []string{
-		fmt.Sprintf("readable now\t%d records", len(records)),
-		fmt.Sprintf("lost\t%d of the %d that were acknowledged", max(cfg.records-len(records), 0), cfg.records),
+		fmt.Sprintf("readable now\t%d records, %d distinct", len(records), len(distinct)),
+		fmt.Sprintf("lost\t%d of the %d that were acknowledged", max(cfg.records-len(distinct), 0), cfg.records),
 	})
 }
 

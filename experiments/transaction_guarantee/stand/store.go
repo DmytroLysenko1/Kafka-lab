@@ -11,7 +11,9 @@ import (
 
 // No unique key on payment_id on purpose: a duplicate has to be able to land, or exp-06
 // would be prevented by the schema from demonstrating the thing it exists to demonstrate.
-// The inbox table is where uniqueness lives, and only exp-07 consults it.
+// The inbox table is where uniqueness lives, and only exp-07 consults it. delivery_refused
+// is exp-07's evidence: without a count of the redeliveries the inbox turned away, a clean
+// table cannot be told apart from a run in which nothing was redelivered at all.
 const schema = `
 CREATE TABLE IF NOT EXISTS delivery_handled (
 	handled_seq bigserial PRIMARY KEY,
@@ -25,6 +27,12 @@ CREATE TABLE IF NOT EXISTS delivery_inbox (
 	mode     text NOT NULL,
 	event_id text NOT NULL,
 	PRIMARY KEY (run_id, mode, event_id)
+);
+CREATE TABLE IF NOT EXISTS delivery_refused (
+	refused_seq bigserial PRIMARY KEY,
+	run_id      text NOT NULL,
+	mode        text NOT NULL,
+	payment_id  text NOT NULL
 )`
 
 type store struct {
@@ -54,10 +62,9 @@ func (s *store) record(ctx context.Context, runID string, mode Mode, handled Pay
 // recordOnce claims the event and writes the payment in ONE transaction. Claiming first in
 // its own statement would be the same bug with more steps: the process can die between the
 // claim and the write, and the payment would then be permanently unwritable because the
-// claim already exists. Reports whether this call was the one that handled it.
-func (s *store) recordOnce(ctx context.Context, runID string, mode Mode, handled Payment) (bool, error) {
-	claimed := false
-	err := s.withinTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+// claim already exists. A claim that is already taken is recorded as refused.
+func (s *store) recordOnce(ctx context.Context, runID string, mode Mode, handled Payment) error {
+	return s.withinTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx,
 			`INSERT INTO delivery_inbox (run_id, mode, event_id) VALUES ($1, $2, $3)
 			 ON CONFLICT DO NOTHING`,
@@ -66,7 +73,7 @@ func (s *store) recordOnce(ctx context.Context, runID string, mode Mode, handled
 			return fmt.Errorf("stand: claim event %s: %w", handled.PaymentID, err)
 		}
 		if tag.RowsAffected() == 0 {
-			return nil
+			return refuse(ctx, tx, runID, mode, handled)
 		}
 
 		if _, err := tx.Exec(ctx,
@@ -74,10 +81,19 @@ func (s *store) recordOnce(ctx context.Context, runID string, mode Mode, handled
 			runID, mode, handled.PaymentID, handled.Seq); err != nil {
 			return fmt.Errorf("stand: record claimed payment %s: %w", handled.PaymentID, err)
 		}
-		claimed = true
 		return nil
 	})
-	return claimed, err
+}
+
+// refuse records a redelivery the inbox turned away, in the same transaction as the claim
+// that found it taken.
+func refuse(ctx context.Context, tx pgx.Tx, runID string, mode Mode, handled Payment) error {
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO delivery_refused (run_id, mode, payment_id) VALUES ($1, $2, $3)`,
+		runID, mode, handled.PaymentID); err != nil {
+		return fmt.Errorf("stand: record refused redelivery %s: %w", handled.PaymentID, err)
+	}
+	return nil
 }
 
 func (s *store) withinTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error {
@@ -108,12 +124,15 @@ func ignoreDone(err error) error {
 // happened to remember: the process under test is killed halfway through, so its memory is
 // not evidence of anything.
 func (s *store) counts(ctx context.Context, runID string, mode Mode, produced int) (Tally, error) {
-	var rows, distinct int
+	var rows, distinct, refused int
 	err := s.pool.QueryRow(ctx,
-		`SELECT count(*), count(DISTINCT payment_id) FROM delivery_handled
-		 WHERE run_id = $1 AND mode = $2`, runID, mode).Scan(&rows, &distinct)
+		`SELECT
+		   (SELECT count(*) FROM delivery_handled WHERE run_id = $1 AND mode = $2),
+		   (SELECT count(DISTINCT payment_id) FROM delivery_handled WHERE run_id = $1 AND mode = $2),
+		   (SELECT count(*) FROM delivery_refused WHERE run_id = $1 AND mode = $2)`,
+		runID, mode).Scan(&rows, &distinct, &refused)
 	if err != nil {
 		return Tally{}, fmt.Errorf("stand: count handled payments: %w", err)
 	}
-	return Tally{Produced: produced, Rows: rows, Distinct: distinct}, nil
+	return Tally{Produced: produced, Rows: rows, Distinct: distinct, Refused: refused}, nil
 }

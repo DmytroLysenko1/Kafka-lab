@@ -77,19 +77,17 @@ func verify(ctx context.Context, cfg *Settings, db *store, out io.Writer) error 
 		return err
 	}
 
-	got := counted.Outcome()
-	note := "as expected"
-	if want := cfg.Mode.Expects(); got != want {
-		note = fmt.Sprintf("EXPECTED %q — this run did not demonstrate what it exists to demonstrate", want)
-	}
-
-	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	lines := []string{
 		fmt.Sprintf("%s\tproduced %d, rows %d, distinct %d", cfg.Mode, counted.Produced, counted.Rows, counted.Distinct),
 		fmt.Sprintf("  lost\t%d", counted.Lost()),
 		fmt.Sprintf("  duplicated\t%d", counted.Duplicated()),
-		fmt.Sprintf("  outcome\t%s — %s", got, note),
 	}
+	if cfg.Mode == Inbox {
+		lines = append(lines, fmt.Sprintf("  redelivered, refused by the inbox\t%d", counted.Refused))
+	}
+	lines = append(lines, fmt.Sprintf("  outcome\t%s — %s", counted.Outcome(), cfg.Mode.Verdict(counted)))
+
+	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	for _, line := range lines {
 		if _, err := fmt.Fprintln(table, line); err != nil {
 			return fmt.Errorf("%s: write report: %w", cfg.Name, err)

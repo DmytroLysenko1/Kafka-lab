@@ -1,0 +1,43 @@
+exp-09 — reordering under a frozen follower, producer: idempotent
+date: 2026-09-22-000803
+client: franz-go v1.22.0
+stream: 120s, follower frozen and thawed 3 times
+
+LEADER_P0         3
+FOLLOWER_P0       1
+in-sync replicas  [3 1 2] of [3 1 2]
+
+flap 1: freezing kafka1
+in-sync set shrank after  25.3s
+in-sync replicas          [3 2] of [3 1 2]
+in-sync set whole again after  5s
+in-sync replicas               [1 2 3] of [3 1 2]
+
+flap 2: freezing kafka1
+in-sync set shrank after  25.3s
+in-sync replicas          [2 3] of [3 1 2]
+in-sync set whole again after  5s
+in-sync replicas               [1 2 3] of [3 1 2]
+
+flap 3: freezing kafka1
+in-sync set shrank after  10.1s
+in-sync replicas          [2 3] of [3 1 2]
+in-sync set whole again after  0s
+in-sync replicas               [1 2 3] of [3 1 2]
+
+producer                          idempotent, acks=all
+events produced                   207420
+acknowledged                      207420
+failed                            0
+PRODUCED                          207420
+written, success ignored, resent  0 records — rewound behind a failed batch
+retried, NOT_ENOUGH_REPLICAS      13 batches, 328 records — refused before the append
+retried, REQUEST_TIMED_OUT        3 batches, 100 records — appended before the refusal: the retry duplicates it unless the producer is idempotent
+
+producer                 idempotent, acks=all
+produced                 207420, read back 207420, distinct 207420
+  out of order           0
+  refund before capture  0 payments
+  duplicated             0
+  missing                0
+  verdict                held, as it must

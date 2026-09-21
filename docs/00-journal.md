@@ -708,7 +708,7 @@ with the default ≈1 MB ceiling the producer waited it out and the median was 3
 16 KiB of batch the two ceilings measured identically — the knob does nothing until batches
 reach it.
 
-**What this means for the two clients.** franz-go's 10 ms against Java's 5 ms costs 1.5–2 ms
+**What this means for the two clients.** franz-go's 10 ms against franz-go set to Java's 5 ms — no Java client was run, and the two lingers are not the same mechanism — costs 1.5–2 ms
 of median latency and about 5 ms of p99, and buys batches half as large again and 4–8% better
 compression. That is a defensible default for a service; it is not the free lunch the
 "Go is cheaper" comparison sometimes assumes, and it is not the 10 ms penalty the other side
@@ -729,3 +729,71 @@ is exp-17b, listed as outstanding.
 **Carried into:** the `linger.ms`, `batch.size` and `compression.type` rows of
 [`tuning-checklist.md`](tuning-checklist.md), [`static/01-write-path.md`](static/01-write-path.md)
 and the defaults table in [`static/README.md`](static/README.md).
+
+
+## Audit of exp-05…17 — six claims that did not survive a second reading
+
+Date: 2026-09-22 · two independent read-throughs of every experiment in
+`transaction_guarantee` against its code, franz-go's source and the run logs, then fixes,
+reruns and a second read-through. The earlier entries above stay as written; this one
+records what they got wrong, because a claim that was published and then withdrawn is
+worth more than one quietly edited.
+
+**Autocommit is not at-most-once by default.** The checklist, the defaults table and
+case 05 said "at-most-once by default (exp-05)". franz-go's own source says the opposite —
+the one-poll lag in `consumer_group.go` "is what makes default autocommit at-least-once" —
+and Java behaves the same in a synchronous poll loop. Autocommit loses records only when the
+handler hands them to another goroutine and polls on, or with `AutoCommitGreedy`. exp-05
+never measured autocommit at all: it commits by hand, before the write. Every mention now
+says so.
+
+**exp-07 could not tell deduplication from no redelivery.** "This run was delivered the
+duplicates too" rested on nothing in the log: the claim result of each inbox write was
+discarded. A redelivery the inbox refuses is now written to `delivery_refused` in the same
+transaction, and the verdict fails a clean table with no refusals. The rerun refused
+exactly 50 ([run](../experiments/transaction_guarantee/exp-07-inbox/results/run-2026-09-21-234218.log)).
+
+**exp-08's `acks=1` half could not lose anything.** The leader was killed after all 2 000
+acknowledgements had returned, by which time local followers had everything; "lost 0,
+the window did not open" was not luck but construction. Both followers are now paused
+before the write, the leader killed, the followers thawed: 2 000 acknowledged, 0 readable
+([run](../experiments/transaction_guarantee/exp-08-acks/results/acks-one-2026-09-22-000605.log)).
+The first audit pass then asked whether that loss leaned on the stand — pausing two combined
+nodes also freezes the KRaft quorum, which is why the followers stay in the in-sync set. The
+pause is now timed: 1 s against a 9 s `broker.session.timeout.ms`, so a live quorum would
+not have fenced them either. The counter also reads distinct keys now, since a
+non-idempotent retry could otherwise hide a loss behind a duplicate.
+
+**exp-09's duplicates were a timeout, not franz-go.** The entry above explains 291
+duplicates by franz-go rewinding past batches that had already landed. That was inferred
+from the source, not counted. Counting it needed franz-go's debug-level per-response summary,
+since the client retries silently at every other level: on the first try an info-level
+counter found "none" while the run had 80 duplicates. Counted, every duplicate is a record
+the leader appended and then answered `REQUEST_TIMED_OUT` for — the frozen follower was
+still in the in-sync set, so the leader waited out the 10 s produce timeout — and the
+rewind resent nothing. In the final run the plain producer duplicated 80 records and had retried exactly 80 appended-then-timed-out ones ([run](../experiments/transaction_guarantee/exp-09-reordering/results/plain-2026-09-22-000803.log)); the idempotent producer retried 100 such records and read none back twice ([run](../experiments/transaction_guarantee/exp-09-reordering/results/idempotent-2026-09-22-000803.log)). Any client without idempotence duplicates
+those records, so the finding is not a franz-go trait. The absence of reordering probably
+is, through its one-in-flight-after-an-error gate, but that is read from the source.
+
+**exp-10a showed an aborted output, not rolled-back offsets.** franz-go's
+`GroupTransactSession` puts the offsets into the transaction only inside `End`, and the
+process died before `End`, so there were no offsets to roll back — they never moved. The
+wording now says so, and the verdict requires the aborted batch to be present, since a run
+whose crash missed the transaction would be exact too. The rerun holds to it: `read_committed` 1 000 of 1 000 with the aborted 50 present under `read_uncommitted` ([run](../experiments/transaction_guarantee/exp-10a-rollback/results/run-2026-09-22-001224.log)).
+
+**exp-17's `acked/s` could never show a backlog,** because it divided by the same window
+as `offered/s`. It is replaced by `drain`, the time from the last record offered to the last
+acknowledgement: 1.3–11.9 ms in all 32 cells, so "no cell fell behind" is now measured
+([run 3](../experiments/transaction_guarantee/exp-17-batching-sweep/results/run-2026-09-21-235508.log)).
+Two readings were also corrected: the "Java 5 ms" row is franz-go set to Java's value, and
+at 50 ms the 16 KiB batches did not fill — they averaged about 10 KB, because franz-go sends
+every partition bound for a broker once any one is ready.
+
+**Instruments that read a client's hooks or logs close the client first.** The
+concurrency review found that `Flush` orders only the record promises; franz-go runs the
+batch-written hook and the debug summary from a defer after them. exp-09 and exp-17 now
+read those counts after `Close`.
+
+**Still not measured:** rebalancing strategies (exp-14), consumer lag and backpressure
+(exp-16), throughput and codec CPU at saturation (exp-17b), autocommit itself, `acks=all`
+at `min.insync.replicas=1`, and exp-09 with the Java client.

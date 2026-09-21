@@ -188,8 +188,8 @@ whoever restarts a broker — skipped after each restart, leadership drifts onto
 | Run | What it shows | Status |
 |---|---|---|
 | exp-04b | `unclean.leader.election.enable=true`: acknowledged records missing after promotion, counted | blocked — see below |
-| exp-08 | `acks=1` vs `acks=all` with `min.insync.replicas=3` under the same kill | **measured**: `acks=all` refused all 2 000 with `NOT_ENOUGH_REPLICAS` once a broker died, and accepted all 2 000 before it [run](../../experiments/transaction_guarantee/exp-08-acks/results/acks-all-2026-09-21-183122.log) |
-| exp-08c | the `acks=1` loss itself, with the follower genuinely held back | TBD — replication throttling cannot do it (it does not restrain in-sync replicas), so this needs a follower paused rather than throttled |
+| exp-08 | `acks=all` with `min.insync.replicas=3` under one broker kill — a different failure from the `acks=1` half, which is exp-08c below; `acks=all` under the same frozen-follower pause is what exp-09 shows: appended, never acknowledged, `REQUEST_TIMED_OUT` | **measured**: `acks=all` refused all 2 000 with `NOT_ENOUGH_REPLICAS` once a broker died, and accepted all 2 000 before it [run](../../experiments/transaction_guarantee/exp-08-acks/results/acks-all-2026-09-21-183122.log) |
+| exp-08c | the `acks=1` loss itself, with the follower genuinely held back | **measured**, now the `acks=1` half of exp-08: both followers paused, 2 000 acknowledged, the leader killed, a follower elected — 0 readable, 2 000 lost [run](../../experiments/transaction_guarantee/exp-08-acks/results/acks-one-2026-09-22-000605.log). Throttling could not do it (it does not restrain in-sync replicas); pausing does |
 
 exp-04b cannot run on this stand. Promoting an out-of-sync replica requires the ISR to
 collapse onto one, which on three combined broker/controller nodes means killing two of
