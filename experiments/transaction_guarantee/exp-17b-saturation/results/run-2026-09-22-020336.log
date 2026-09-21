@@ -1,0 +1,16 @@
+exp-17b — linger x codec with the producer flat out
+date: 2026-09-22-020336
+client: franz-go v1.22.0
+load: as fast as the client's 10 000-record buffer allows, for 10s per cell, acks=all, 6 partitions, RF 3
+payload: 200 000 generated payment events, seeded, generated before the sweep and cycled
+host: Apple M1 Pro, 10 CPUs; brokers share it
+
+  linger    batch   codec  acked/s  MB/s in  MB/s wire  wire ratio  CPU ms/MB     p50      p99  failed
+      0s  default    none   294962     74.0       74.0        1.00        4.5  15.9ms  665.6ms       0
+      0s  default  snappy   564080    141.5       42.2        3.35        4.7   7.1ms   52.8ms       0
+      0s  default     lz4   782382    196.3       55.5        3.53        5.1   6.1ms   19.1ms       0
+      0s  default    zstd   692088    173.6       30.0        5.78        7.5   6.8ms   20.7ms       0
+    10ms  default    none   248083     62.2       62.2        1.00        4.9  20.3ms  897.6ms       0
+    10ms  default  snappy   591971    148.5       44.3        3.35        4.7   6.9ms   23.1ms       0
+    10ms  default     lz4   629212    157.8       44.6        3.54        5.1   6.4ms   22.9ms       0
+    10ms  default    zstd   590608    148.2       25.6        5.79        7.3   6.9ms   41.4ms       0

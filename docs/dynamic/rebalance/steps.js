@@ -41,7 +41,7 @@ Walkthrough.register({
 
     { kind: "msg", from: "coord", to: "b", label: "SyncGroup: p2, p3", reply: true,
       t: "B finally starts working",
-      d: "The group is whole again. The gap between the revocation and the first commit after this arrow is precisely what exp-14 measures." },
+      d: "The group is whole again. exp-14 measures the gap from the revocation to the first record handled after this arrow: with two members on a local network it was 45–61 ms, no longer than an ordinary poll cycle." },
 
     { kind: "msg", from: "a", to: "coord", label: "JoinGroup keeping the current assignment",
       t: "Run 2, cooperative — same event, different protocol",
@@ -71,7 +71,7 @@ Walkthrough.register({
 
     { kind: "note", at: ["a", "b"], lines: ["measure the gap,", "not the rebalance count"],
       t: "What to actually measure",
-      d: "Rebalance frequency on its own says nothing. The number worth reporting is processing downtime — the interval during which the group produced no committed progress at all. exp-14 runs both assignors under identical load.",
+      d: "Rebalance frequency on its own says nothing. The number worth reporting is processing downtime — how long each partition went unhandled. exp-14 measured it under identical load: eager stopped all six partitions for 45–61 ms, cooperative stopped only the three that moved, for 0.51–0.68 s, and KIP-848 stopped those three for 5.0–6.5 s, its heartbeat interval.",
       r: "A group that rebalances often but never stalls is healthier than one that rebalances rarely and freezes for thirty seconds when it does. Static membership (group.instance.id) plus a session timeout longer than a pod restart removes most rebalances from a rolling deploy entirely." }
   ]
 });

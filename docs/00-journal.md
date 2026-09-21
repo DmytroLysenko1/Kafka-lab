@@ -743,7 +743,7 @@ worth more than one quietly edited.
 case 05 said "at-most-once by default (exp-05)". franz-go's own source says the opposite —
 the one-poll lag in `consumer_group.go` "is what makes default autocommit at-least-once" —
 and Java behaves the same in a synchronous poll loop. Autocommit loses records only when the
-handler hands them to another goroutine and polls on, or with `AutoCommitGreedy`. exp-05
+handler hands them to another goroutine and polls on, or with `GreedyAutoCommit`. exp-05
 never measured autocommit at all: it commits by hand, before the write. Every mention now
 says so.
 
@@ -784,7 +784,7 @@ whose crash missed the transaction would be exact too. The rerun holds to it: `r
 **exp-17's `acked/s` could never show a backlog,** because it divided by the same window
 as `offered/s`. It is replaced by `drain`, the time from the last record offered to the last
 acknowledgement: 1.3–11.9 ms in all 32 cells, so "no cell fell behind" is now measured
-([run 3](../experiments/transaction_guarantee/exp-17-batching-sweep/results/run-2026-09-21-235508.log)).
+(the log of that run is superseded; see the entry below).
 Two readings were also corrected: the "Java 5 ms" row is franz-go set to Java's value, and
 at 50 ms the 16 KiB batches did not fill — they averaged about 10 KB, because franz-go sends
 every partition bound for a broker once any one is ready.
@@ -797,3 +797,125 @@ read those counts after `Close`.
 **Still not measured:** rebalancing strategies (exp-14), consumer lag and backpressure
 (exp-16), throughput and codec CPU at saturation (exp-17b), autocommit itself, `acks=all`
 at `min.insync.replicas=1`, and exp-09 with the Java client.
+
+
+## exp-05b, 06b, 14, 16, 17b — the rest of KR2
+
+Date: 2026-09-22 · run logs under each experiment's `results/`
+
+**Autocommit, measured rather than quoted (exp-05b, exp-06b).** The audit above corrected
+the docs from franz-go's source; these two runs put numbers on it. Both kill the consumer at
+the same moment — past 500 handled, right after an autocommit has landed inside the batch
+being written — and differ only in the flavour. Greedy lost the unwritten rest of the batch,
+38 and 41 payments; the default lost nothing and wrote 12 twice, both runs. *What the
+instrument got wrong first:* the kill waited for two autocommits after the poll, on the
+theory that the first might have been sent before it. It never fired, because franz-go
+does not send an autocommit when nothing has changed, so a batch sees one. The kill now
+reads what the client has committed and, for greedy, waits until that covers the batch.
+100 ms is also the shortest autocommit interval franz-go accepts; the first attempt asked
+for 20 and was refused at start-up.
+
+**Rebalancing (exp-14): the textbook difference, and not the textbook costs.** Eager
+revoked all six partitions when a second member joined — and stopped them for 45–61 ms, no
+longer than an ordinary poll cycle, because with two members, a fast handler and a local
+network the round is that short. Cooperative stopped only the three that moved, but for
+0.51–0.68 s: franz-go notices its second round with a heartbeat 500 ms after the first
+(`cooperativeFastCheck` in `consumer_group.go`). KIP-848 stopped the moved three for
+5.0–6.5 s, its consumer heartbeat interval, read off the broker as 5 000 ms. None of the
+strategies stopped partitions that did not move except eager, which moved everything.
+Holding rebalances off while handling 2 ms records changed none of this at a load the
+member kept up with. *What the instrument got wrong first:* 312 records handled twice under
+cooperative. The callback registered to log revocations had replaced franz-go's default
+one, which is what commits before partitions go; with the commit restored every run reports
+zero. The number was published nowhere, but it would have read as a property of
+cooperative rebalancing.
+
+**Lag and backpressure (exp-16): lag is the outage, the group is the handler.** Through a
+20 s dependency outage with a member joining in the middle, both handlers built the same
+backlog and drained it in the same 10–13 s. What differed is everything lag does not show.
+Retrying inline under `BlockRebalanceOnPoll` held the rebalance: the newcomer waited
+exactly the 8 s rebalance timeout, the coordinator removed the blocked member without
+telling it, and it learnt of it at 35.4 s, when the dependency answered and its commit was
+refused with `UNKNOWN_MEMBER_ID`. Then the
+surprise: that member handled a few more records it had fetched before the outage, rejoined,
+and its next commit was *accepted* — and moved a partition's committed offset back
+1 726–1 732 records, in every run. When the rewound partition went to it next, it handled
+1 739 records a second time; when it stayed with the member already past it, the next commit
+covered the rewind. One run in three. Pausing fetches and rewinding to the first unhandled
+record showed none of it. *What the instrument got wrong first,* three times over: the
+producer truncated 300 records a second to 200, because 1.5 records per 5 ms tick rounds
+down — both lag experiments now refuse a rate that is not a whole number per tick; a
+"partitions lost" count read zero while a member had plainly been removed, because franz-go
+did not call `OnPartitionsLost` for it; and the first rewind detector compared every commit
+with the highest offset ever committed, so the removed member's catch-up commits all read as
+rewinds. The rewind is now judged against the last accepted commit only.
+
+**Throughput and codec CPU (exp-17b): compression bought throughput.** Flat out, with no
+codec the producer stalled at 70–79 MB/s on the wire; every codec put less on the wire and
+delivered more records — zstd 2.4–2.8× as many, for 52–67% more producer CPU per megabyte.
+On this stand the brokers share the laptop and write every byte three times, so bytes were
+the first ceiling. Two derived numbers in the first draft of the write-up were ratios taken
+across different runs; every ratio is now taken within one run and one linger.
+
+**What still cannot be shown here:** `acks=all` at `min.insync.replicas=1` losing like
+`acks=1` needs the in-sync set shrunk to one, and on three combined broker and controller
+nodes that takes the KRaft quorum down with it. `min.insync.replicas=2` is measured in
+exp-04 and 3 in exp-08.
+
+**Carried into:** the autocommit, assignment, rebalance-timeout, backpressure, compression
+and "not measured here" parts of [`tuning-checklist.md`](tuning-checklist.md), cases
+[03](static/03-read-path.md), [05](static/05-delivery-semantics.md),
+[07](static/07-retry-dlq.md) and [08](static/08-rebalance.md), and the defaults table in
+[`static/README.md`](static/README.md).
+
+
+## The hook that Close does not wait for — and what it moved
+
+Date: 2026-09-22 · a concurrency review of the new experiments, then a second independent
+audit of the whole group, then reruns
+
+**The instrument was reading a counter nobody had finished writing.** exp-17 and exp-17b
+take their byte columns from franz-go's batch-written hook. The entry above says those are
+read after `Close`, on the reasoning that `Close` orders what `Flush` does not. It does not:
+franz-go dispatches that hook in a goroutine of its own (`go func()` in `produceMetrics.hook`,
+its `sink.go`) which neither `Flush` nor `Close` joins. Both sweeps now wait until the hook
+has accounted for every acknowledged record, and fail the cell if it never does.
+
+**That was not a rounding error.** Rerun with the wait, the same grid measures 4.2–8.5
+records per batch at linger 0 against the ≈5 published before, and zstd 2.9–3.7× against
+2.87–3.22×. The cells that lose the most are exactly the ones with the smallest, most
+numerous batches — the tail of a cell is a larger share of it. Every exp-17 and exp-17b
+figure in this repository now comes from a run that waits; the superseded logs were deleted
+rather than kept as a second opinion, since they measure the same thing worse.
+
+**exp-14 was committing more than it had handled.** Its revoke callback replaced franz-go's
+default one and called `CommitUncommittedOffsets`, which stores everything the last poll
+returned. franz-go's own callback deliberately stores the *previous* poll instead, so that a
+revoke arriving while the handler is still working cannot mark unhandled records as done.
+Without `BlockRebalanceOnPoll` — half this experiment's runs — that is a loss window. The
+handler now marks each record it has handled and the callback commits only those, and the
+run counts what nobody handled as well as what was handled twice: two runs of all six
+configurations report zero of each. Its published ranges are those two runs: eager 39–75 ms,
+cooperative 0.52–0.68 s on what moved, KIP-848 4.9–6.5 s — the same shape as the entry above,
+measured again after the fix.
+
+**Two deadlines that were missing.** The same revoke callback held the rebalance while
+committing with no timeout of its own, and a member polling with `BlockRebalanceOnPoll`
+waits for that callback on a condition variable no context can interrupt — a slow broker
+would have hung the run past its deadline. And exp-14's handler slept per record without
+looking at the context, so a batch of 200 could outlast a cancellation by seconds. Both are
+bounded now.
+
+**What the audit found in the writing, not the code.** The root README claimed `TBD` rows
+that no longer exist and listed exp-14 and exp-16 as outstanding; case 01 cited the two
+exp-17 runs that, by this repository's own admission, could not have shown a backlog;
+exp-08's replication-throttle paragraph and exp-14's first instrument failure quoted numbers
+whose logs were not kept, and now say so; "the three that stayed never stopped" was one
+240 ms reading away from being true, and is now stated as the baseline it actually was.
+Four gaps that were neither measured nor admitted — static membership and a rebalance from a
+member leaving, consumer-side fetch sizing, the other backpressure levers, and
+`AutoCommitMarks` as a commit strategy — are now listed in the checklist's "Not measured
+here".
+
+**Not everything the audit reported was real:** it read exp-09's test package as missing
+`goleak`, which it has had since the package was written.

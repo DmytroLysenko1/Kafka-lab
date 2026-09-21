@@ -27,7 +27,14 @@ const (
 	defaultBatchBytes = 1_000_012
 )
 
-var errShape = errors.New("exp-17: -rate or -duration out of range")
+var (
+	errShape    = errors.New("exp-17: -rate or -duration out of range")
+	errHookLate = errors.New("exp-17: the client's batch metrics never caught up with what it acknowledged")
+)
+
+// hookWait bounds that catching up: franz-go dispatches the batch-written hook without
+// joining it, so the wait is on the number of records, with a deadline.
+const hookWait = 5 * time.Second
 
 type codec struct {
 	name  string
@@ -56,6 +63,7 @@ type settings struct {
 	rate     int
 	duration time.Duration
 	timeout  time.Duration
+	saturate bool
 }
 
 // point is one cell of the sweep.
@@ -91,6 +99,7 @@ func run() error {
 	flag.IntVar(&cfg.rate, "rate", 20_000, "records offered per second, held constant across the sweep")
 	flag.DurationVar(&cfg.duration, "duration", 10*time.Second, "how long each cell is offered load")
 	flag.DurationVar(&cfg.timeout, "timeout", 20*time.Minute, "deadline for the whole sweep")
+	flag.BoolVar(&cfg.saturate, "saturate", false, "exp-17b: produce flat out instead of at -rate")
 	flag.Parse()
 
 	if cfg.rate <= 0 || cfg.rate > maxRate || cfg.duration <= 0 || cfg.duration > time.Minute {
@@ -102,6 +111,9 @@ func run() error {
 	ctx, cancel := context.WithTimeout(ctx, cfg.timeout)
 	defer cancel()
 
+	if cfg.saturate {
+		return saturationSweep(ctx, &cfg, os.Stdout)
+	}
 	return sweep(ctx, &cfg, os.Stdout)
 }
 
@@ -170,11 +182,13 @@ func measure(ctx context.Context, cfg *settings, cell point) (outcome, error) {
 	}
 
 	got, err := offerAndFlush(ctx, client, cfg, cell)
-	// Closed before the wire totals are read, not deferred: Flush orders only the record
-	// promises, and franz-go runs the batch-written hook from a defer after them, so the
-	// last batch of the cell could otherwise be missing from the byte counts.
 	client.Close()
 	if err != nil {
+		return outcome{}, err
+	}
+	// Only now are the bytes read, and only once the hook has seen every acknowledged
+	// record: Close does not wait for it.
+	if err := sent.await(ctx, len(got.lat), hookWait); err != nil {
 		return outcome{}, err
 	}
 	got.sentWire = sent.total()
@@ -205,7 +219,7 @@ func offer(ctx context.Context, client *kgo.Client, cfg *settings, rec *recorder
 	defer ticker.Stop()
 	stop := time.After(cfg.duration)
 	perTick := max(cfg.rate*int(tick)/int(time.Second), 1)
-	source := newPayloads(17)
+	source := newPayloads()
 
 	offered := 0
 	for {
@@ -252,7 +266,10 @@ func (r *recorder) snapshot() outcome {
 }
 
 // wireHook sums the client's own per-batch metrics: what actually went over the wire,
-// compressed, rather than an estimate from the payload.
+// compressed, rather than an estimate from the payload. franz-go calls it from a goroutine
+// of its own that nothing joins — not Flush, not Close (`produceMetrics.hook` in its
+// sink.go) — so a reader has to wait for the records it expects rather than for the client.
+
 type wireHook struct {
 	mu   sync.Mutex
 	seen wire
@@ -271,4 +288,33 @@ func (h *wireHook) total() wire {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.seen
+}
+
+// await waits until the hook has accounted for every record the client acknowledged. It
+// polls because the hook's goroutine is franz-go's and offers nothing to wait on; a cell
+// whose bytes never arrive is an error, not a quietly short number.
+func (h *wireHook) await(ctx context.Context, records int, within time.Duration) error {
+	deadline := time.Now().Add(within)
+	for {
+		if h.total().Records >= records {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%w: %d of %d records after %s", errHookLate, h.total().Records, records, within)
+		}
+		if !sleep(ctx, time.Millisecond) {
+			return fmt.Errorf("exp-17: waiting for the batch metrics: %w", ctx.Err())
+		}
+	}
+}
+
+func sleep(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }

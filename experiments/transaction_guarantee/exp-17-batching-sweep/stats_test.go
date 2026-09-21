@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/twmb/franz-go/pkg/kgo"
 	"go.uber.org/goleak"
 )
 
@@ -75,7 +77,7 @@ func TestWireRatiosSurviveEmptyRuns(t *testing.T) {
 // The compression numbers are only worth publishing if the payload is not trivially
 // compressible, and only comparable across codecs if every codec saw the same bytes.
 func TestPayloadsAreReproducibleAndNotPadding(t *testing.T) {
-	first, second := newPayloads(17), newPayloads(17)
+	first, second := newPayloads(), newPayloads()
 	var previous []byte
 	for range 50 {
 		k1, v1 := first.next()
@@ -106,5 +108,20 @@ func TestGridCoversEveryCombinationOnce(t *testing.T) {
 			t.Errorf("cell %s appears twice", key)
 		}
 		seen[key] = true
+	}
+}
+
+func TestWireHookAwaitWaitsForTheRecordsTheClientAcknowledged(t *testing.T) {
+	// The hook franz-go calls from a goroutine nothing joins: the bytes of the last batch
+	// can land after Close, so a short count has to be an error rather than a quiet zero.
+	hook := &wireHook{}
+	hook.OnProduceBatchWritten(kgo.BrokerMetadata{}, topic, 0, kgo.ProduceBatchMetrics{NumRecords: 40})
+
+	if err := hook.await(t.Context(), 40, 50*time.Millisecond); err != nil {
+		t.Errorf("await of what the hook already saw: %v", err)
+	}
+	err := hook.await(t.Context(), 41, 20*time.Millisecond)
+	if !errors.Is(err, errHookLate) {
+		t.Errorf("await of a record the hook never saw = %v, want %v", err, errHookLate)
 	}
 }

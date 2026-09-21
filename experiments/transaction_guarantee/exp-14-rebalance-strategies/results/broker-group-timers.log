@@ -1,0 +1,2 @@
+  group.consumer.heartbeat.interval.ms=5000 sensitive=false synonyms={DEFAULT_CONFIG:group.consumer.heartbeat.interval.ms=5000}
+  group.initial.rebalance.delay.ms=0 sensitive=false synonyms={STATIC_BROKER_CONFIG:group.initial.rebalance.delay.ms=0, DEFAULT_CONFIG:group.initial.rebalance.delay.ms=3000}

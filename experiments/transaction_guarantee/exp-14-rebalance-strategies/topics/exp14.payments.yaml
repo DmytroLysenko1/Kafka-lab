@@ -1,0 +1,21 @@
+meta:
+  name: exp14.payments
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-14, rebalancing: a steady stream spread evenly over six partitions while a second
+    consumer joins the group, once per assignment strategy. Six partitions so the join has
+    something to move and something to leave in place — which is exactly where eager and
+    cooperative rebalancing differ. RF 3 and min.insync.replicas 2 match the catalog; the
+    experiment is about the consumer group, not the log.
+
+spec:
+  partitions: 6
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

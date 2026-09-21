@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
+	"time"
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -12,20 +14,20 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 )
 
-// consume reads the run and writes it to Postgres. Which of the three semantics it
-// demonstrates is decided entirely by where CommitRecords sits relative to the write.
+// The autocommit modes are timed so that the kill can land right after an autocommit, which
+// is the only moment the two flavours differ. 100 ms is the shortest interval franz-go
+// accepts, and 5 ms a record makes a batch of 50 last about 250 ms, so an autocommit lands
+// inside every batch. Neither value is advice.
+const (
+	autocommitInterval    = 100 * time.Millisecond
+	autocommitHandleDelay = 5 * time.Millisecond
+)
+
+// consume reads the run and writes it to Postgres. Which semantics it demonstrates is
+// decided entirely by when the offset is committed relative to the write.
 func consume(ctx context.Context, cfg *Settings, db *store) error {
 	group := fmt.Sprintf("%s-%s", cfg.Name, cfg.RunID)
-	client, err := kgo.NewClient(
-		kgo.SeedBrokers(strings.Split(cfg.Brokers, ",")...),
-		kgo.ConsumeTopics(cfg.Topic),
-		// One group per run, so a restarted process resumes where the killed one committed
-		// — which is the whole mechanism under test — while a later run starts from
-		// nothing.
-		kgo.ConsumerGroup(group),
-		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
-		kgo.DisableAutoCommit(),
-	)
+	client, err := kgo.NewClient(clientOptions(cfg, group)...)
 	if err != nil {
 		return fmt.Errorf("%s: kafka client: %w", cfg.Name, err)
 	}
@@ -47,6 +49,7 @@ func consume(ctx context.Context, cfg *Settings, db *store) error {
 		if err != nil {
 			return err
 		}
+		run.polled(fetches)
 		if err := run.apply(ctx, fetches, batch); err != nil {
 			return err
 		}
@@ -61,14 +64,78 @@ func consume(ctx context.Context, cfg *Settings, db *store) error {
 	return nil
 }
 
+func clientOptions(cfg *Settings, group string) []kgo.Opt {
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(strings.Split(cfg.Brokers, ",")...),
+		kgo.ConsumeTopics(cfg.Topic),
+		// One group per run, so a restarted process resumes where the killed one committed
+		// — which is the whole mechanism under test — while a later run starts from
+		// nothing.
+		kgo.ConsumerGroup(group),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+	}
+	if !cfg.Mode.AutoCommits() {
+		return append(opts, kgo.DisableAutoCommit())
+	}
+	opts = append(opts, kgo.AutoCommitInterval(autocommitInterval))
+	if cfg.Mode == AutoCommitGreedy {
+		opts = append(opts, kgo.GreedyAutoCommit())
+	}
+	return opts
+}
+
 type consumer struct {
 	cfg     *Settings
 	db      *store
 	client  *kgo.Client
 	handled int
+	// For the autocommit modes: what this client had committed when the current batch was
+	// polled, and the offset just past the batch on each of its partitions.
+	committedAtPoll map[int32]int64
+	batchEnd        map[int32]int64
+}
+
+func (c *consumer) polled(fetches kgo.Fetches) {
+	if !c.cfg.Mode.AutoCommits() {
+		return
+	}
+	c.committedAtPoll = c.committed()
+	c.batchEnd = make(map[int32]int64)
+	fetches.EachRecord(func(record *kgo.Record) {
+		c.batchEnd[record.Partition] = max(c.batchEnd[record.Partition], record.Offset+1)
+	})
+}
+
+// committed is what the broker has accepted from this client's commits, per partition.
+func (c *consumer) committed() map[int32]int64 {
+	offsets := make(map[int32]int64)
+	for partition, at := range c.client.CommittedOffsets()[c.cfg.Topic] {
+		offsets[partition] = at.Offset
+	}
+	return offsets
+}
+
+// autocommitLanded decides when the autocommit modes may die. Greedy waits until an
+// autocommit covers the whole batch being written, which is the commit that makes its unwritten
+// rest unreachable. The default waits until any autocommit has landed since the poll: it
+// commits what the previous poll returned, so the batch being written stays uncommitted
+// either way, and the run shows that.
+func autocommitLanded(mode Mode, atPoll, now, batchEnd map[int32]int64) bool {
+	if mode != AutoCommitGreedy {
+		return !maps.Equal(atPoll, now)
+	}
+	for partition, end := range batchEnd {
+		if now[partition] < end {
+			return false
+		}
+	}
+	return len(batchEnd) > 0
 }
 
 func (c *consumer) apply(ctx context.Context, fetches kgo.Fetches, batch []Payment) error {
+	if c.cfg.Mode.AutoCommits() {
+		return c.writeAll(ctx, batch)
+	}
 	if c.cfg.Mode.CommitsFirst() {
 		if err := c.commit(ctx, fetches); err != nil {
 			return err
@@ -87,6 +154,9 @@ func (c *consumer) writeAll(ctx context.Context, batch []Payment) error {
 		if err := c.write(ctx, handled); err != nil {
 			return err
 		}
+		if c.cfg.Mode.AutoCommits() {
+			time.Sleep(autocommitHandleDelay)
+		}
 		c.handled++
 		if c.shouldDie(i == len(batch)-1) {
 			labkit.Crash(c.cfg.Name+": killing this consumer", "mode", c.cfg.Mode, "handled", c.handled)
@@ -101,11 +171,23 @@ func (c *consumer) writeAll(ctx context.Context, batch []Payment) error {
 // exactly what was written and the run proves nothing. The first live run did precisely
 // that — 500 handled fell on a batch boundary, and the report read "every payment exactly
 // once" for the semantics that is supposed to lose them.
+//
+// Under autocommit the kill waits for an autocommit to land inside the batch and for records
+// of the batch to remain unwritten. Then the two flavours differ in exactly one thing: greedy
+// has just committed this batch, so its unwritten rest is lost; the default has committed
+// only the previous batch, so the written part of this one is replayed.
 func (c *consumer) shouldDie(lastOfBatch bool) bool {
 	if c.cfg.DieAfter <= 0 || c.handled < c.cfg.DieAfter {
 		return false
 	}
-	return !c.cfg.Mode.CommitsFirst() || !lastOfBatch
+	switch {
+	case c.cfg.Mode.AutoCommits():
+		return !lastOfBatch && autocommitLanded(c.cfg.Mode, c.committedAtPoll, c.committed(), c.batchEnd)
+	case c.cfg.Mode.CommitsFirst():
+		return !lastOfBatch
+	default:
+		return true
+	}
 }
 
 func (c *consumer) write(ctx context.Context, handled Payment) error {

@@ -1,0 +1,11 @@
+exp-10c — the same crash read with read_uncommitted: the aborted records are delivered
+date: 2026-09-22-022300
+client: franz-go v1.22.0
+payments: 1000, processor killed mid-transaction at the first batch that takes it to 525 handled
+
+2026/09/22 02:23:12 WARN exp-10c: killing the processor mid-transaction handled=550
+experiments/transaction_guarantee/exp-10c-read-uncommitted/run.sh: line 25: 83394 Killed: 9               "$binary" -run-id "$run_id" -payments "$payments" "$@"
+payments          1000 seeded
+read_committed    1000 rows, 1000 distinct, 0 duplicated
+read_uncommitted  1050 rows, 1000 distinct, 50 duplicated
+claim             read_committed exactly once, and read_uncommitted handed the aborted records — as expected

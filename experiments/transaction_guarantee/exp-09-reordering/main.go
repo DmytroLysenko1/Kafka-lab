@@ -157,10 +157,11 @@ func produce(ctx context.Context, cfg *settings, out io.Writer) error {
 
 	sent, err := streamAndFlush(ctx, client, cfg, promise)
 	// Closed before seen is read, not deferred: Flush orders only the record promises, and
-	// franz-go logs each response's debug summary — what seen counts — from a defer that
-	// runs after them. Close cancels the client and stops every broker first, which lets
-	// those last summaries land; the retries this run counts all happen mid-stream, while
-	// a follower is frozen, never in the healthy tail.
+	// franz-go logs each response's debug summary — what seen counts — from a defer in the
+	// goroutine handling that response, which nothing joins. Close cancels the client and
+	// stops every broker first, which is as close to a barrier as this gets; what makes the
+	// count sound is that every retry it reports happens mid-stream, while a follower is
+	// frozen, and never in the healthy tail.
 	client.Close()
 	if err != nil {
 		return err

@@ -23,7 +23,11 @@ type payloads struct {
 	seq    int
 }
 
-func newPayloads(seed uint64) *payloads {
+// payloadSeed is fixed so that every cell of both sweeps compresses the same bytes.
+const payloadSeed = 17
+
+func newPayloads() *payloads {
+	const seed = payloadSeed
 	// Deliberately not crypto/rand: these are test payloads, and what they need is the
 	// opposite of unpredictability — the same seed must give the same bytes, so every codec
 	// compresses the identical input. crypto/rand cannot be seeded.
