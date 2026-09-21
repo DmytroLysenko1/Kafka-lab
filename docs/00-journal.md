@@ -342,3 +342,71 @@ is the one for a slow follower. The alert threshold and the failover budget both
 
 **Carried into:** [`static/04-isr-leader-election.md`](static/04-isr-leader-election.md),
 its measurement table, and the timers table in [`static/README.md`](static/README.md).
+
+## exp-05/06/07 — the three semantics as numbers
+
+Date: 2026-09-21 ·
+[run log](../experiments/transaction_guarantee/exp-05-delivery-semantics/results/run-2026-09-21-175334.log) ·
+`make exp-05`
+
+**Hypothesis.** At-most-once, at-least-once and effectively-once are not three libraries or
+three settings. They are one ordering decision — where the offset is committed relative to
+the write — and a crash in the wrong place turns each into a different kind of incident.
+
+**Setup.** One topic of 3 partitions, RF 3. 1 000 payments produced with `acks=all`, then a
+consumer with `DisableAutoCommit` reads them in batches of 50 and writes each to Postgres.
+Partway through, the consumer sends itself `SIGKILL` — a real crash, so no deferred close
+runs and nothing is flushed — and a second process resumes from whatever the first managed
+to commit. The counts are read back out of Postgres, never out of the dead process's
+memory. Three runs, identical but for the commit order.
+
+**Result.**
+
+| Mode | Commit order | Rows | Distinct | Outcome |
+|---|---|---|---|---|
+| at-most-once | commit, then write | 951 | 951 | **49 lost** |
+| at-least-once | write, then commit | 1 050 | 1 000 | **50 duplicated** |
+| inbox | claim and write in one transaction, then commit | 1 000 | 1 000 | **exactly once** |
+
+**The two failures are the same window from both sides.** One batch, 50 records. Committed
+before writing, the 49 that had not been written when the process died are gone — the
+offsets say they were handled, so no restart will ever fetch them. Written before
+committing, the whole batch is fetched again and charged twice. Same crash, same instant,
+opposite failure, and the only difference in the code is which of two statements comes
+first.
+
+**The inbox run was delivered the duplicates too.** That is the sentence worth keeping:
+exp-07 did not receive its records once. It received 50 of them twice, exactly as exp-06
+did, and still holds 1 000 rows, because the claim and the write are a single transaction
+and the second delivery loses the race for the primary key. *Exactly-once effect,
+at-least-once delivery* — Kafka never promised the first and always gave the second.
+
+**What the instrument got wrong first, twice.**
+
+*The resumed consumer hung.* The first live run timed out with "332 left". Progress was
+being tracked as "have I read up to the last offset of every partition", and a consumer
+replacing a killed one is never sent the records its predecessor already committed — so a
+partition the predecessor finished held the run open forever. It now seeds progress from
+the group's committed offsets, so a partition someone else finished is finished. The
+failure mode is worth naming: a hang reported as a timeout, in the middle of an experiment
+about losing records.
+
+*The crash landed where it cost nothing.* With the kill set at 500 handled records and
+batches of 50, the at-most-once run died exactly on a batch boundary — the offsets that had
+been committed covered precisely what had been written, nothing was lost, and the report
+read "every payment exactly once" for the semantics whose entire purpose is to lose
+payments. It was caught because the run states what each mode must demonstrate and compares
+the outcome to it, rather than printing three numbers and leaving the reader to notice. The
+kill now refuses to land on a batch boundary under at-most-once. A crash that costs nothing
+proves nothing.
+
+**Conclusion.** There is no configuration flag for exactly-once between Kafka and a
+database. At-most-once and at-least-once are both one line away from each other, and the
+gap between them is where payments live or die. What closes it is not a stronger delivery
+guarantee but an idempotent write: the consumer stops caring how many times a record
+arrives. That is the same shape as the outbox on the way out ([06](static/06-transactional-outbox.md)),
+and it is why exp-10 will matter — Kafka transactions do cover read-process-write, and they
+stop at the database boundary.
+
+**Carried into:** [`static/05-delivery-semantics.md`](static/05-delivery-semantics.md),
+its measurement table.

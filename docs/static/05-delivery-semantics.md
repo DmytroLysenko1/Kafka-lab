@@ -122,13 +122,41 @@ So for "Kafka plus Postgres" the answer is not EOS. It is an inbox on the way in
 that distinction precisely — *exactly-once effect, at-least-once delivery* — is the
 single most useful sentence in the whole KR2 write-up.
 
-## To be measured
+## Measured
+
+`make exp-05` · [journal](../00-journal.md#exp-050607--the-three-semantics-as-numbers) ·
+[run log](../../experiments/transaction_guarantee/exp-05-delivery-semantics/results/run-2026-09-21-175334.log)
+
+1 000 payments, one consumer, `SIGKILL` delivered mid-batch. The three runs differ in
+exactly one thing: where the offset is committed relative to the write.
+
+| Run | Commit order | Rows | Distinct | Result |
+|---|---|---|---|---|
+| exp-05 at-most-once | commit **then** write | 951 | 951 | **49 payments lost** |
+| exp-06 at-least-once | write **then** commit | 1 050 | 1 000 | **50 payments charged twice** |
+| exp-07 inbox | claim + write in one transaction, then commit | 1 000 | 1 000 | **exactly once** |
+
+The two failure numbers are the same window seen from both sides: one batch of 50. Under
+at-most-once the batch's offsets were stored before it was written, so the 49 records still
+unwritten when the process died are gone and no restart will fetch them again. Under
+at-least-once the batch was written but not yet committed, so the restart fetched all 50 a
+second time. Neither is a bug in Kafka; both are the consequence of a two-line ordering
+decision in the consumer.
+
+**The inbox does not make delivery exactly-once.** exp-07 was delivered the same 50 records
+twice — the log shows the same replay — and still holds 1 000 rows, because the claim and
+the write are one transaction: the second delivery loses the race for the primary key and
+writes nothing. *Exactly-once effect, at-least-once delivery.*
+
+**Claiming first and writing second would be the same bug with more steps.** If the inbox
+row were inserted in its own statement, a crash between the claim and the write would leave
+a payment permanently unwritable: the claim exists, so every retry is refused. That is why
+`recordOnce` does both inside one transaction and nothing else.
+
+## Still to be measured
 
 | Run | What it shows | Expected shape | Status |
 |---|---|---|---|
-| exp-05 | at-most-once under `kill -9`: produced vs rows in DB | a small deficit | TBD |
-| exp-06 | at-least-once under `kill -9`: produced vs rows in DB | a small surplus | TBD |
-| exp-07 | the same failure with the inbox | equal counts, zero duplicates | TBD |
 | exp-10 | Kafka EOS read-process-write, then the same run with an external DB write | EOS holds inside Kafka, not across the boundary | TBD |
 
 A small number is the dangerous result here, not a large one: a handful of silently lost
