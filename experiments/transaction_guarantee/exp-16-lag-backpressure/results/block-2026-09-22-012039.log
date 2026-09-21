@@ -1,0 +1,79 @@
+exp-16 — a dependency outage with a join in the middle, handler: block
+date: 2026-09-22-012039
+client: franz-go v1.22.0
+
+handler                block: retries the dependency inside the batch, holding it and the rebalance
+group                  exp16-block-1790029246191479000
+load                   400 records/s over 3 partitions, 50s
+dependency down        15s to 35s
+second consumer joins  20s
+rebalance timeout      8s
+
+what the members went through
+  0s     A assigned [0 1 2]
+  28s    B assigned [0 1 2]
+  35.4s  A commit refused: UNKNOWN_MEMBER_ID: The coordinator is not aware of this member.
+  35.4s  A revoked []
+  37.6s  B revoked []
+  37.6s  A revoked [0 1 2]
+  37.6s  A assigned []
+  37.6s  A revoked []
+  37.7s  B revoked [0]
+  37.7s  B assigned []
+  37.7s  B revoked []
+  37.8s  A assigned [0]
+  37.9s  B assigned []
+  1m15s  A revoked [0]
+  1m15s  B revoked [1 2]
+
+lag, sampled every second (every second sample shown)
+  1s     2
+  3s     2
+  5s     0
+  7s     2
+  9s     0
+  11s    0
+  13s    2
+  15s    0
+  17s    796
+  19s    1592
+  21s    2388
+  23s    3188
+  25s    3990
+  27s    4788
+  29s    5588
+  31s    6388
+  33s    7180
+  35s    7978
+  37s    7274
+  39s    7197
+  41s    4793
+  43s    2873
+  45s    1801
+  47s    631
+  49s    2
+  51s    0
+  53s    0
+  55s    0
+  57s    0
+  59s    0
+  1m1s   0
+  1m3s   0
+  1m5s   0
+  1m7s   0
+  1m9s   0
+  1m11s  0
+  1m13s  0
+
+peak lag                                 8501 at 38s
+lag under 100 again                      48s, 13s after the dependency came back
+second consumer first owned a partition  28s, 8s after it joined
+commits refused by the group             1
+produced and acknowledged                19912
+  handled twice                          1739, 1739 of them by both members
+after the group refused a member's commit, until it was assigned again
+  records it handled                             A: 6
+  commits that still reported success            A: 1
+accepted commits that moved an offset backwards  37.6s by A on partition 1, back 263 records; 37.6s by A on partition 0, back 1731 records
+  never handled                                  0
+lag samples that failed                          0

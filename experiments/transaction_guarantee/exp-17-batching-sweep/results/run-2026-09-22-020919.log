@@ -1,0 +1,39 @@
+exp-17 — linger x batch size x codec under a fixed load
+date: 2026-09-22-020919
+client: franz-go v1.22.0
+offered: 20000 records/s for 10s per cell, acks=all, 6 partitions, RF 3
+payload: generated payment JSON, seeded, identical for every cell
+
+  linger    batch   codec  offered/s  drain  failed     p50     p99  rec/batch  bytes/rec  wire ratio
+      0s    16KiB    none      19928    3ms       0   2.3ms  25.1ms        6.4        250        1.00
+      0s    16KiB  snappy      19944  5.1ms       0   2.3ms  25.7ms        6.5        109        2.29
+      0s    16KiB     lz4      19958  1.4ms       0   2.3ms  17.4ms        5.9        112        2.23
+      0s    16KiB    zstd      20000  3.4ms       0   2.2ms  10.8ms        5.8         78        3.20
+      0s  default    none      19999  3.6ms       0   3.3ms  30.8ms        4.4        250        1.00
+      0s  default  snappy      20000  3.2ms       0     3ms  31.8ms        4.5        122        2.05
+      0s  default     lz4      20000  3.4ms       0     3ms    12ms        4.2        126        1.98
+      0s  default    zstd      19999  3.9ms       0   3.1ms  14.3ms        4.7         86        2.91
+     5ms    16KiB    none      19999  2.8ms       0   6.8ms  14.9ms       22.4        250        1.00
+     5ms    16KiB  snappy      19989  2.1ms       0   6.7ms  12.5ms       21.8         89        2.82
+     5ms    16KiB     lz4      19988  2.3ms       0   6.8ms  12.7ms       22.4         86        2.91
+     5ms    16KiB    zstd      19739  2.5ms       0   7.2ms  18.7ms       24.4         52        4.81
+     5ms  default    none      19980  1.4ms       0     7ms  15.3ms       22.7        250        1.00
+     5ms  default  snappy      19989  1.3ms       0   6.8ms  13.5ms       22.9         88        2.84
+     5ms  default     lz4      19988  5.4ms       0   6.8ms  30.7ms       22.9         86        2.92
+     5ms  default    zstd      19995  3.5ms       0   7.1ms  13.4ms       23.0         53        4.75
+    10ms    16KiB    none      19779  2.1ms       0   9.5ms  20.4ms       36.6        250        1.00
+    10ms    16KiB  snappy      19718  3.3ms       0   9.4ms  21.7ms       37.1         84        2.97
+    10ms    16KiB     lz4      19949  4.8ms       0   9.2ms  20.3ms       35.7         81        3.07
+    10ms    16KiB    zstd      19988  5.3ms       0   9.1ms  18.7ms       34.7         49        5.14
+    10ms  default    none      19989  3.2ms       0   8.6ms  17.2ms       34.3        250        1.00
+    10ms  default  snappy      19988  4.6ms       0     9ms  19.5ms       34.7         85        2.95
+    10ms  default     lz4      19989  2.8ms       0   8.7ms  18.2ms       33.7         82        3.06
+    10ms  default    zstd      19959  2.1ms       0   8.9ms  19.3ms       34.7         49        5.14
+    50ms    16KiB    none      19988  3.3ms       0  11.9ms  23.8ms       39.4        250        1.00
+    50ms    16KiB  snappy      19939    4ms       0  11.9ms  25.4ms       39.9         84        2.99
+    50ms    16KiB     lz4      19999  2.5ms       0  11.8ms  24.6ms       40.0         80        3.13
+    50ms    16KiB    zstd      19979  2.6ms       0  12.1ms  25.1ms       39.9         48        5.24
+    50ms  default    none      19998  8.8ms       0  30.8ms  58.3ms      139.0        251        1.00
+    50ms  default  snappy      19999  3.6ms       0    31ms  58.4ms      137.7         76        3.28
+    50ms  default     lz4      19999  2.3ms       0    31ms  58.2ms      138.9         74        3.39
+    50ms  default    zstd      19998  9.3ms       0  31.6ms  58.4ms      143.8         44        5.64

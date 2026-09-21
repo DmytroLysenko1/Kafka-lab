@@ -1,0 +1,32 @@
+exp-14 — a second consumer joins, strategy: server, handler: blocking
+date: 2026-09-22-021756
+client: franz-go v1.22.0
+
+strategy                   server: KIP-848, the broker assigns (range assignor), incremental
+group                      exp14-server-1790032884777577000
+load                       400 records/s over 6 partitions
+handler                    2ms a record, rebalances blocked while a batch of up to 200 is handled
+second consumer joined at  15s
+
+assignment changes after the first
+  15.01s  B assigned []
+  15.03s  A revoked []
+  15.03s  A revoked [3 4 5]
+  15.03s  A assigned []
+  20.01s  B revoked []
+  20.01s  B assigned [3 4 5]
+  35.01s  B revoked [3 4 5]
+  35.01s  A revoked [0 1 2]
+
+partition  longest gap, 10s before the join  longest gap, from 2s before to 15s after
+  0        57ms                              49ms
+  1        45ms                              49ms
+  2        38ms                              57ms
+  3        36ms                              6.526s
+  4        36ms                              5.787s
+  5        41ms                              5.003s
+
+partitions stopped for more than 1s                3 of 6
+longest time the whole group handled nothing       26ms
+records handled twice                              0
+records missed between the first and last handled  0

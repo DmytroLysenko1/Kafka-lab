@@ -15,7 +15,7 @@ Walkthrough.register({
 
     { kind: "msg", from: "c", to: "k", label: "CommitOffsets(43)", warn: true,
       t: "Act I — commit first",
-      d: "The consumer tells Kafka it is finished before it has done anything. Autocommit does not do this by default, since it commits only what the previous poll returned; it does when the handler hands records to another goroutine and polls on, or with franz-go's AutoCommitGreedy." },
+      d: "The consumer tells Kafka it is finished before it has done anything. Autocommit does not do this by default, since it commits only what the previous poll returned; it does when the handler hands records to another goroutine and polls on, or with franz-go's GreedyAutoCommit." },
 
     { kind: "note", at: ["c", "db"], warn: true, lines: ["kill -9 in this window"],
       t: "The loss window",

@@ -68,14 +68,23 @@ the window had closed by construction before the kill landed. In production the 
 as wide as replication lag: a GC pause, a slow disk, a saturated link.
 
 **Holding the followers back with a replication throttle does not work**, which is worth
-knowing before planning any test around it. The configs applied and read back from the
-cluster; an 8.3 MB log still reached all three replicas instantly. Replication quotas exist
+knowing before planning any test around it — an observation from the attempt that preceded
+this run, whose log was not kept, so the numbers below are from the
+[journal](../../../docs/00-journal.md) rather than from `results/`. The configs applied and
+read back from the cluster; an 8.3 MB log still reached all three replicas instantly. Replication quotas exist
 for reassignment traffic, where the destination replica is not in the in-sync set — they do
 not restrain replicas that already are.
 
+**The middle setting is measured elsewhere.** With RF 3 and one broker dead,
+`min.insync.replicas=2` still accepted every write, with the in-sync set at exactly 2 —
+[exp-04](../../kafka_internals/exp-04-isr-leader-election/). Together with this run's
+refusal at 3, that is the whole trade: 2 survives one failure and refuses the second.
+
 **Not shown:** `acks=all` with `min.insync.replicas=1` after the in-sync set has shrunk to
-the leader alone — the case where `acks=all` loses like `acks=1`. It needs a follower
-dropped from the set first, which this pause deliberately does not do.
+the leader alone — the case where `acks=all` loses like `acks=1`. Shrinking the set to one
+needs two nodes down, and on three combined broker and controller nodes that takes the
+KRaft quorum with it, so the set cannot shrink at all. It is blocked on this stand for the
+same reason as exp-04b.
 
 The reasoning, and the false zero this instrument printed before it was fixed, are in the
 [journal](../../../docs/00-journal.md).

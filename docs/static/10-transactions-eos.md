@@ -135,8 +135,8 @@ transaction is dead and aborts it.
 | Run | `read_committed` output | `read_uncommitted` output | Postgres | Log |
 |---|---|---|---|---|
 | exp-10a — rollback | **1 000, 1 000 distinct** | 1 050 | — | [run](../../experiments/transaction_guarantee/exp-10a-rollback/results/run-2026-09-21-185537.log) |
-| exp-10b — database in the loop | **1 000, 1 000 distinct** | 1 050 | **1 050 rows, 50 duplicated** | [run](../../experiments/transaction_guarantee/exp-10b-database-boundary/results/run-2026-09-21-185649.log) |
-| exp-10c — `read_uncommitted` | 1 000, 1 000 distinct | **1 050 — the aborted batch delivered** | — | [run](../../experiments/transaction_guarantee/exp-10c-read-uncommitted/results/run-2026-09-21-185751.log) |
+| exp-10b — database in the loop | **1 000, 1 000 distinct** | 1 050 | **1 050 rows, 50 duplicated** | [run](../../experiments/transaction_guarantee/exp-10b-database-boundary/results/run-2026-09-22-022201.log) |
+| exp-10c — `read_uncommitted` | 1 000, 1 000 distinct | **1 050 — the aborted batch delivered** | — | [run](../../experiments/transaction_guarantee/exp-10c-read-uncommitted/results/run-2026-09-22-022300.log) |
 
 **The transaction held exactly where it claims to and nowhere else.** The output records
 of the killed batch were aborted and its consumed offsets, which join the transaction only

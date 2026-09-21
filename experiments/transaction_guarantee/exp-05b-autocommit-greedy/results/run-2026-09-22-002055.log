@@ -1,0 +1,11 @@
+exp-05b — at-most-once through GreedyAutoCommit: the timer commits what was polled, handled or not
+date: 2026-09-22-002055
+client: franz-go v1.22.0
+payments: 1000, consumer killed at the first record past 500 handled that follows an autocommit inside its batch, with records of the batch still unwritten
+
+2026/09/22 00:21:06 WARN exp-05b: killing this consumer mode=autocommit-greedy handled=512
+experiments/transaction_guarantee/exp-05b-autocommit-greedy/run.sh: line 29: 30118 Killed: 9               "$binary" -run-id "$run_id" -payments "$payments" "$@"
+autocommit-greedy  produced 1000, rows 962, distinct 962
+  lost             38
+  duplicated       0
+  outcome          payments lost — as expected

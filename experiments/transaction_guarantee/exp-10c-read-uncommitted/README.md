@@ -15,7 +15,7 @@ The loop itself lives in [`../eos/`](../eos/), shared with its two siblings.
 
 ## Result — 2026-09-21
 
-[run log](results/run-2026-09-21-185751.log)
+[run log](results/run-2026-09-22-022300.log)
 
 | `read_committed` | `read_uncommitted` |
 |---|---|

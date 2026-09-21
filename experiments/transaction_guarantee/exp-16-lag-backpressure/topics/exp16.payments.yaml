@@ -1,0 +1,20 @@
+meta:
+  name: exp16.payments
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-16, lag and backpressure: a steady stream while the handlers' downstream dependency
+    is down for twenty seconds and a second consumer joins the group in the middle of it.
+    Three partitions, so the join has something to move. RF 3 and min.insync.replicas 2
+    match the catalog; the experiment is about the consumer, not the log.
+
+spec:
+  partitions: 3
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

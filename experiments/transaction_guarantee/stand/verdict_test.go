@@ -69,7 +69,7 @@ func TestTallyNamesWhatTheRunDidToThePayments(t *testing.T) {
 }
 
 func TestEveryModeDeclaresWhatItMustDemonstrate(t *testing.T) {
-	for _, mode := range []Mode{AtMostOnce, AtLeastOnce, Inbox} {
+	for _, mode := range []Mode{AtMostOnce, AtLeastOnce, Inbox, AutoCommit, AutoCommitGreedy} {
 		if mode.Expects() == "" {
 			t.Errorf("mode %q has no expected outcome, so its run could not fail", mode)
 		}
@@ -181,6 +181,58 @@ func TestShouldDieLandsWhereTheCrashCostsSomething(t *testing.T) {
 			}
 			if got := run.shouldDie(tt.args.lastOfBatch); got != tt.want {
 				t.Errorf("shouldDie(%v) = %v, want %v", tt.args.lastOfBatch, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAutocommitLandedSeparatesWhatTheTwoFlavoursCommitted(t *testing.T) {
+	type args struct {
+		mode     Mode
+		atPoll   map[int32]int64
+		now      map[int32]int64
+		batchEnd map[int32]int64
+	}
+
+	batch := map[int32]int64{0: 350, 1: 340}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "greedy has committed the whole batch being written: its unwritten rest is now unreachable",
+			args: args{mode: AutoCommitGreedy, atPoll: map[int32]int64{0: 300, 1: 320}, now: batch, batchEnd: batch},
+			want: true,
+		},
+		{
+			// A commit sent before the poll can land after it; it carries the previous batch
+			// and would make the kill lose nothing.
+			name: "greedy with only part of the batch committed waits",
+			args: args{mode: AutoCommitGreedy, atPoll: map[int32]int64{0: 300, 1: 320}, now: map[int32]int64{0: 350, 1: 320}, batchEnd: batch},
+			want: false,
+		},
+		{
+			name: "greedy with an empty batch has nothing to lose",
+			args: args{mode: AutoCommitGreedy, now: batch, batchEnd: map[int32]int64{}},
+			want: false,
+		},
+		{
+			name: "the default dies once any autocommit has landed since the poll",
+			args: args{mode: AutoCommit, atPoll: map[int32]int64{0: 250, 1: 300}, now: map[int32]int64{0: 300, 1: 320}, batchEnd: batch},
+			want: true,
+		},
+		{
+			name: "the default with nothing committed since the poll waits",
+			args: args{mode: AutoCommit, atPoll: map[int32]int64{0: 300, 1: 320}, now: map[int32]int64{0: 300, 1: 320}, batchEnd: batch},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := autocommitLanded(tt.args.mode, tt.args.atPoll, tt.args.now, tt.args.batchEnd); got != tt.want {
+				t.Errorf("autocommitLanded() = %v, want %v", got, tt.want)
 			}
 		})
 	}

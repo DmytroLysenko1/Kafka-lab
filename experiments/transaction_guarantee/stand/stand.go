@@ -17,29 +17,41 @@ import (
 	"time"
 )
 
-// Mode is the ordering decision the three experiments exist to compare.
+// Mode is the commit decision the experiments exist to compare: three orderings of a manual
+// commit, and franz-go's autocommit in its two flavours.
 type Mode string
 
 const (
 	AtMostOnce  Mode = "at-most-once"
 	AtLeastOnce Mode = "at-least-once"
 	Inbox       Mode = "inbox"
+	// AutoCommit is franz-go's default: a timer commits what the previous poll returned.
+	AutoCommit Mode = "autocommit"
+	// AutoCommitGreedy is GreedyAutoCommit: the timer commits what the last poll returned,
+	// whether or not it has been handled yet.
+	AutoCommitGreedy Mode = "autocommit-greedy"
 )
 
-// CommitsFirst is the whole difference between at-most-once and the other two: storing the
-// offset before the payment is written means a crash in between loses the payment, and
-// storing it after means the crash replays it.
+// CommitsFirst is the whole difference between at-most-once and the other two manual modes:
+// storing the offset before the payment is written means a crash in between loses the
+// payment, and storing it after means the crash replays it.
 func (m Mode) CommitsFirst() bool {
 	return m == AtMostOnce
+}
+
+// AutoCommits reports whether the client commits on its own timer rather than when the
+// handler tells it to.
+func (m Mode) AutoCommits() bool {
+	return m == AutoCommit || m == AutoCommitGreedy
 }
 
 // Expects is what a mode must demonstrate when the consumer dies in the middle. A run that
 // produces anything else has not proved its point, whatever the totals look like.
 func (m Mode) Expects() Outcome {
 	switch m {
-	case AtMostOnce:
+	case AtMostOnce, AutoCommitGreedy:
 		return OutcomeLost
-	case AtLeastOnce:
+	case AtLeastOnce, AutoCommit:
 		return OutcomeDuplicate
 	default:
 		return OutcomeExactly

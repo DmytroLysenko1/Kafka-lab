@@ -22,20 +22,22 @@ sequenceDiagram
     PR--xC: timeout
 
     rect rgba(229, 57, 53, 0.16)
-        Note over M,C: p3 is stopped for the whole of this frame.<br/>9c21, 4b08 and e77d did nothing wrong and wait anyway,<br/>and so does every later payment that hashes to p3
+        Note over M,C: p3 is stopped for the whole of this frame.<br/>9c21, 4b08 and e77d did nothing wrong and wait anyway,<br/>and with one poll loop, so do its other partitions
         Note over C: sleep 5s
         C->>PR: capture 7f3a, attempt 2
         PR--xC: timeout
         Note over C: sleep 5s, and again, and again
     end
 
-    Note over C: the offset never moved, so nothing is lost —<br/>and nothing is reported either: no error, no alert,<br/>only lag on one partition out of six
+    Note over C: the offset never moved, so nothing is lost —<br/>and nothing is reported either: no error, no alert,<br/>only lag
 ```
 
 *Fig. 7a — sleeping in the handler is the smallest possible change and it converts one
-failing merchant into a throughput outage for every payment sharing its partition; the
-failure is head-of-line blocking, and its distinguishing feature is that the handler logs
-look healthy because the record does eventually succeed (exp-16).*
+failing merchant into a throughput outage for every payment sharing its partition — and,
+with a single poll loop, every partition the consumer owns. The failure is head-of-line
+blocking, and its distinguishing feature is that the handler logs look healthy because the
+record does eventually succeed. exp-16 measured the outage version of it; the one slow
+merchant among healthy ones is argued, not run.*
 
 ## Case B — the wait happens in a topic
 
@@ -226,8 +228,10 @@ provider is down for an hour, every payment walks the whole chain, the entire fl
 DLQ eleven minutes in, and on the way the recovering provider receives four attempts for
 every payment — a retry storm. A systemic failure is handled one step earlier: a circuit
 breaker around the provider opens, and the main consumer pauses its partitions
-(`PauseFetchPartitions`) instead of feeding the chain. That is backpressure, and it is the
-third phase of exp-16. The retry chain stays for what it is good at: one record failing among
+(`PauseFetchPartitions`) instead of feeding the chain. That is backpressure, and exp-16
+measured it against the inline retry through a 20 s outage: the same lag, but no member
+removed, no commit rewound and nothing handled twice, where the inline retry had its member
+removed and a stale commit rewind a partition 1 726–1 732 records. The retry chain stays for what it is good at: one record failing among
 healthy ones.
 
 ## To be measured
@@ -235,7 +239,5 @@ healthy ones.
 | Run | What it shows | Status |
 |---|---|---|
 | exp-11 | poison pill: straight to DLQ and the partition keeps flowing, versus infinite retry and a permanently stuck partition | TBD |
-| exp-16 | one slow handler, three reactions — the phases are what make the difference visible | |
-| exp-16a | `sleep` in the handler: lag grows on one partition, the other five keep flowing | TBD |
-| exp-16b | the handler outlasts the rebalance timeout: the member is evicted and the group rebalances repeatedly | TBD |
-| exp-16c | breaker open, main paused: lag grows at a rate the operator chose, and the group stays stable — backpressure | TBD |
+| exp-16 | a 20 s outage with a member joining mid-way: retry inline, holding the batch, against pause-and-rewind | **measured**: the same lag, 7 940–8 501 records, either way. Inline: the member removed after the 8 s rebalance timeout, one commit refused, its next commit rewinding a partition 1 726–1 732 records, 1 739 handled twice in one run of three. Paused: none of that ([exp-16](../../experiments/transaction_guarantee/exp-16-lag-backpressure/)) |
+| one slow merchant among healthy ones | a single poll loop stalls every partition the member owns, not only the slow one's | not run — argued from the loop |

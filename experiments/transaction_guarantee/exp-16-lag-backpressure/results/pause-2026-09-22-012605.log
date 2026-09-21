@@ -1,0 +1,79 @@
+exp-16 — a dependency outage with a join in the middle, handler: pause
+date: 2026-09-22-012605
+client: franz-go v1.22.0
+
+handler                pause: on failure pauses fetching, rewinds to the first unhandled record, releases the rebalance
+group                  exp16-pause-1790029652118509000
+load                   400 records/s over 3 partitions, 50s
+dependency down        15s to 35s
+second consumer joins  20s
+rebalance timeout      8s
+
+what the members went through
+  0s     A assigned [0 1 2]
+  15.1s  A paused fetching, rewound, released the rebalance
+  21.5s  A revoked []
+  21.5s  B assigned []
+  21.5s  A revoked [2]
+  21.5s  A assigned []
+  21.5s  A revoked []
+  22s    B revoked []
+  22s    B assigned [2]
+  22s    A assigned []
+  22.1s  B paused fetching, rewound, released the rebalance
+  35.3s  B dependency back, resumed fetching
+  35.4s  A dependency back, resumed fetching
+  1m15s  B revoked [2]
+  1m15s  A revoked [0 1]
+
+lag, sampled every second (every second sample shown)
+  1s     2
+  3s     0
+  5s     0
+  7s     2
+  9s     0
+  11s    0
+  13s    0
+  15s    0
+  17s    789
+  19s    1584
+  21s    2380
+  23s    3178
+  25s    3976
+  27s    4772
+  29s    5572
+  31s    6374
+  33s    7172
+  35s    7970
+  37s    6070
+  39s    3670
+  41s    2409
+  43s    1332
+  45s    164
+  47s    0
+  49s    2
+  51s    0
+  53s    0
+  55s    0
+  57s    0
+  59s    0
+  1m1s   0
+  1m3s   0
+  1m5s   0
+  1m7s   0
+  1m9s   0
+  1m11s  0
+  1m13s  0
+
+peak lag                                 7970 at 35s
+lag under 100 again                      46s, 11s after the dependency came back
+second consumer first owned a partition  22s, 2s after it joined
+commits refused by the group             0
+produced and acknowledged                19922
+  handled twice                          0, 0 of them by both members
+after the group refused a member's commit, until it was assigned again
+  records it handled                             none
+  commits that still reported success            none
+accepted commits that moved an offset backwards  none
+  never handled                                  0
+lag samples that failed                          0

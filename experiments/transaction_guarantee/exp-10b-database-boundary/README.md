@@ -16,7 +16,7 @@ This one also writes every payment to Postgres inside the loop.
 
 ## Result — 2026-09-21
 
-[run log](results/run-2026-09-21-185649.log)
+[run log](results/run-2026-09-22-022201.log)
 
 | `read_committed` | Postgres |
 |---|---|

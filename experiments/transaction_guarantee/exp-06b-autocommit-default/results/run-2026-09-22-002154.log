@@ -1,0 +1,11 @@
+exp-06b — franz-go's default autocommit: the timer commits what the previous poll returned
+date: 2026-09-22-002154
+client: franz-go v1.22.0
+payments: 1000, consumer killed at the first record past 500 handled that follows an autocommit inside its batch, with records of the batch still unwritten
+
+2026/09/22 00:22:06 WARN exp-06b: killing this consumer mode=autocommit handled=512
+experiments/transaction_guarantee/exp-06b-autocommit-default/run.sh: line 29: 30494 Killed: 9               "$binary" -run-id "$run_id" -payments "$payments" "$@"
+autocommit    produced 1000, rows 1012, distinct 1000
+  lost        0
+  duplicated  12
+  outcome     payments duplicated — as expected

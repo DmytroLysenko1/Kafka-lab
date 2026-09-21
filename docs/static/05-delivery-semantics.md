@@ -35,8 +35,12 @@ exp-05 puts the commit there by hand. Autocommit does not by default: both clien
 only what the *previous* poll returned, so a handler that finishes a batch before polling
 again stays behind its commit, which is at-least-once. It lands in this case when the
 handler hands records to another goroutine and polls on, or when franz-go's
-`AutoCommitGreedy` commits what was just returned. However the commit gets ahead of the
-work, nothing in the logs marks the loss. The only evidence is a count mismatch that nobody
+`GreedyAutoCommit` commits what was just returned. exp-05b and exp-06b kill the consumer
+at the same moment, right after an autocommit lands inside a batch: greedy lost the
+unwritten rest of the batch, 38 and 41 payments in two runs, and the default lost none and
+wrote 12 twice ([05b](../../experiments/transaction_guarantee/exp-05b-autocommit-greedy/),
+[06b](../../experiments/transaction_guarantee/exp-06b-autocommit-default/)); the hand-off
+case is argued, not run. However the commit gets ahead of the work, nothing in the logs marks the loss. The only evidence is a count mismatch that nobody
 is counting.
 
 ## Case B — at-least-once: process first

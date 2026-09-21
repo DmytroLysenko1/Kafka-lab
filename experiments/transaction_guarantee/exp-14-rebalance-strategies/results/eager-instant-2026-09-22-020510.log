@@ -1,0 +1,29 @@
+exp-14 — a second consumer joins, strategy: eager, handler: instant
+date: 2026-09-22-020510
+client: franz-go v1.22.0
+
+strategy                   eager: RangeBalancer, classic protocol, every partition revoked on a rebalance
+group                      exp14-eager-1790031918645736000
+load                       1200 records/s over 6 partitions
+handler                    0s a record, franz-go's default: rebalances run beside the handler
+second consumer joined at  15s
+
+assignment changes after the first
+  15.04s  A revoked [0 1 2 3 4 5]
+  15.04s  A assigned [0 1 2]
+  15.04s  B assigned [3 4 5]
+  35s     B revoked [3 4 5]
+  35s     A revoked [0 1 2]
+
+partition  longest gap, 10s before the join  longest gap, from 2s before to 15s after
+  0        43ms                              43ms
+  1        44ms                              40ms
+  2        43ms                              40ms
+  3        43ms                              39ms
+  4        43ms                              43ms
+  5        44ms                              40ms
+
+partitions stopped for more than 1s                0 of 6
+longest time the whole group handled nothing       39ms
+records handled twice                              0
+records missed between the first and last handled  0

@@ -67,7 +67,7 @@ Walkthrough.register({
     { kind: "note", at: "cons", lines: ["deserialize, process,", "write to Postgres"],
       t: "This is where the time budget is spent",
       d: "Everything slow lives here: deserialization, business logic, database writes, calls to providers. The batch is the unit of transfer, so a fetch sized for throughput can hand a consumer far more work at once than expected.",
-      r: "Take too long and the group moves on without you. Heartbeats keep flowing in the background, so it is not the session timeout that fires — it is the rebalance timeout. Java's trigger is max.poll.interval.ms, 300 s by default; franz-go has no poll watchdog at all and its RebalanceTimeout defaults to 60 s, so a slow handler goes unnoticed until a rebalance actually happens — and then it has a fifth of the Java budget to finish (exp-16)." },
+      r: "Take too long and the group moves on without you. Heartbeats keep flowing in the background, so it is not the session timeout that fires — it is the rebalance timeout. Java's trigger is max.poll.interval.ms, 300 s by default; franz-go has no poll watchdog at all: a slow handler goes unnoticed until a rebalance happens. By default the rebalance does not wait for it; with BlockRebalanceOnPoll it does, for RebalanceTimeout (60 s, a fifth of Java's budget), and then the member is removed without being told — exp-16 measured that, and the removed member's next commit rewinding a partition 1 726–1 732 records." },
 
     { kind: "msg", from: "cons", to: "coord", label: "OffsetCommit 1093",
       t: "Commit after processing, never before",
