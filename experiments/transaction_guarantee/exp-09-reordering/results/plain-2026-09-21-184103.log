@@ -1,0 +1,40 @@
+exp-09 — reordering under a frozen follower, producer: plain
+date: 2026-09-21-184103
+client: franz-go v1.22.0
+stream: 120s, follower frozen and thawed 3 times
+
+LEADER_P0         1
+FOLLOWER_P0       2
+in-sync replicas  [1 2 3] of [1 2 3]
+
+flap 1: freezing kafka2
+in-sync set shrank after  20.3s
+in-sync replicas          [1 3] of [1 2 3]
+in-sync set whole again after  5s
+in-sync replicas               [1 2 3] of [1 2 3]
+
+flap 2: freezing kafka2
+in-sync set shrank after  25.3s
+in-sync replicas          [1 3] of [1 2 3]
+in-sync set whole again after  5s
+in-sync replicas               [1 2 3] of [1 2 3]
+
+flap 3: freezing kafka2
+in-sync set shrank after  10.1s
+in-sync replicas          [1 3] of [1 2 3]
+in-sync set whole again after  5s
+in-sync replicas               [1 2 3] of [1 2 3]
+
+producer         idempotence off, 5 requests in flight, acks=all
+events produced  217840
+acknowledged     217840
+failed           0
+PRODUCED         217840
+
+producer                 idempotence off, 5 requests in flight, acks=all
+produced                 217840, read back 218131, distinct 217840
+  out of order           0
+  refund before capture  0 payments
+  duplicated             291
+  missing                0
+  verdict                reported as found — the plain producer promises nothing to check it against

@@ -9,6 +9,11 @@ something to remember when running anything.
 | [`kafka_internals/`](kafka_internals/) | KR1 — fundamentals and internals | exp-01 partition keys · exp-02 hot partition · exp-03 segments and retention · exp-04 ISR and leader election (plus exp-04c, the timer varied) |
 | [`transaction_guarantee/`](transaction_guarantee/) | KR2 — delivery guarantees | exp-05…07 delivery semantics · exp-08 acks · exp-09 reordering · exp-10 transactions · exp-17 batching sweep |
 
+[`labkit/`](labkit/) is the instrument several experiments share: reading a topic to its end
+offsets, and waiting on the in-sync set instead of sleeping. It exists because four
+experiments wrote the same reader separately, and two of those copies once reported a
+short or mid-election read as a finding.
+
 Each experiment directory holds the same five things: `README.md` with the hypothesis and
 the result, the Go program that measures it, `run.sh` that drives the cluster around it,
 `topics/` with the YAML for the topics it owns, and `results/` with the run logs every

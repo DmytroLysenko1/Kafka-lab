@@ -1,0 +1,22 @@
+meta:
+  name: exp09.payments
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-09, reordering: a steady stream of captures and refunds while a follower is frozen
+    and thawed. min.insync.replicas 3 on three brokers, so freezing a single follower makes
+    every acks=all request fail with NOT_ENOUGH_REPLICAS — a retriable error, which is what
+    makes the producer retry, and the edge where the in-sync set comes back is where an
+    earlier request can fail while a later one lands. One partition, so every request goes
+    to the same leader and the order is a single sequence to check.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 3
+    unclean.leader.election.enable: false

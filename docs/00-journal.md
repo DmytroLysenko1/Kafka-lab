@@ -498,3 +498,70 @@ a race nobody measures and nobody alerts on.
 
 **Carried into:** [`static/01-write-path.md`](static/01-write-path.md) and
 [`static/04-isr-leader-election.md`](static/04-isr-leader-election.md).
+
+
+## exp-09 — the failure the advice warns about is not the one this client has
+
+Date: 2026-09-21 · `make exp-09` · run logs:
+[idempotence off](../experiments/transaction_guarantee/exp-09-reordering/results/plain-2026-09-21-184103.log) ·
+[idempotent](../experiments/transaction_guarantee/exp-09-reordering/results/idempotent-2026-09-21-184103.log)
+
+**Hypothesis.** With idempotence off and more than one request in flight, a retried batch
+can land after a later one, so a refund is recorded before the capture it refunds. With
+idempotence on, the broker's sequence numbers make that impossible. This is the standard
+teaching, and it is written with the Java client in mind.
+
+**Setup.** One partition, RF 3, `min.insync.replicas=3`, so freezing a single follower
+makes every `acks=all` request fail with `NOT_ENOUGH_REPLICAS` — a retriable error, which
+is what makes the producer retry. A steady stream for two minutes, each payment a capture
+followed by its refund, keyed by payment, with small batches and no linger so several
+requests are in flight at once. During the stream a follower is frozen with `docker pause`
+and thawed, three times; every wait is on the cluster's own state, not a sleep. Then the
+whole partition is read back and checked for events out of order, refunds before captures,
+duplicates and gaps. Run twice: idempotence off with five requests in flight, then
+idempotent.
+
+**Result.**
+
+| Producer | Produced | Read back | Out of order | Refund before capture | Duplicated | Missing |
+|---|---|---|---|---|---|---|
+| idempotence off, 5 in flight | 217 840 | 218 131 | **0** | 0 | **291** | 0 |
+| idempotent | 266 980 | 266 980 | 0 | 0 | 0 | 0 |
+
+**What was surprising: franz-go did not reorder. It duplicated.** Not one event arrived out
+of order in either run, and the idempotence-off run wrote 291 events twice. That is not
+luck. It follows from how the client handles a retriable failure, read from its source
+before the run and confirmed by it: on a failure franz-go rewinds the partition to its
+*oldest* pending batch (`resetBatchDrainIdx` sets the drain index to zero) and refuses to
+pipeline that partition again until a request succeeds (`okOnSink` goes false). Everything
+after the failed batch is resent after it, in order — including batches the broker had in
+fact already written but whose acknowledgement the client never saw. Order survives;
+exactly-once does not.
+
+**Why that matters more than it sounds.** The advice in the tuning checklist said, with
+this experiment's number on it, that turning idempotence off with five in flight makes
+`Refunded` overtake `Captured`. For this client it does not, and the checklist now says
+what does happen. The conclusion is unchanged — leave idempotence on — but the reason is
+different, and so is the symptom anyone debugging it would be looking for. A team hunting
+for reordered events would find none and conclude the configuration was fine, while
+charging a few hundred customers twice.
+
+**The control held exactly.** 266 980 events, 266 980 read back, zero of anything, through
+the same three refusal windows. Idempotence is not a performance setting; it is what turns
+the producer's retries from a source of duplicates into a no-op.
+
+**What this run does not show.** Reordering in franz-go is not proven impossible: its own
+documentation says more than one request in flight without idempotence "may result in out
+of order records", and three refusal windows are three chances, not a proof. What was shown
+is that under this failure — a retriable refusal from the leader — the client's rewind
+turns the textbook reordering into duplication. A failure that loses one request on the
+wire while a later one lands, rather than refusing both, is the case left open.
+
+**What the instrument got wrong first.** Nothing numerical, but the run script had the
+same flaw as exp-08's: the frozen broker's id was set inside a piped block, which is a
+subshell, so the clean-up trap outside could not see it. Had a wait failed while a follower
+was frozen, the broker would have been left paused — answering nothing and hanging every
+later experiment. The clean-up now thaws all three brokers unconditionally.
+
+**Carried into:** [`static/01-write-path.md`](static/01-write-path.md) and the idempotence
+and in-flight rows of [`tuning-checklist.md`](tuning-checklist.md).

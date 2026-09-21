@@ -23,19 +23,15 @@ const (
 
 	maxRecords     = 1_000_000
 	maxRecordBytes = 1 << 20
-	pollBatch      = 500
 	readStall      = 10 * time.Second
 )
 
 var phases = []string{"write-acks-one", "count", "write-acks-all", "leader", "await-shrunk", "await-full"}
 
 var (
-	errPhase     = errors.New("exp-08: -phase must be write-acks-one, count, write-acks-all, leader, await-shrunk or await-full")
-	errNoShrink  = errors.New("exp-08: the in-sync set never reached the wanted state inside the deadline")
-	errNoOffsets = errors.New("exp-08: the partition never reported usable offsets")
-	errShape     = errors.New("exp-08: -records out of range")
-	errTopic     = errors.New("exp-08: -topic is required")
-	errShortRead = errors.New("exp-08: the log went quiet before its last offset")
+	errPhase = errors.New("exp-08: -phase must be write-acks-one, count, write-acks-all, leader, await-shrunk or await-full")
+	errShape = errors.New("exp-08: -records out of range")
+	errTopic = errors.New("exp-08: -topic is required")
 )
 
 type settings struct {

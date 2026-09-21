@@ -18,7 +18,7 @@ able to name.
 |---|---|---|
 | `acks` (`kgo.RequiredAcks`) | `all` in Java since 3.0, `AllISRAcks` in franz-go | Never lower it on payments. `acks=1` returns before any follower has the record, so a leader crash inside the replication window loses an acknowledged write — rarely, silently, which is worse than often. Lowering it buys latency and pays in invisible loss (exp-08) |
 | `min.insync.replicas` | **1** — a topic setting, not a producer one | Set it to 2 on every topic that holds money. At 1, `acks=all` means "all of the one replica left in the ISR" and protects nothing. The cost is availability: with RF 3 and min.isr 2, losing two brokers stops writes — the write fails loudly instead of vanishing (exp-08) |
-| `enable.idempotence` (`kgo.DisableIdempotentWrite` to turn off) | on in both | Leave it on. It removes duplicates from producer-side retries and keeps batches in order within a partition. It holds only within one producer session: a process restart needs a `transactional.id` to keep the guarantee (exp-09) |
+| `enable.idempotence` (`kgo.DisableIdempotentWrite` to turn off) | on in both | Leave it on. It removes duplicates from producer-side retries and keeps batches in order within a partition: exp-09 ran 266 980 events through three refusal windows with it on and read back exactly that many, zero duplicated and zero out of order. It holds only within one producer session — a process restart needs a `transactional.id` to keep the guarantee, which no run here measures yet |
 | `unclean.leader.election.enable` | `false` | Leave it false. True converts an offline partition into a promoted out-of-sync replica: availability bought with acknowledged records that are then truncated away (exp-04b) |
 | `retries` / `recordRetries` | Java `retries=MAX_INT` bounded by `delivery.timeout.ms` 120 s; franz-go record retries **unbounded**, request retries 20, backoff 250 ms → 5 s jittered | Bound the wall-clock, not the count: in franz-go that is `kgo.RecordDeliveryTimeout`. Unbounded retries turn a broker outage into unbounded latency and a full memory buffer instead of a visible error |
 
@@ -29,7 +29,7 @@ able to name.
 | record key | — | The key is the ordering unit: same key, same partition, order preserved. `payment_id` keeps one payment's events in order and spreads payments across partitions. A null key gives up ordering entirely (exp-01) |
 | partitioner | Java `DefaultPartitioner` (sticky batching for null keys); franz-go `UniformBytesPartitioner(64 KiB, adaptive, keys)` | Leave it. Note the shape for experiments: with a null key franz-go stays on one partition until **64 KiB** have been written, so a small test run shows no disorder at all and invites a false conclusion (exp-01) |
 | partition count | 6 here | Only grows, and growing moves existing keys to other partitions — one payment's history splits across a boundary. Size it for the consumer parallelism you will need, since it is the ceiling (exp-02, [`deploy/topics/README.md`](../deploy/topics/README.md)) |
-| `max.in.flight.requests.per.connection` (`kgo.MaxProduceRequestsInflightPerBroker`) | **Java 5, franz-go 1** | The clients differ here. Raising franz-go to 5 buys throughput on a high-latency link; it is safe *only* with idempotence on, which keeps sequence numbers in order. Without idempotence, >1 in flight reorders on retry: `Refunded` overtakes `Captured` (exp-09) |
+| `max.in.flight.requests.per.connection` (`kgo.MaxProduceRequestsInflightPerBroker`) | **Java 5, franz-go 1** | The clients differ here. Raising franz-go to 5 buys throughput on a high-latency link; it is safe *only* with idempotence on, which keeps sequence numbers in order. **What it costs without idempotence is client-specific.** In Java the textbook failure is reordering — a retried batch lands after a later one. franz-go rewinds a partition to its oldest pending batch on a retriable error and drops to one request in flight until a success, which keeps the order and resends batches that had in fact landed: exp-09 produced 217 840 events through three refusal windows and read back 291 duplicates and zero out of order. Duplication is still a double charge; it is just not the failure the Java-shaped advice warns about |
 
 ## 3. Throughput against latency
 
@@ -101,9 +101,6 @@ config is ported to Go.
 
 | Run | What it fills in |
 |---|---|
-| exp-05…07 | the offset-commit rows: duplicates and losses per strategy |
-| exp-08 | the durability rows: what `acks=1` loses, what `min.insync.replicas` refuses |
-| exp-09 | reordering with idempotence off and more than one request in flight |
 | exp-14 | eager versus cooperative: processing stalled, in seconds |
 | exp-16 | the backpressure table: lag and group stability under each lever |
 | exp-17 | linger × batch size × codec: throughput against p99 produce latency |
