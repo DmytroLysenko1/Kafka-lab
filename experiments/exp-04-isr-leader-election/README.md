@@ -53,17 +53,34 @@ third it is zero — leadership was already back at the first poll, which is all
 instrument can say about a preferred election: it finishes faster than a process can start
 and ask. Fast enough not to measure is still the answer to "should I wait for it".
 
-**The reaction time is consistent with a session timeout, not with the lag timer.** This is
-an inference, not a measurement, and the difference is worth stating plainly: nothing in the
-run varies either setting. What was measured is 10.6 s here and 10.1 s on the run before. What is argued is
-that `broker.session.timeout.ms` governs it — 9 s, heartbeats every 2 s — rather than
-`replica.lag.time.max.ms`, the 30 s figure usually quoted for a replica leaving the ISR.
-Ten-odd seconds fits the first and cannot fit the second, and a crashed broker is not a slow
-follower: the controller stops receiving heartbeats and fences it, which rewrites the ISR of
-every partition it was in. The three defaults are [read off the running
-broker](results/broker-timers.log), not recalled. Turning the argument into a measurement
-takes one more run with `broker.session.timeout.ms` raised, showing the reaction move with
-it; until that exists this stays an inference.
+**The reaction time is set by the session timeout, not by the lag timer — and exp-04c
+measures that rather than arguing it.** `replica.lag.time.max.ms` at 30 s is the figure
+usually quoted for a replica leaving the ISR, and ten-odd seconds cannot be it. A crashed
+broker is not a slow follower: the controller stops receiving heartbeats and fences it after
+`broker.session.timeout.ms` — 9 s, heartbeats every 2 s, both [read off the running
+broker](results/broker-timers.log) — and fencing rewrites the ISR of every partition it was
+in.
+
+```
+make exp-04c
+```
+
+recreates the brokers with `broker.session.timeout.ms=20000`, changes nothing else, kills
+the same broker, and puts the default back on every exit path:
+
+| `broker.session.timeout.ms` | `replica.lag.time.max.ms` | kill → ISR shrinks |
+|---|---|---|
+| 9 000 | 30 000 | 10.1 s · 10.6 s |
+| **20 000** | 30 000 | **20.3 s** |
+
+[log](results/exp-04c-2026-09-21-172333.log), which prints the timers the broker is
+enforcing above the measurement. ISR recovery stayed at 5.1 s in both — that is the
+returning replica catching up, not fencing, and it is the control: had it moved too, the
+change would have been something broader than the timer under test.
+
+Each figure lands a little above its timeout — heartbeat interval, controller work, and this
+experiment's 250 ms polling. A session expires some time after the last heartbeat that would
+have renewed it, not the instant the process dies.
 
 **One dead broker degraded every partition.** With RF 3 on three brokers each broker holds
 a replica of every partition, so `under-replicated 3 of 3`. That is the shape of a small
@@ -85,6 +102,19 @@ The same constraint is written up in
 [04](../../docs/static/04-isr-leader-election.md#the-three-ways-an-acknowledged-record-dies).
 
 The reasoning is in the [journal](../../docs/00-journal.md).
+
+## exp-04c — varying the timer
+
+`make exp-04c` recreates the brokers with a raised `broker.session.timeout.ms`, runs the
+same kill, and restores the default. The named volumes survive a recreate, so the topic and
+its data are the ones exp-04 measured on.
+
+```
+SESSION_TIMEOUT_MS=30000 make exp-04c    # any value; 20000 is the default for this run
+```
+
+It leaves the stand as it found it: default timeout, every broker running, leadership back
+on the preferred replicas.
 
 ## Cleaning up
 

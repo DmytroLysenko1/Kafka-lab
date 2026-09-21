@@ -141,16 +141,33 @@ third is degenerate — leadership was already back at the first poll — so all
 can say about a preferred election is that it finishes faster than a process can start and
 ask.
 
-**The detector is the heartbeat session, not the lag timer — argued, not shown.**
-`replica.lag.time.max.ms` (30 s) is the figure usually quoted for a replica leaving the
-ISR, and the 10.1 s and 10.6 s measured here cannot be it. The explanation is that a crashed broker is not a slow
-follower: the controller fences a broker whose heartbeats stop after
+**The detector is the heartbeat session, not the lag timer — and this was measured, not
+argued.** `replica.lag.time.max.ms` (30 s) is the figure usually quoted for a replica
+leaving the ISR, and the 10.1 s and 10.6 s measured here cannot be it. A crashed broker is
+not a slow follower: the controller fences a broker whose heartbeats stop after
 `broker.session.timeout.ms` — 9 s, heartbeats every 2 s, both
 [read off the running broker](../../experiments/exp-04-isr-leader-election/results/broker-timers.log)
 — and fencing rewrites the ISR of every partition that broker was in. The lag timer is for a
-live follower that has fallen behind. That is two detectors and a good argument for which
-one fired; it is not a measurement, because no run here varies either timer. One run with
-the session timeout raised would settle it, and is listed below.
+live follower that has fallen behind.
+
+exp-04c raises the session timeout to 20 s, changes nothing else, and kills the same broker:
+
+| `broker.session.timeout.ms` | `replica.lag.time.max.ms` | kill → ISR shrinks |
+|---|---|---|
+| 9 000 | 30 000 | 10.1 s · 10.6 s |
+| **20 000** | 30 000 | **20.3 s** |
+
+The reaction moved with the session timeout across an 11-second change while the lag timer
+sat at 30 s throughout — `make exp-04c`,
+[log](../../experiments/exp-04-isr-leader-election/results/exp-04c-2026-09-21-172333.log).
+ISR recovery after the restart stayed at 5.1 s, which is the returning replica catching up
+and has nothing to do with fencing: a control that would have moved too, had the change been
+something broader than the timer under test.
+
+**What this costs anyone who tunes the wrong one.** Lowering `replica.lag.time.max.ms` to
+make failover faster does nothing for a crash, and makes the ISR twitchy under ordinary GC
+pauses. The failover budget and the alert threshold both belong on
+`broker.session.timeout.ms`.
 
 **One dead broker, every partition degraded.** RF 3 on three brokers means every broker
 holds a replica of every partition, so the under-replicated count went straight to 3 of 3.
@@ -171,7 +188,6 @@ whoever restarts a broker — skipped after each restart, leadership drifts onto
 | Run | What it shows | Status |
 |---|---|---|
 | exp-04b | `unclean.leader.election.enable=true`: acknowledged records missing after promotion, counted | blocked — see below |
-| exp-04c | the same kill with `broker.session.timeout.ms` raised to 20 s: does the reaction time move with it | TBD — this is what turns the detector claim above from an argument into a result |
 | exp-08 | `acks=1` vs `acks=all` with `min.insync.replicas=2` under the same kill | TBD |
 
 exp-04b cannot run on this stand. Promoting an out-of-sync replica requires the ISR to

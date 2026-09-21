@@ -1,0 +1,35 @@
+exp-04c — does the reaction to a crash move with broker.session.timeout.ms?
+date: 2026-09-21-172333
+client: franz-go v1.22.0
+
+timers the broker is enforcing
+  broker.heartbeat.interval.ms=2000 sensitive=false synonyms={DEFAULT_CONFIG:broker.heartbeat.interval.ms=2000}
+  broker.session.timeout.ms=20000 sensitive=false synonyms={STATIC_BROKER_CONFIG:broker.session.timeout.ms=20000, DEFAULT_CONFIG:broker.session.timeout.ms=9000}
+  replica.lag.time.max.ms=30000 sensitive=false synonyms={DEFAULT_CONFIG:replica.lag.time.max.ms=30000}
+
+phase                 baseline, every broker up
+writes accepted       300 of 300 with acks=all
+leaders by partition  [2 3 1]
+smallest ISR          3 of 3 replicas
+under-replicated      0
+LEADER_P0             2
+
+killing kafka2, the broker leading partition 0
+
+phase                     degraded, one broker killed
+noticed within            20.3s of the kill
+  of that, spent polling  20.3s
+leaders by partition      [3 3 1]
+leaderless partitions     0
+under-replicated          3 of 3
+smallest ISR              2, with min.insync.replicas 2
+writes accepted           300 of 300 with acks=all
+
+starting kafka2 again
+
+phase                            recovered, the broker is back
+ISR restored within              5.1s of the restart
+  of that, spent polling         5s
+leaders by partition             [3 3 1]
+smallest ISR                     3 of 3 replicas
+partitions led by a replacement  1 of 3

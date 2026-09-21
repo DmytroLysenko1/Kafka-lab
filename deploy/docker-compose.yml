@@ -47,6 +47,11 @@ x-broker-env: &broker-env
   KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 5000
   KAFKA_LOG_CLEANER_BACKOFF_MS: 5000
   KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  # The controller fences a broker whose heartbeats stop after this long, which is what
+  # removes a dead broker from every ISR. Overridable because exp-04c raises it and checks
+  # that the reaction time moves with it — the experiment that turns exp-04's explanation
+  # from an argument into a measurement.
+  KAFKA_BROKER_SESSION_TIMEOUT_MS: ${KAFKA_BROKER_SESSION_TIMEOUT_MS:-9000}
   # A topic created by hand in an experiment without explicit values would otherwise get
   # RF 1 and a quorum of one. With eligible leader replicas the controller copies this
   # min.insync.replicas into its cluster-wide default when the cluster is first formatted.

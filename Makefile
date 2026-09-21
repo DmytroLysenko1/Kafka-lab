@@ -18,7 +18,7 @@ TOPIC ?=
 GROUP ?=
 EXP ?=
 
-.PHONY: up stop down logs topics exp-topics check exp-% topic-lint reset-topic elect-preferred describe lag build vet lint test test-race verify tidy
+.PHONY: up stop down logs topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag build vet lint test test-race verify tidy
 
 up:
 	$(COMPOSE) up -d --wait
@@ -72,6 +72,12 @@ reset-topic:
 # The explicit replacement for the auto leader rebalance that the compose file switches off.
 elect-preferred:
 	$(KAFKA_BIN)/kafka-leader-election.sh $(BOOTSTRAP) --election-type PREFERRED --all-topic-partitions
+
+# exp-04c is not a plain experiment directory: it recreates the brokers with a raised
+# broker.session.timeout.ms and puts the default back afterwards. An explicit rule wins over
+# the pattern rule below, which would look for experiments/exp-04c-* and find nothing.
+exp-04c: check
+	experiments/exp-04-isr-leader-election/run-session-timeout.sh
 
 # make exp-01 runs experiments/exp-01-*/run.sh, and only after check has agreed that the
 # cluster still matches the catalog — a measurement on a drifted stand is a wrong number.

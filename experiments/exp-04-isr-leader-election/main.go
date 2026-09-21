@@ -136,7 +136,7 @@ func degraded(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *
 	if err != nil {
 		return err
 	}
-	timing := reached(cfg, "noticed", "the kill", waited)
+	timing := reached(cfg, time.Now(), "noticed", "the kill", waited)
 
 	insync, err := minInsyncReplicas(ctx, admin)
 	if err != nil {
@@ -167,7 +167,7 @@ func recovered(ctx context.Context, admin *kadm.Client, cfg *settings, out io.Wr
 	if err != nil {
 		return err
 	}
-	timing := reached(cfg, "ISR restored", "the restart", waited)
+	timing := reached(cfg, time.Now(), "ISR restored", "the restart", waited)
 
 	state := inspect(partitions)
 	return render(out, slices.Concat(
@@ -190,7 +190,7 @@ func elected(ctx context.Context, admin *kadm.Client, cfg *settings, out io.Writ
 	if err != nil {
 		return err
 	}
-	timing := reached(cfg, "leadership back", "the election", waited)
+	timing := reached(cfg, time.Now(), "leadership back", "the election", waited)
 
 	state := inspect(partitions)
 	return render(out, slices.Concat(
@@ -285,9 +285,9 @@ func writeNote(err error) string {
 // may have got there while this process was still starting. The second is how long this
 // process actually spent polling — near zero means the cluster was already in the wanted
 // state at the first look, so the bound above is process startup and nothing else.
-func reached(cfg *settings, what, event string, waited time.Duration) []string {
+func reached(cfg *settings, now time.Time, what, event string, waited time.Duration) []string {
 	return []string{
-		fmt.Sprintf("%s within\t%s of %s", what, since(cfg, waited), event),
+		fmt.Sprintf("%s within\t%s of %s", what, since(cfg, now, waited), event),
 		fmt.Sprintf("  of that, spent polling\t%s", waited.Round(100*time.Millisecond)),
 	}
 }
@@ -317,11 +317,18 @@ func minInsyncReplicas(ctx context.Context, admin *kadm.Client) (int, error) {
 	return 0, fmt.Errorf("%w: min.insync.replicas on %s", errNoConfig, topic)
 }
 
-func since(cfg *settings, waited time.Duration) time.Duration {
-	if cfg.since <= 0 {
+// since takes now as an argument rather than reading the clock: the two numbers this
+// experiment publishes are elapsed times, and a function that cannot be given a clock
+// cannot be tested for what it reports.
+func since(cfg *settings, now time.Time, waited time.Duration) time.Duration {
+	elapsed := now.Sub(time.UnixMilli(cfg.since))
+	// The shell's timestamp and this process's clock are two wall clocks; an NTP step
+	// between them can make the bound come out shorter than the polling it contains, or
+	// negative. Fall back to what this process timed itself, which is monotonic.
+	if cfg.since <= 0 || elapsed < waited {
 		return waited.Round(100 * time.Millisecond)
 	}
-	return time.Since(time.UnixMilli(cfg.since)).Round(100 * time.Millisecond)
+	return elapsed.Round(100 * time.Millisecond)
 }
 
 func render(out io.Writer, lines []string) error {

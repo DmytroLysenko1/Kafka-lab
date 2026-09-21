@@ -242,25 +242,19 @@ next process starting up, and the 0.2 s was *nothing but* startup. The instrumen
 prints the polling time next to the bound so a degenerate row cannot be mistaken for a
 measurement.
 
-**What was surprising — and it is an inference, not a measurement.** The reaction took
-10.6 s — 10.1 s on the run before it — and the number everyone quotes for "a replica leaves the ISR",
-`replica.lag.time.max.ms` at 30 s, cannot be the one that applies. The argument is that
-`broker.session.timeout.ms` governs it instead: a crashed broker is not a slow follower, so
-the controller stops receiving its heartbeats and fences it, and fencing rewrites the ISR of
-every partition that broker belonged to at once. The three defaults are committed as
-evidence — [`results/broker-timers.log`](../experiments/exp-04-isr-leader-election/results/broker-timers.log):
+**What was surprising.** The reaction took 10.6 s — 10.1 s on the run before it — and the
+number everyone quotes for "a replica leaves the ISR", `replica.lag.time.max.ms` at 30 s,
+cannot be the one that applies. A crashed broker is not a slow follower: the controller
+stops receiving its heartbeats and fences it after `broker.session.timeout.ms`, and fencing
+rewrites the ISR of every partition that broker belonged to at once. The three defaults are
+committed as evidence —
+[`results/broker-timers.log`](../experiments/exp-04-isr-leader-election/results/broker-timers.log):
 `broker.session.timeout.ms=9000`, `broker.heartbeat.interval.ms=2000`,
 `replica.lag.time.max.ms=30000`.
 
-What is missing is the step that would make this a result rather than an argument: no run
-varies either timer. Ten-odd seconds is consistent with the session timeout and inconsistent with the
-lag timer, which is strong circumstantial evidence and not the same thing as showing the
-reaction move when the setting moves. Reading the config off the live broker, which the
-previous version of this entry offered as its defence, settles the *values* — which nobody
-disputes — and says nothing about the causal step. One more run with
-`broker.session.timeout.ms` raised to, say, 20 s would settle it; it is listed as
-outstanding. The distinction matters here more than usual, because this claim has already
-been quoted elsewhere in the docs as established.
+For a while this entry could only argue that. Nothing in the run varied either timer, so
+"ten-odd seconds fits 9 s and cannot fit 30 s" was circumstantial, however strong. exp-04c
+varies it, and the reaction moves with it — the entry below.
 
 **One dead broker degraded every partition — 3 of 3.** With RF 3 on three brokers, every
 broker holds a replica of every partition, so there is no partition that a failure can
@@ -298,3 +292,53 @@ not the writes, which keep succeeding right up until they do not.
 
 **Carried into:** [`static/04-isr-leader-election.md`](static/04-isr-leader-election.md),
 its measurement table.
+
+## exp-04c — the same kill, with the session timeout moved
+
+Date: 2026-09-21 · [run log](../experiments/exp-04-isr-leader-election/results/exp-04c-2026-09-21-172333.log) ·
+`make exp-04c`
+
+**Hypothesis.** exp-04 explained its ten-second reaction by `broker.session.timeout.ms`
+rather than `replica.lag.time.max.ms`. If that is right, raising the session timeout and
+changing nothing else moves the reaction by the same amount. If the lag timer were
+governing it, the reaction would not move at all.
+
+**Setup.** The same experiment, the same topic and the same kill. The brokers are recreated
+with `broker.session.timeout.ms=20000` instead of 9 000 — the named volumes survive, so the
+topic and its data are the ones exp-04 used. `replica.lag.time.max.ms` is left at its
+default. The run prints the timers the broker is enforcing before it measures anything, and
+puts the default back on every exit path.
+
+**Result.**
+
+| `broker.session.timeout.ms` | `replica.lag.time.max.ms` | kill → ISR shrinks |
+|---|---|---|
+| 9 000 (default) | 30 000 | 10.1 s · 10.6 s |
+| **20 000** | 30 000 | **20.3 s** |
+
+The broker's own config listing is in the log above the measurement:
+`broker.session.timeout.ms=20000 synonyms={STATIC_BROKER_CONFIG:...=20000,
+DEFAULT_CONFIG:...=9000}`.
+
+**What this settles.** The reaction tracked the session timeout across an 11-second change
+while the lag timer sat at 30 s throughout. exp-04's explanation was an argument from
+config values — the kind that is usually right and occasionally, expensively, wrong — and
+it is now a measurement. Both figures land about 0.3–1.6 s above their timeout, which is
+the heartbeat interval (2 s) plus the controller's own work plus this experiment's 250 ms
+polling: a broker is fenced when its session expires, and a session expires some time after
+the last heartbeat that would have renewed it, not the instant the process dies.
+
+**What did not move.** ISR recovery after the restart stayed at 5.1 s, unchanged from
+exp-04. That is the returning replica catching up, which has nothing to do with fencing —
+a useful control: had recovery moved too, the change would have been something broader than
+the timer under test.
+
+**Why this matters beyond the number.** "Kafka takes 30 seconds to notice a dead broker" is
+the received wisdom, and it is wrong for the case people mean by it. Tuning
+`replica.lag.time.max.ms` down to make failover faster would do nothing for a crash and
+would make the ISR twitchy under ordinary GC pauses — the setting it would actually change
+is the one for a slow follower. The alert threshold and the failover budget both belong on
+`broker.session.timeout.ms`.
+
+**Carried into:** [`static/04-isr-leader-election.md`](static/04-isr-leader-election.md),
+its measurement table, and the timers table in [`static/README.md`](static/README.md).
