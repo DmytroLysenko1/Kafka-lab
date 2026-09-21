@@ -1,0 +1,20 @@
+meta:
+  name: exp17.sweep
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-17, linger x batch size x codec under a fixed offered load. Six partitions, like
+    payments.main, so the producer is batching across several leaders the way it would in
+    production rather than feeding one. RF 3 and min.insync.replicas 2 as in the catalog,
+    so every latency figure includes the in-sync replication acks=all waits for.
+
+spec:
+  partitions: 6
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

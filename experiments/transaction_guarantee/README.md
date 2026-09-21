@@ -16,7 +16,7 @@ distinct / duplicates`.
 | [exp-10b](exp-10b-database-boundary/) | the same, with a Postgres write in the loop | **Kafka 1 000, Postgres 1 050 — the transaction stops at Kafka** |
 | [exp-10c](exp-10c-read-uncommitted/) | the same, read `read_uncommitted` | **1 050 — the aborted batch is still in the log** |
 | [exp-10d](exp-10d-hanging-transaction/) | a transaction left open | **unrelated records invisible to `read_committed` for 23.2 s behind a 20 s timeout** |
-| exp-17 | linger × batch size × codec under fixed load | throughput against p99 produce latency |
+| [exp-17](exp-17-batching-sweep/) | linger × batch size × codec under fixed load | **linger decides batching, batching decides compression: zstd 3.0× → 5.6× on the same bytes; Java's default is 5 ms, not 0** |
 
 All of them read their logs back through [`../labkit/`](../labkit/), which refuses a short
 read and a partition mid-election. The first three are separate experiments with separate topics, runs and logs, because each

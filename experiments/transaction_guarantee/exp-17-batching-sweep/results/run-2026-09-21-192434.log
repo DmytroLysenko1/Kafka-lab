@@ -1,0 +1,39 @@
+exp-17 — linger x batch size x codec under a fixed load
+date: 2026-09-21-192434
+client: franz-go v1.22.0
+offered: 20000 records/s for 10s per cell, acks=all, 6 partitions, RF 3
+payload: generated payment JSON, seeded, identical for every cell
+
+  linger    batch   codec  offered/s  acked/s     p50      p99  rec/batch  bytes/rec  wire ratio
+      0s    16KiB    none      19947    19947     3ms   27.9ms        5.0        250        1.00
+      0s    16KiB  snappy      19992    19992   2.2ms   14.3ms        4.8        119        2.09
+      0s    16KiB     lz4      19993    19993   2.1ms   17.9ms        5.0        119        2.11
+      0s    16KiB    zstd      19994    19994   2.3ms   23.8ms        5.4         81        3.10
+      0s  default    none      19985    19985   2.4ms   11.5ms        4.6        250        1.00
+      0s  default  snappy      19991    19991     3ms   28.1ms        4.5        122        2.05
+      0s  default     lz4      19992    19992   3.2ms   29.5ms        4.4        124        2.02
+      0s  default    zstd      19989    19989   3.2ms   12.3ms        4.5         87        2.87
+     5ms    16KiB    none      19996    19996   6.7ms   13.5ms       22.3        250        1.00
+     5ms    16KiB  snappy      19991    19991   6.7ms   13.1ms       23.0         88        2.84
+     5ms    16KiB     lz4      19993    19993   6.7ms   12.5ms       22.9         86        2.92
+     5ms    16KiB    zstd      19989    19989   6.8ms   13.3ms       22.1         53        4.72
+     5ms  default    none      19958    19958   6.8ms   18.6ms       22.5        250        1.00
+     5ms  default  snappy      19688    19688   6.7ms   73.6ms       22.8         88        2.84
+     5ms  default     lz4      19991    19991   6.8ms   12.6ms       23.4         85        2.93
+     5ms  default    zstd      19995    19995   6.8ms   16.3ms       22.7         53        4.74
+    10ms    16KiB    none      19905    19905   8.9ms   19.5ms       34.6        250        1.00
+    10ms    16KiB  snappy      19990    19990   8.5ms   16.9ms       33.3         85        2.94
+    10ms    16KiB     lz4      19993    19993   8.2ms   16.7ms       33.9         82        3.05
+    10ms    16KiB    zstd      19994    19994   8.9ms   17.2ms       34.8         49        5.14
+    10ms  default    none      19975    19975   8.8ms   17.3ms       34.3        250        1.00
+    10ms  default  snappy      19995    19995   8.4ms   17.9ms       34.1         85        2.95
+    10ms  default     lz4      19857    19857   8.9ms  125.4ms       35.5         81        3.07
+    10ms  default    zstd      19904    19904   8.9ms   24.4ms       34.4         49        5.13
+    50ms    16KiB    none      19979    19979  11.9ms   27.4ms       40.1        250        1.00
+    50ms    16KiB  snappy      19956    19956  11.7ms   24.7ms       40.1         84        2.99
+    50ms    16KiB     lz4      19989    19989  11.9ms   24.4ms       40.0         80        3.12
+    50ms    16KiB    zstd      19970    19970  12.2ms     25ms       39.7         48        5.23
+    50ms  default    none      19984    19984  29.8ms   56.9ms      140.0        251        1.00
+    50ms  default  snappy      19967    19967  31.3ms   58.6ms      145.4         76        3.28
+    50ms  default     lz4      19976    19976  31.1ms   58.7ms      140.8         74        3.39
+    50ms  default    zstd      19969    19969  31.3ms   58.6ms      139.9         44        5.64

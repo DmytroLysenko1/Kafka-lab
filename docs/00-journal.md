@@ -654,3 +654,78 @@ transaction.
 [`static/06-transactional-outbox.md`](static/06-transactional-outbox.md),
 [`static/05-delivery-semantics.md`](static/05-delivery-semantics.md) and the isolation row
 of [`tuning-checklist.md`](tuning-checklist.md).
+
+
+## exp-17 — linger, batch size and the codec, under one fixed load
+
+Date: 2026-09-21 · `make exp-17` · run logs: [run 1](../experiments/transaction_guarantee/exp-17-batching-sweep/results/run-2026-09-21-191906.log) · [run 2](../experiments/transaction_guarantee/exp-17-batching-sweep/results/run-2026-09-21-192434.log) ·
+[the Java client's own defaults](../experiments/transaction_guarantee/exp-17-batching-sweep/results/java-client-defaults.log)
+
+**Hypothesis.** Linger trades latency for throughput: waiting fills batches, and full
+batches compress better and cost fewer requests. The three franz-go defaults — linger
+10 ms, a ≈1 MB batch ceiling, snappy — have already made that trade before anyone tunes
+anything, and the difference from Java's defaults should be visible and priced.
+
+**Setup.** 32 cells: linger 0, 5, 10 and 50 ms × batch ceiling 16 KiB and the default ×
+codec none, snappy, lz4, zstd. Each cell is offered the same 20 000 records a second for ten
+seconds into a six-partition topic with `acks=all`, RF 3. The payload is generated payment
+JSON — ids, amounts, merchants, timestamps varying, field names repeating — seeded, so every
+codec compresses identical bytes. Latency is from handing a record to the client to its
+acknowledgement; bytes and batch sizes come from the client's own per-batch metrics, not an
+estimate. The whole sweep ran twice.
+
+**Result — robust across both runs.**
+
+| Linger | Records per batch | Median latency | p99 (range over cells and runs) | zstd | snappy |
+|---|---|---|---|---|---|
+| 0 | ≈5 | 2.1–3.4 ms | 11–33 ms, unstable | 2.9–3.1× | 2.0–2.1× |
+| 5 ms — Java since 4.0 | ≈22.5 | 6.6–6.9 ms | 11–19 ms | 4.7× | 2.8× |
+| 10 ms — franz-go | ≈34 | 8.1–9.1 ms | 16–24 ms | 5.1× | 2.95× |
+| 50 ms, 16 KiB batch | ≈40 | 11.7–12.2 ms | 23–32 ms | 5.2× | 3.0× |
+| 50 ms, default batch | ≈140 | 29.8–33.1 ms | 57–65 ms | 5.6× | 3.3× |
+
+Every cell kept up: acknowledged within a percent of offered, in both runs.
+
+**What was surprising, three times.**
+
+*The Java default was not what the documents said.* Every tuning guide, and this
+repository until this run, gives Java's `linger.ms` as 0. Kafka 4.0 changed it to 5 ms
+(KIP-1030). That was not recalled — it was printed by the 4.3.1 Java client's own config
+class inside the broker image, along with `batch.size` = 16 384, which also corrected a row
+of the tuning checklist that claimed both clients defaulted to ≈1 MB. The sweep grew a 5 ms
+row so that "both clients' defaults are in the table" became true rather than assumed.
+
+*Compression is a property of the batch, not the codec.* zstd went from 3.0× to 5.6× on
+identical bytes, and snappy from 2.1× to 3.3×, purely by changing how long the producer
+waited. A team comparing codecs at linger 0 is measuring how badly five-record batches
+compress, and will pick the wrong one.
+
+*Linger is an upper bound, not a price.* The checklist said "you pay exactly the linger in
+added latency". 10 ms added about 6 ms to the median, because a batch ships as soon as it is
+full or another partition's request goes out. At 50 ms the batch ceiling decided everything:
+a 16 KiB batch filled in about 12 ms and shipped, so the 50 ms linger was never reached;
+with the default ≈1 MB ceiling the producer waited it out and the median was 31 ms. Below
+16 KiB of batch the two ceilings measured identically — the knob does nothing until batches
+reach it.
+
+**What this means for the two clients.** franz-go's 10 ms against Java's 5 ms costs 1.5–2 ms
+of median latency and about 5 ms of p99, and buys batches half as large again and 4–8% better
+compression. That is a defensible default for a service; it is not the free lunch the
+"Go is cheaper" comparison sometimes assumes, and it is not the 10 ms penalty the other side
+assumes either.
+
+**What the tail says, and what it does not.** Linger 0 has the lowest median and the least
+stable tail — 11 to 33 ms at p99 across cells that should behave alike — because five-record
+batches mean several thousand requests a second, and more, smaller requests queue unevenly.
+Two single cells in the second run spiked to 74 and 125 ms at p99 where the first run had
+measured 11 and 19: host noise, visible only because the sweep ran twice. No conclusion here
+rests on a single cell's p99.
+
+**What this run does not show.** At 20 000 records a second none of the 32 configurations
+was short of capacity, so throughput did not differ and neither did the codecs' CPU cost:
+zstd bought the fewest bytes at no measurable latency. Both only appear at saturation, which
+is exp-17b, listed as outstanding.
+
+**Carried into:** the `linger.ms`, `batch.size` and `compression.type` rows of
+[`tuning-checklist.md`](tuning-checklist.md), [`static/01-write-path.md`](static/01-write-path.md)
+and the defaults table in [`static/README.md`](static/README.md).

@@ -1,0 +1,10 @@
+# The Java producer's defaults, printed by the Kafka 4.3.1 client itself:
+#   java -cp '/opt/kafka/libs/*' org.apache.kafka.clients.producer.ProducerConfig
+# (the config class's own documentation dump, run inside kafka-lab-kafka1), 2026-09-21
+
+linger.ms = 5
+batch.size = 16384
+compression.type = none
+acks = all
+enable.idempotence = true
+max.in.flight.requests.per.connection = 5
