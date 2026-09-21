@@ -76,6 +76,56 @@ func TestEveryModeDeclaresWhatItMustDemonstrate(t *testing.T) {
 	}
 }
 
+func TestVerdictRefusesARunThatDidNotExerciseItsMode(t *testing.T) {
+	type args struct {
+		mode  Mode
+		tally Tally
+	}
+
+	const asExpected = "as expected"
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "the inbox refused the replayed batch and the table is clean: deduplication shown",
+			args: args{mode: Inbox, tally: Tally{Produced: 1000, Rows: 1000, Distinct: 1000, Refused: 50}},
+			want: asExpected,
+		},
+		{
+			// The gap the audit found: without the refusal count this run printed "exactly
+			// once" and could not be told apart from one that was never redelivered anything.
+			name: "a clean inbox table with nothing redelivered proves nothing about the inbox",
+			args: args{mode: Inbox, tally: Tally{Produced: 1000, Rows: 1000, Distinct: 1000}},
+			want: "EXPECTED the inbox to refuse redeliveries — none arrived, so a clean table proves nothing",
+		},
+		{
+			name: "an inbox that still let a duplicate through fails on the outcome first",
+			args: args{mode: Inbox, tally: Tally{Produced: 1000, Rows: 1001, Distinct: 1000, Refused: 49}},
+			want: `EXPECTED "every payment exactly once" — this run did not demonstrate what it exists to demonstrate`,
+		},
+		{
+			name: "at-least-once needs no refusals: its duplicates are the redelivery",
+			args: args{mode: AtLeastOnce, tally: Tally{Produced: 1000, Rows: 1050, Distinct: 1000}},
+			want: asExpected,
+		},
+		{
+			name: "at-most-once that lost nothing did not demonstrate the loss",
+			args: args{mode: AtMostOnce, tally: Tally{Produced: 1000, Rows: 1000, Distinct: 1000}},
+			want: `EXPECTED "payments lost" — this run did not demonstrate what it exists to demonstrate`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if diff := cmp.Diff(tt.want, tt.args.mode.Verdict(tt.args.tally)); diff != "" {
+				t.Errorf("mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestShouldDieLandsWhereTheCrashCostsSomething(t *testing.T) {
 	type args struct {
 		mode        Mode

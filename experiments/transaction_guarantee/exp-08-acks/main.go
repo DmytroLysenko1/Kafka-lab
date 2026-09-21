@@ -108,8 +108,7 @@ func writeAcksOne(ctx context.Context, cfg *settings, out io.Writer) error {
 		kgo.DisableIdempotentWrite(),
 		// franz-go compresses with snappy by default, unlike the Java client. The padding
 		// below is repetitive, so with compression on, 8 MB of records became a 600 KB log
-		// that one fetch carried in full — and the throttle this run depends on never
-		// applied. The bytes have to reach the disk as written.
+		// and RECORD_BYTES stopped meaning what it says. The bytes reach the disk as written.
 		kgo.ProducerBatchCompression(kgo.NoCompression()),
 	)
 	if err != nil {
@@ -164,10 +163,7 @@ func refusal(err error) string {
 }
 
 func write(ctx context.Context, client *kgo.Client, cfg *settings) (int, error) {
-	// The payload size is not decoration. Kafka enforces a quota by delaying the NEXT
-	// request after one exceeds it, so a log small enough to fit in a single fetch is
-	// replicated in full before any throttle applies — which is why the first version of
-	// this run found nothing missing. The log has to be bigger than one fetch.
+	// Every key is distinct, so count can tell a lost record from a duplicated one.
 	padding := strings.Repeat("x", cfg.recordBytes)
 	batch := make([]*kgo.Record, 0, cfg.records)
 	for i := range cfg.records {

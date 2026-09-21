@@ -1,11 +1,16 @@
 package stand
 
+import "fmt"
+
 // Tally is what the database says after a run: how many payments were produced, how many
 // rows the consumer left behind, and how many distinct payments those rows cover.
 type Tally struct {
 	Produced int
 	Rows     int
 	Distinct int
+	// Refused counts redeliveries the inbox turned away because the payment was already
+	// claimed. Only exp-07 writes through the inbox, so for the other two it stays 0.
+	Refused int
 }
 
 // Lost counts payments that were produced and never landed in the database. It is not
@@ -44,5 +49,20 @@ func (t Tally) Outcome() Outcome {
 		return OutcomeDuplicate
 	default:
 		return OutcomeExactly
+	}
+}
+
+// Verdict says whether a run demonstrated what its mode exists to demonstrate. For the
+// inbox a clean table is not enough: a run in which nothing was redelivered comes out
+// exactly once as well, and proves nothing about deduplication.
+func (m Mode) Verdict(t Tally) string {
+	want := m.Expects()
+	switch {
+	case t.Outcome() != want:
+		return fmt.Sprintf("EXPECTED %q — this run did not demonstrate what it exists to demonstrate", want)
+	case m == Inbox && t.Refused == 0:
+		return "EXPECTED the inbox to refuse redeliveries — none arrived, so a clean table proves nothing"
+	default:
+		return "as expected"
 	}
 }

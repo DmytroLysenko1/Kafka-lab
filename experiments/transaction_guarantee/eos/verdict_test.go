@@ -30,6 +30,14 @@ func TestJudgeRequiresBothHalvesOfEachClaim(t *testing.T) {
 			want:  true,
 		},
 		{
+			// The gap the audit found: with no aborted batch in the log, the crash never
+			// landed inside a transaction, and an exact output proves nothing about rollback.
+			name:  "10a: an exact output with nothing aborted proves nothing",
+			claim: KafkaExactlyOnce,
+			got:   views{Produced: 1000, Committed: exact, Uncommitted: exact},
+			want:  false,
+		},
+		{
 			name:  "10a: a duplicate in the committed output breaks exactly-once",
 			claim: KafkaExactlyOnce,
 			got:   views{Produced: 1000, Committed: doubled},

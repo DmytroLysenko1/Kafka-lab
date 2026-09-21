@@ -70,7 +70,7 @@ matter and `autonumber` counts only arrows.
 | 11–13 | `PREPARE_COMMIT` is the point of no return, and it is durable before the caller is told anything. The markers after it are cleanup that will happen eventually, even if the coordinator dies. | Treating a commit timeout as an abort. Same rule as [01](01-write-path.md) step 13: after the request is sent, the outcome is unknown, not failed. |
 | 14–15 | A marker is a control batch, appended to each participating partition, never handed to application code. | Counting records with a raw log dump and finding more than you produced. |
 | 16 | The LSO advances past the marker, and everything in the transaction becomes visible at once. | This is the lag people report as "messages are missing": a `read_committed` consumer is not behind, it is waiting for a marker that has not been written yet ([02](02-log-segments-retention.md), [03](03-read-path.md)). |
-| 17–18 | The step that is drawn outside the frame on purpose. A row in Postgres is not a Kafka partition, so it cannot be a member of the set in step 5: no `AddPartitionsToTxn` can name it, no marker is written to it, and `EndTxn abort` leaves it untouched. | The single most expensive misreading of this feature. An aborted transaction rolls back the records and the offsets and keeps the row — so the input is reprocessed, the row is written a second time, and the system is at-least-once exactly where it was assumed to be exactly-once (exp-10b). |
+| 17–18 | The step that is drawn outside the frame on purpose. A row in Postgres is not a Kafka partition, so it cannot be a member of the set in step 5: no `AddPartitionsToTxn` can name it, no marker is written to it, and `EndTxn abort` leaves it untouched. | The single most expensive misreading of this feature. An aborted transaction discards the records and commits no offsets, and keeps the row — so the input is reprocessed, the row is written a second time, and the system is at-least-once exactly where it was assumed to be exactly-once (exp-10b). |
 
 ## The consumer is half of the guarantee
 
@@ -139,8 +139,8 @@ transaction is dead and aborts it.
 | exp-10c — `read_uncommitted` | 1 000, 1 000 distinct | **1 050 — the aborted batch delivered** | — | [run](../../experiments/transaction_guarantee/exp-10c-read-uncommitted/results/run-2026-09-21-185751.log) |
 
 **The transaction held exactly where it claims to and nowhere else.** The output records
-of the killed batch and its consumed offsets rolled back together, so the replacement
-reprocessed the batch and a `read_committed` reader saw every payment once. The Postgres
+of the killed batch were aborted and its consumed offsets, which join the transaction only
+at its end, were never committed, so the replacement reprocessed the batch and a `read_committed` reader saw every payment once. The Postgres
 rows written for the same batch did not roll back, because nothing told the database a
 transaction existed — 50 payments recorded twice. That is exp-10b in one line: EOS is a
 property of Kafka's partitions, and a database write inside the loop is outside it.

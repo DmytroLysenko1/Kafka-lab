@@ -28,7 +28,7 @@ run() { "$binary" -run-id "$run_id" -payments "$payments" "$@"; }
   echo "exp-10c — the same crash read with read_uncommitted: the aborted records are delivered"
   echo "date: $stamp"
   echo "client: franz-go $(go list -m github.com/twmb/franz-go | awk '{print $2}')"
-  echo "payments: $payments, processor killed mid-transaction after handling $die_after"
+  echo "payments: $payments, processor killed mid-transaction at the first batch that takes it to $die_after handled"
   echo
 
   run -phase seed

@@ -1,0 +1,11 @@
+exp-10a — a crash mid-transaction aborts the output, and the offsets were never committed
+date: 2026-09-22-001224
+client: franz-go v1.22.0
+payments: 1000, processor killed mid-transaction at the first batch that takes it to 525 handled
+
+2026/09/22 00:12:36 WARN exp-10a: killing the processor mid-transaction handled=550
+experiments/transaction_guarantee/exp-10a-rollback/run.sh: line 25: 26192 Killed: 9               "$binary" -run-id "$run_id" -payments "$payments" "$@"
+payments          1000 seeded
+read_committed    1000 rows, 1000 distinct, 0 duplicated
+read_uncommitted  1050 rows, 1000 distinct, 50 duplicated
+claim             read_committed exactly once, although a batch was aborted mid-transaction — as expected

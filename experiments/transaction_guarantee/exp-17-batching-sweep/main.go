@@ -65,12 +65,15 @@ type point struct {
 	codec  codec
 }
 
-// outcome is what one cell measured.
+// outcome is what one cell measured. drain is the time from the last record offered to
+// the last acknowledgement. Flush stops every linger, so a cell that keeps up drains in
+// about a round trip whatever its linger, and one that falls behind carries its backlog
+// past the end of the window.
 type outcome struct {
 	offered  int
-	acked    int
 	failed   int
-	elapsed  time.Duration
+	window   time.Duration
+	drain    time.Duration
 	lat      latencies
 	sentWire wire
 }
@@ -104,7 +107,7 @@ func run() error {
 
 func sweep(ctx context.Context, cfg *settings, out io.Writer) error {
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', tabwriter.AlignRight)
-	if _, err := fmt.Fprintln(table, "linger\tbatch\tcodec\toffered/s\tacked/s\tp50\tp99\trec/batch\tbytes/rec\twire ratio\t"); err != nil {
+	if _, err := fmt.Fprintln(table, "linger\tbatch\tcodec\toffered/s\tdrain\tfailed\tp50\tp99\trec/batch\tbytes/rec\twire ratio\t"); err != nil {
 		return fmt.Errorf("exp-17: write report: %w", err)
 	}
 
@@ -134,10 +137,9 @@ func grid() []point {
 }
 
 func row(cell point, got *outcome) string {
-	seconds := got.elapsed.Seconds()
-	return fmt.Sprintf("%s\t%s\t%s\t%.0f\t%.0f\t%s\t%s\t%.1f\t%.0f\t%.2f\t",
+	return fmt.Sprintf("%s\t%s\t%s\t%.0f\t%s\t%d\t%s\t%s\t%.1f\t%.0f\t%.2f\t",
 		cell.linger, batchLabel(cell.batch), cell.codec.name,
-		float64(got.offered)/seconds, float64(got.acked)/seconds,
+		float64(got.offered)/got.window.Seconds(), got.drain.Round(100*time.Microsecond), got.failed,
 		got.lat.percentile(0.50).Round(100*time.Microsecond), got.lat.percentile(0.99).Round(100*time.Microsecond),
 		got.sentWire.recordsPerBatch(), float64(got.sentWire.Compressed)/float64(max(got.sentWire.Records, 1)),
 		got.sentWire.ratio())
@@ -151,8 +153,9 @@ func batchLabel(b int32) string {
 }
 
 // measure offers a fixed load to one configuration and records what came back. The load
-// is the same for every cell, so a cell that cannot keep up shows it as acked below
-// offered rather than as a faster run on less data.
+// is the same for every cell, so a cell that cannot keep up shows it as a long drain
+// rather than as a faster run on less data. Acknowledgements per second
+// would not show it: counted up to the end of the flush, every record offered is acked.
 func measure(ctx context.Context, cfg *settings, cell point) (outcome, error) {
 	sent := &wireHook{}
 	client, err := kgo.NewClient(
@@ -165,20 +168,35 @@ func measure(ctx context.Context, cfg *settings, cell point) (outcome, error) {
 	if err != nil {
 		return outcome{}, fmt.Errorf("exp-17: kafka client for %s: %w", cell.codec.name, err)
 	}
-	defer client.Close()
 
+	got, err := offerAndFlush(ctx, client, cfg, cell)
+	// Closed before the wire totals are read, not deferred: Flush orders only the record
+	// promises, and franz-go runs the batch-written hook from a defer after them, so the
+	// last batch of the cell could otherwise be missing from the byte counts.
+	client.Close()
+	if err != nil {
+		return outcome{}, err
+	}
+	got.sentWire = sent.total()
+	return got, nil
+}
+
+// offerAndFlush offers the cell's load and waits for every record to be acknowledged.
+// Everything it measures comes from the promises, which Flush does order.
+func offerAndFlush(ctx context.Context, client *kgo.Client, cfg *settings, cell point) (outcome, error) {
 	rec := &recorder{lat: make(latencies, 0, cfg.rate*int(cfg.duration/time.Second))}
 	started := time.Now()
 	offered, err := offer(ctx, client, cfg, rec)
 	if err != nil {
 		return outcome{}, err
 	}
+	offerEnded := time.Now()
 	if err := client.Flush(ctx); err != nil {
 		return outcome{}, fmt.Errorf("exp-17: flush %s: %w", cell.codec.name, err)
 	}
 
 	got := rec.snapshot()
-	got.offered, got.elapsed, got.sentWire = offered, time.Since(started), sent.total()
+	got.offered, got.window, got.drain = offered, offerEnded.Sub(started), time.Since(offerEnded)
 	return got, nil
 }
 
@@ -214,7 +232,6 @@ func offer(ctx context.Context, client *kgo.Client, cfg *settings, rec *recorder
 type recorder struct {
 	mu     sync.Mutex
 	lat    latencies
-	acked  int
 	failed int
 }
 
@@ -225,14 +242,13 @@ func (r *recorder) record(took time.Duration, err error) {
 		r.failed++
 		return
 	}
-	r.acked++
 	r.lat = append(r.lat, took)
 }
 
 func (r *recorder) snapshot() outcome {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return outcome{acked: r.acked, failed: r.failed, lat: r.lat}
+	return outcome{failed: r.failed, lat: r.lat}
 }
 
 // wireHook sums the client's own per-batch metrics: what actually went over the wire,

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # exp-08 — what `acks` actually promises, in two halves.
 #
-#   acks=1   the leader answers alone, and whether anything is lost depends on a race it
-#            does not tell you about.
+#   acks=1   the leader answers alone. The followers are paused before the write, so the
+#            window between the acknowledgement and replication is held open on purpose,
+#            and the leader is killed inside it.
 #   acks=all with min.insync.replicas=3 and a broker down: refused outright, not lost.
 #
 # Usage: make exp-08
@@ -33,6 +34,7 @@ settled() {
   return 1
 }
 restore() {
+  for id in 1 2 3; do docker unpause "kafka-lab-kafka$id" >/dev/null 2>&1 || true; done
   [ -n "$victim" ] && docker start "kafka-lab-kafka$victim" >/dev/null 2>&1 || true
   for _ in $(seq 120); do settled && break; sleep 1; done
   settled || echo "exp-08: the cluster was still under-replicated after two minutes; run make elect-preferred by hand" >&2
@@ -54,7 +56,19 @@ require_broker() { case "$1" in 1|2|3) ;; *) echo "exp-08: could not read the le
 # ---------------------------------------------------------------- half one: acks=1
 victim="$(leader_of exp08.acks1)"
 require_broker "$victim" exp08.acks1
+session_timeout_ms="$(docker exec "kafka-lab-kafka$victim" printenv KAFKA_BROKER_SESSION_TIMEOUT_MS)"
+followers=""
+for id in 1 2 3; do [ "$id" != "$victim" ] && followers="$followers $id"; done
 
+# Killing the leader after the write proves nothing: on a local network the followers have
+# every record within milliseconds, so the window is closed before any kill lands — the
+# first version of this run read "lost 0" and called it luck. Pausing both followers holds
+# the window open. They stay in the in-sync set, because shrinking it needs the controller
+# quorum and two of the three combined nodes are frozen, so when they are thawed one of them
+# is elected cleanly — with none of the records the dead leader acknowledged. With dedicated
+# controllers the quorum would stay up and fence a follower silent for longer than
+# broker.session.timeout.ms, so the pause is timed: under that timeout, a live quorum would
+# have left the followers in the set too, and the result does not depend on this stand.
 log="$here/results/acks-one-$stamp.log"
 {
   echo "exp-08a — what acks=1 acknowledges, and whether it survives"
@@ -65,11 +79,19 @@ log="$here/results/acks-one-$stamp.log"
 
   exp08 -topic exp08.acks1 -phase leader
   echo
-  exp08 -topic exp08.acks1 -phase write-acks-one
+
+  echo "pausing the followers:$followers"
+  paused_at="$(date +%s)"
+  for id in $followers; do docker pause "kafka-lab-kafka$id" >/dev/null; done
+  # Only the leader is reachable, so it is the only seed: a metadata request sent to a
+  # frozen broker would hang instead of failing.
+  exp08 -topic exp08.acks1 -phase write-acks-one -brokers "localhost:${victim}9092" -timeout 1m
   echo
 
-  echo "killing kafka$victim, the leader that acknowledged them"
+  echo "killing kafka$victim, the leader that acknowledged them, then thawing the followers"
   docker kill "kafka-lab-kafka$victim" >/dev/null
+  for id in $followers; do docker unpause "kafka-lab-kafka$id" >/dev/null; done
+  echo "followers paused for $(( $(date +%s) - paused_at ))s, against a broker.session.timeout.ms of ${session_timeout_ms}ms"
   exp08 -topic exp08.acks1 -phase await-shrunk -timeout 3m
   echo
 

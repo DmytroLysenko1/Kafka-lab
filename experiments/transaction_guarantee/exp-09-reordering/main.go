@@ -113,9 +113,10 @@ func measure(ctx context.Context, cfg *settings, out io.Writer) error {
 // producerOptions is the whole difference between the two runs. Both ask for acks=all,
 // so a record is only acknowledged once the in-sync set has it; what differs is whether
 // the broker can tell a retried batch from a new one.
-func producerOptions(cfg *settings) []kgo.Opt {
+func producerOptions(cfg *settings, seen *failures) []kgo.Opt {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(strings.Split(cfg.brokers, ",")...),
+		kgo.WithLogger(seen),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
 		// Small, frequent requests, so several are in flight to the leader when one of
 		// them fails: reordering needs an earlier request to fail while a later one lands.
@@ -137,11 +138,11 @@ func producerOptions(cfg *settings) []kgo.Opt {
 // produce starts a steady stream of payments, each a capture followed by its refund, and
 // keeps it going while the script freezes and thaws a follower.
 func produce(ctx context.Context, cfg *settings, out io.Writer) error {
-	client, err := kgo.NewClient(producerOptions(cfg)...)
+	seen := newFailures()
+	client, err := kgo.NewClient(producerOptions(cfg, seen)...)
 	if err != nil {
 		return fmt.Errorf("exp-09: kafka client: %w", err)
 	}
-	defer client.Close()
 
 	var acked, failed atomic.Int64
 	var lastFailure atomic.Value
@@ -154,12 +155,15 @@ func produce(ctx context.Context, cfg *settings, out io.Writer) error {
 		acked.Add(1)
 	}
 
-	sent, err := stream(ctx, client, cfg, promise)
+	sent, err := streamAndFlush(ctx, client, cfg, promise)
+	// Closed before seen is read, not deferred: Flush orders only the record promises, and
+	// franz-go logs each response's debug summary — what seen counts — from a defer that
+	// runs after them. Close cancels the client and stops every broker first, which lets
+	// those last summaries land; the retries this run counts all happen mid-stream, while
+	// a follower is frozen, never in the healthy tail.
+	client.Close()
 	if err != nil {
 		return err
-	}
-	if err := client.Flush(ctx); err != nil {
-		return fmt.Errorf("exp-09: flush after %d events: %w", sent, err)
 	}
 
 	lines := []string{
@@ -169,10 +173,22 @@ func produce(ctx context.Context, cfg *settings, out io.Writer) error {
 		fmt.Sprintf("failed\t%d", failed.Load()),
 		fmt.Sprintf("PRODUCED\t%d", sent),
 	}
+	lines = append(lines, seen.lines()...)
 	if reason, ok := lastFailure.Load().(string); ok {
 		lines = append(lines, fmt.Sprintf("last failure\t%s", reason))
 	}
 	return render(out, lines)
+}
+
+func streamAndFlush(ctx context.Context, client *kgo.Client, cfg *settings, promise func(*kgo.Record, error)) (int, error) {
+	sent, err := stream(ctx, client, cfg, promise)
+	if err != nil {
+		return sent, err
+	}
+	if err := client.Flush(ctx); err != nil {
+		return sent, fmt.Errorf("exp-09: flush after %d events: %w", sent, err)
+	}
+	return sent, nil
 }
 
 func stream(ctx context.Context, client *kgo.Client, cfg *settings, promise func(*kgo.Record, error)) (int, error) {

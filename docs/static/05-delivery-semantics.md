@@ -31,10 +31,13 @@ sequenceDiagram
 payment from the system with no error anywhere: the group resumes at 43 and record 42 is
 never redelivered (exp-05).*
 
-This is what `enable.auto.commit=true` does by default: it commits offsets that were
-handed to the application, on a timer, in the background, regardless of whether the
-handler finished. Nothing in the logs marks the loss. The only evidence is a count
-mismatch that nobody is counting.
+exp-05 puts the commit there by hand. Autocommit does not by default: both clients commit
+only what the *previous* poll returned, so a handler that finishes a batch before polling
+again stays behind its commit, which is at-least-once. It lands in this case when the
+handler hands records to another goroutine and polls on, or when franz-go's
+`AutoCommitGreedy` commits what was just returned. However the commit gets ahead of the
+work, nothing in the logs marks the loss. The only evidence is a count mismatch that nobody
+is counting.
 
 ## Case B — at-least-once: process first
 
@@ -127,7 +130,7 @@ single most useful sentence in the whole KR2 write-up.
 [journal](../00-journal.md#exp-050607--the-three-semantics-as-numbers) · run logs:
 [`make exp-05`](../../experiments/transaction_guarantee/exp-05-at-most-once/results/run-2026-09-21-180311.log) ·
 [`make exp-06`](../../experiments/transaction_guarantee/exp-06-at-least-once/results/run-2026-09-21-180404.log) ·
-[`make exp-07`](../../experiments/transaction_guarantee/exp-07-inbox/results/run-2026-09-21-180500.log)
+[`make exp-07`](../../experiments/transaction_guarantee/exp-07-inbox/results/run-2026-09-21-180500.log) · [exp-07 with the refusal count](../../experiments/transaction_guarantee/exp-07-inbox/results/run-2026-09-21-234218.log)
 
 1 000 payments, one consumer, `SIGKILL` delivered mid-batch. Three separate runs on three
 separate topics, differing in exactly one thing: where the offset is committed relative to
@@ -137,7 +140,7 @@ the write.
 |---|---|---|---|---|
 | exp-05 at-most-once | commit **then** write | 951 | 951 | **49 payments lost** |
 | exp-06 at-least-once | write **then** commit | 1 050 | 1 000 | **50 payments charged twice** |
-| exp-07 inbox | claim + write in one transaction, then commit | 1 000 | 1 000 | **exactly once** |
+| exp-07 inbox | claim + write in one transaction, then commit | 1 000 | 1 000 | **exactly once, 50 redeliveries refused** |
 
 The two failure numbers are the same window seen from both sides: one batch of 50. Under
 at-most-once the batch's offsets were stored before it was written, so the 49 records still
@@ -147,7 +150,8 @@ second time. Neither is a bug in Kafka; both are the consequence of a two-line o
 decision in the consumer.
 
 **The inbox does not make delivery exactly-once.** exp-07 was delivered the same 50 records
-twice — the log shows the same replay — and still holds 1 000 rows, because the claim and
+twice — the inbox refused exactly 50 redeliveries, counted in the same transaction as each
+claim ([run](../../experiments/transaction_guarantee/exp-07-inbox/results/run-2026-09-21-234218.log)) — and still holds 1 000 rows, because the claim and
 the write are one transaction: the second delivery loses the race for the primary key and
 writes nothing. *Exactly-once effect, at-least-once delivery.*
 

@@ -112,8 +112,7 @@ func (c *consumer) write(ctx context.Context, handled Payment) error {
 	if c.cfg.Mode != Inbox {
 		return c.db.record(ctx, c.cfg.RunID, c.cfg.Mode, handled)
 	}
-	_, err := c.db.recordOnce(ctx, c.cfg.RunID, c.cfg.Mode, handled)
-	return err
+	return c.db.recordOnce(ctx, c.cfg.RunID, c.cfg.Mode, handled)
 }
 
 func (c *consumer) commit(ctx context.Context, fetches kgo.Fetches) error {

@@ -28,8 +28,8 @@ the database, because the dead process's memory is not evidence of anything.
 |---|---|---|
 | 951 | 951 | **49 payments lost** |
 
-The missing 49 are one batch minus the record that was being written when the process
-died. Their offsets had already been stored, so as far as the group is concerned they were
+The missing 49 are one batch of 50 minus the one record already written when the process
+died — the kill lands right after the 501st write. Their offsets had already been stored, so as far as the group is concerned they were
 handled, and the resuming consumer starts past them. Nothing in the cluster reports this:
 there is no error, no lag, and no retry — the payments simply never existed for anyone
 downstream.
