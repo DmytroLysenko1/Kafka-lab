@@ -345,15 +345,19 @@ its measurement table, and the timers table in [`static/README.md`](static/READM
 
 ## exp-05/06/07 — the three semantics as numbers
 
-Date: 2026-09-21 ·
-[run log](../experiments/transaction_guarantee/exp-05-delivery-semantics/results/run-2026-09-21-175334.log) ·
-`make exp-05`
+Date: 2026-09-21 · `make exp-05`, `make exp-06`, `make exp-07` · run logs:
+[at-most-once](../experiments/transaction_guarantee/exp-05-at-most-once/results/run-2026-09-21-180311.log) ·
+[at-least-once](../experiments/transaction_guarantee/exp-06-at-least-once/results/run-2026-09-21-180404.log) ·
+[inbox](../experiments/transaction_guarantee/exp-07-inbox/results/run-2026-09-21-180500.log)
 
 **Hypothesis.** At-most-once, at-least-once and effectively-once are not three libraries or
 three settings. They are one ordering decision — where the offset is committed relative to
 the write — and a crash in the wrong place turns each into a different kind of incident.
 
-**Setup.** One topic of 3 partitions, RF 3. 1 000 payments produced with `acks=all`, then a
+**Setup.** Three experiments, one harness. Each owns a topic of 3 partitions, RF 3 — they
+are not allowed to share one, because a consumer group resumes from committed offsets and a
+topic carrying a sibling's records would replay them into this one's count. 1 000 payments
+produced with `acks=all`, then a
 consumer with `DisableAutoCommit` reads them in batches of 50 and writes each to Postgres.
 Partway through, the consumer sends itself `SIGKILL` — a real crash, so no deferred close
 runs and nothing is flushed — and a second process resumes from whatever the first managed

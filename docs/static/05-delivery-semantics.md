@@ -124,11 +124,14 @@ single most useful sentence in the whole KR2 write-up.
 
 ## Measured
 
-`make exp-05` · [journal](../00-journal.md#exp-050607--the-three-semantics-as-numbers) ·
-[run log](../../experiments/transaction_guarantee/exp-05-delivery-semantics/results/run-2026-09-21-175334.log)
+[journal](../00-journal.md#exp-050607--the-three-semantics-as-numbers) · run logs:
+[`make exp-05`](../../experiments/transaction_guarantee/exp-05-at-most-once/results/run-2026-09-21-180311.log) ·
+[`make exp-06`](../../experiments/transaction_guarantee/exp-06-at-least-once/results/run-2026-09-21-180404.log) ·
+[`make exp-07`](../../experiments/transaction_guarantee/exp-07-inbox/results/run-2026-09-21-180500.log)
 
-1 000 payments, one consumer, `SIGKILL` delivered mid-batch. The three runs differ in
-exactly one thing: where the offset is committed relative to the write.
+1 000 payments, one consumer, `SIGKILL` delivered mid-batch. Three separate runs on three
+separate topics, differing in exactly one thing: where the offset is committed relative to
+the write.
 
 | Run | Commit order | Rows | Distinct | Result |
 |---|---|---|---|---|

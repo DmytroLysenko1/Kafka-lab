@@ -1,0 +1,24 @@
+meta:
+  name: exp05.payments
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-05: 1000 payments produced once, then consumed by a process that is killed
+    mid-batch. Its own topic, not shared with its two sibling experiments: the consumer
+    group resumes from committed offsets, and a topic carrying another experiment's
+    records would replay them into this one's count. Three partitions, because the loss
+    and the duplication both happen at a commit boundary and three gives three of them
+    without making a run slow. RF 3 and min.insync.replicas 2 match the catalog — this
+    experiment is about the consumer's commit order, so nothing on the producer side
+    should be able to lose a record and confuse the result.
+
+spec:
+  partitions: 3
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

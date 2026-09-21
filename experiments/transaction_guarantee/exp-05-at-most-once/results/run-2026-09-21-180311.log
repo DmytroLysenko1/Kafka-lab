@@ -1,0 +1,11 @@
+exp-05 — at-most-once, the offset committed before the write
+date: 2026-09-21-180311
+client: franz-go v1.22.0
+payments: 1000, consumer killed after handling 500
+
+2026/09/21 18:03:18 WARN exp-05: killing this consumer mode=at-most-once handled=501
+experiments/transaction_guarantee/exp-05-at-most-once/run.sh: line 29: 22548 Killed: 9               "$binary" -run-id "$run_id" -payments "$payments" "$@"
+at-most-once  produced 1000, rows 951, distinct 951
+  lost        49
+  duplicated  0
+  outcome     payments lost — as expected

@@ -1,4 +1,4 @@
-package main
+package stand
 
 import (
 	"context"
@@ -61,21 +61,21 @@ func (p *progress) remaining() int64 {
 	return left
 }
 
-func endOffsets(ctx context.Context, cfg *settings, group string) (*progress, error) {
-	client, err := kgo.NewClient(kgo.SeedBrokers(strings.Split(cfg.brokers, ",")...))
+func endOffsets(ctx context.Context, cfg *Settings, group string) (*progress, error) {
+	client, err := kgo.NewClient(kgo.SeedBrokers(strings.Split(cfg.Brokers, ",")...))
 	if err != nil {
-		return nil, fmt.Errorf("exp-05: kafka client for end offsets: %w", err)
+		return nil, fmt.Errorf("%s: kafka client for end offsets: %w", cfg.Name, err)
 	}
 	defer client.Close()
 
 	admin := kadm.NewClient(client)
-	listed, err := admin.ListEndOffsets(ctx, topic)
+	listed, err := admin.ListEndOffsets(ctx, cfg.Topic)
 	if err != nil {
-		return nil, fmt.Errorf("exp-05: end offsets of %s: %w", topic, err)
+		return nil, fmt.Errorf("%s: end offsets of %s: %w", cfg.Name, cfg.Topic, err)
 	}
 
-	end := make(map[int32]int64, len(listed[topic]))
-	for partition, offset := range listed[topic] {
+	end := make(map[int32]int64, len(listed[cfg.Topic]))
+	for partition, offset := range listed[cfg.Topic] {
 		end[partition] = offset.Offset
 	}
 
@@ -83,12 +83,12 @@ func endOffsets(ctx context.Context, cfg *settings, group string) (*progress, er
 	// of a run starting from the beginning.
 	stored, err := admin.FetchOffsets(ctx, group)
 	if err != nil && !errors.Is(err, kerr.GroupIDNotFound) {
-		return nil, fmt.Errorf("exp-05: committed offsets of %s: %w", group, err)
+		return nil, fmt.Errorf("%s: committed offsets of %s: %w", cfg.Name, group, err)
 	}
 
 	committed := make(map[int32]int64, len(end))
 	stored.Each(func(offset kadm.OffsetResponse) {
-		if offset.Topic == topic {
+		if offset.Topic == cfg.Topic {
 			committed[offset.Partition] = offset.At
 		}
 	})
