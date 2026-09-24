@@ -34,7 +34,7 @@ const (
 
 var (
 	errStrategy = errors.New("exp-14: -strategy must be eager, cooperative or server")
-	errShape    = errors.New("exp-14: -rate, -work, -join-after or -duration out of range")
+	errShape    = errors.New("exp-14: -rate, -work, -join-after, -leave-after or -duration out of range")
 )
 
 type settings struct {
@@ -44,7 +44,17 @@ type settings struct {
 	work      time.Duration
 	block     bool
 	joinAfter time.Duration
-	duration  time.Duration
+	// leaveAfter closes the second consumer again, so the run measures a member leaving
+	// rather than joining; 0 leaves it in for the whole run.
+	leaveAfter time.Duration
+	// rejoinAfter brings the second consumer back that long after it left, which is what a
+	// rolling deploy looks like to the group; 0 leaves it gone.
+	rejoinAfter time.Duration
+	// static gives both members a group.instance.id. franz-go then sends no LeaveGroup when
+	// a member closes, so its partitions stay assigned to it until the session times out.
+	static         bool
+	sessionTimeout time.Duration
+	duration       time.Duration
 }
 
 func main() {
@@ -62,19 +72,62 @@ func run() error {
 	flag.DurationVar(&cfg.work, "work", 0, "time the handler spends on each record")
 	flag.BoolVar(&cfg.block, "block", false, "BlockRebalanceOnPoll: a rebalance waits for the batch in hand to be handled")
 	flag.DurationVar(&cfg.joinAfter, "join-after", 15*time.Second, "when the second consumer joins the group")
+	flag.DurationVar(&cfg.leaveAfter, "leave-after", 0, "when the second consumer leaves again; 0 keeps it for the whole run")
+	flag.DurationVar(&cfg.rejoinAfter, "rejoin-after", 0, "bring the second consumer back this long after it left; 0 leaves it gone")
+	flag.BoolVar(&cfg.static, "static", false, "static membership: give both members a group.instance.id")
+	flag.DurationVar(&cfg.sessionTimeout, "session-timeout", 12*time.Second, "how long a member may go unheard before the group drops it")
 	flag.DurationVar(&cfg.duration, "duration", 35*time.Second, "how long the whole run lasts")
 	flag.Parse()
 
 	if _, err := strategyOptions(cfg.strategy); err != nil {
 		return err
 	}
-	if cfg.rate <= 0 || cfg.rate > maxRate || cfg.rate%perSecondPerTick != 0 || cfg.work < 0 || cfg.work > maxWork || cfg.joinAfter < baselineWindow+joinMargin || cfg.duration < cfg.joinAfter+afterJoinWindow {
-		return fmt.Errorf("%w: -rate %d, -work %s, -join-after %s, -duration %s", errShape, cfg.rate, cfg.work, cfg.joinAfter, cfg.duration)
+	if err := cfg.validate(); err != nil {
+		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return experiment(ctx, &cfg, os.Stdout)
+}
+
+// validate keeps the measured moment — the join, or the leave when there is one — far
+// enough from the run's edges for the baseline window before it and the window after it.
+func (cfg *settings) validate() error {
+	switch {
+	case cfg.rate <= 0 || cfg.rate > maxRate || cfg.rate%perSecondPerTick != 0:
+		return fmt.Errorf("%w: -rate %d", errShape, cfg.rate)
+	case cfg.work < 0 || cfg.work > maxWork:
+		return fmt.Errorf("%w: -work %s", errShape, cfg.work)
+	}
+	return cfg.validateSchedule()
+}
+
+// validateSchedule places the join, the leave and the run's end so that every window the
+// report needs falls inside the run: ten seconds of baseline before the measured moment,
+// and fifteen seconds after it.
+func (cfg *settings) validateSchedule() error {
+	switch {
+	case cfg.joinAfter <= 0:
+		return fmt.Errorf("%w: -join-after %s", errShape, cfg.joinAfter)
+	case cfg.leaveAfter != 0 && cfg.leaveAfter < cfg.joinAfter+baselineWindow+joinMargin:
+		return fmt.Errorf("%w: -leave-after %s", errShape, cfg.leaveAfter)
+	case cfg.rejoinAfter != 0 && cfg.leaveAfter == 0:
+		return fmt.Errorf("%w: -rejoin-after needs -leave-after", errShape)
+	case cfg.measuredAt() < baselineWindow+joinMargin:
+		return fmt.Errorf("%w: -join-after %s", errShape, cfg.joinAfter)
+	case cfg.duration < cfg.measuredAt()+afterJoinWindow:
+		return fmt.Errorf("%w: -duration %s", errShape, cfg.duration)
+	}
+	return nil
+}
+
+// measuredAt is the moment the report's windows are placed around.
+func (cfg *settings) measuredAt() time.Duration {
+	if cfg.leaveAfter > 0 {
+		return cfg.leaveAfter
+	}
+	return cfg.joinAfter
 }
 
 // strategyOptions is the whole difference between the three runs. Eager has to be asked for:
@@ -124,21 +177,46 @@ func experiment(ctx context.Context, cfg *settings, out io.Writer) error {
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return produce(gctx, cfg) })
 	g.Go(func() error { return consume(gctx, cfg, group, "A", line) })
-	g.Go(func() error {
-		join := time.NewTimer(cfg.joinAfter)
-		defer join.Stop()
-		select {
-		case <-gctx.Done():
-			return nil
-		case <-join.C:
-		}
-		line.markJoin()
-		return consume(gctx, cfg, group, "B", line)
-	})
+	g.Go(func() error { return second(gctx, cfg, group, line) })
 	if err := g.Wait(); err != nil {
 		return err
 	}
 	return render(out, report(cfg, group, line.snapshot()))
+}
+
+// second is the member whose arrival — or departure — the run measures. It joins after
+// joinAfter, and with leaveAfter set it closes again at that mark, which is the moment the
+// report's windows are placed around.
+func second(ctx context.Context, cfg *settings, group string, line *timeline) error {
+	if !sleep(ctx, cfg.joinAfter) {
+		return nil
+	}
+	if cfg.leaveAfter == 0 {
+		line.markMeasured()
+		return consume(ctx, cfg, group, "B", line)
+	}
+
+	member, leave := context.WithCancel(ctx)
+	defer leave()
+	go func() {
+		if sleep(ctx, cfg.leaveAfter-cfg.joinAfter) {
+			line.markMeasured()
+			leave()
+		}
+	}()
+	if err := consume(member, cfg, group, "B", line); err != nil {
+		return err
+	}
+	if cfg.rejoinAfter == 0 {
+		// The member is gone; the run keeps going so its partitions can be seen coming back.
+		<-ctx.Done()
+		return nil
+	}
+	if !sleep(ctx, cfg.rejoinAfter) {
+		return nil
+	}
+	// Back with the same identity if the run is static, a stranger if it is not.
+	return consume(ctx, cfg, group, "B", line)
 }
 
 // produce spreads records evenly over the partitions by number, so every partition has the
@@ -198,7 +276,11 @@ func consume(ctx context.Context, cfg *settings, group, member string, line *tim
 		kgo.OnPartitionsAssigned(line.change(member, "assigned")),
 		kgo.OnPartitionsRevoked(line.revoked(member)),
 		kgo.OnPartitionsLost(line.change(member, "lost")),
+		kgo.SessionTimeout(cfg.sessionTimeout),
 	})
+	if cfg.static {
+		opts = append(opts, kgo.InstanceID(group+"-"+member))
+	}
 	if cfg.block {
 		opts = append(opts, kgo.BlockRebalanceOnPoll())
 	}

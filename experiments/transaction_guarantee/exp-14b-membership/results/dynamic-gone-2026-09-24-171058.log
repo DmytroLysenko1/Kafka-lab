@@ -1,0 +1,29 @@
+exp-14b — a member leaves, membership: dynamic, then: gone
+date: 2026-09-24-171058
+client: franz-go v1.22.0
+
+strategy                 cooperative: CooperativeStickyBalancer, classic protocol, only moving partitions revoked
+group                    exp14-cooperative-1790259065155744000
+load                     1200 records/s over 6 partitions
+handler                  0s a record, franz-go's default: rebalances run beside the handler
+membership               dynamic, session timeout 12s
+second consumer left at  25s
+
+assignment changes after the first
+  25s     B revoked [3 4 5]
+  25.55s  A revoked []
+  25.55s  A assigned [3 4 5]
+  45s     A revoked [0 1 2 3 4 5]
+
+partition  longest gap, 10s before the join  longest gap, from 2s before to 15s after
+  0        30ms                              57ms
+  1        40ms                              62ms
+  2        40ms                              51ms
+  3        48ms                              571ms
+  4        52ms                              571ms
+  5        52ms                              565ms
+
+partitions stopped for more than 1s                0 of 6
+longest time the whole group handled nothing       50ms
+records handled twice                              0
+records missed between the first and last handled  0
