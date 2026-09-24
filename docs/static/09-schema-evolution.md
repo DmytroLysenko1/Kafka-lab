@@ -164,23 +164,24 @@ Two consequences worth stating out loud in the write-up:
   mode, not because of it. If the requirement really is "old consumers keep working while
   producers roll ahead", set `FULL` deliberately rather than inheriting the default.
 
-## To be measured
+## Measured
 
-Every verdict below is what the pinned registry version is *expected* to return. The
-protobuf checker's exact behaviour has moved between releases, so exp-12 records what it
-actually did, against a pinned image — that recorded matrix is the deliverable, not this
-table.
+Every verdict in the fourth column is what the pinned registry version was *expected* to
+return; the fifth is what it did, measured against Apicurio 3.0.9. The protobuf checker's
+behaviour has moved between releases, which is the reason for measuring rather than
+quoting — and on this version one expectation did not survive contact (exp-12c).
 
 | Run | Change under test | Mode | Expected verdict | Status |
 |---|---|---|---|---|
-| exp-12a | add a new singular field `refund_reason` | `BACKWARD` | accepted | TBD |
-| exp-12b | change `amount_minor` from `int64` to `string` | `BACKWARD` | rejected | TBD |
-| exp-12c | delete a field, no `reserved` | `BACKWARD` | accepted — and this is the trap, not the success | TBD |
-| exp-12d | reuse the deleted field number, **same wire type**, new meaning (Fig. 9c) | `BACKWARD` | registry verdict recorded, plus the number a v3 consumer decodes out of v1 bytes | TBD |
-| exp-12d2 | the same reuse with a **different** wire type | `BACKWARD` | recorded — expected to be the less dangerous variant, because a wire-type mismatch is visible to the decoder | TBD |
-| exp-12e | a v1 consumer reads v2 data after 12a | — | decodes, unknown field ignored | TBD |
-| exp-12e2 | a v1 consumer reads v2 data after 12c (Fig. 9a) | — | proto3: decodes with `merchant_ref` empty, no error raised anywhere — the ending this file exists to make visible | TBD |
-| exp-12f | delete a field | `FULL` | registry verdict recorded | TBD |
+| exp-12a | add a new singular field | `BACKWARD` | accepted | **accepted** ([exp-12](../../experiments/transaction_guarantee/exp-12-schema-evolution/)) |
+| exp-12b | change `amount_minor` from `int64` to `string` | `BACKWARD` | rejected | **refused (409)** |
+| exp-12c | delete a field, no `reserved` | `BACKWARD` | accepted — and this is the trap, not the success | **refused (409)** — the expectation did not hold on Apicurio 3.0.9: under `BACKWARD` the deletion is blocked. The trap is real but lives one setting over, in `FULL` (exp-12f) |
+| exp-12d | reuse the deleted field number, **same wire type**, new meaning (Fig. 9c) | `BACKWARD` | registry verdict recorded, plus the number a v3 consumer decodes out of v1 bytes | not run |
+| exp-12d2 | the same reuse with a **different** wire type | `BACKWARD` | recorded — expected to be the less dangerous variant, because a wire-type mismatch is visible to the decoder | not run |
+| exp-12e | a v1 consumer reads v2 data after 12a | — | decodes, unknown field ignored | **decoded and counted**, the unknown field skipped |
+| exp-12e2 | a v1 consumer reads v2 data after 12c (Fig. 9a) | — | proto3: decodes with the field empty, no error raised anywhere — the ending this file exists to make visible | **confirmed**: no decoding error anywhere; `amount_minor` arrives as 0, and the only thing that refused the record was the domain rule that an authorised amount is positive. Without it the total would have taken a payment of zero and reported success |
+| exp-12f | delete a field | `FULL` | registry verdict recorded | **accepted** — `FULL` is not `BACKWARD` plus more: it lets through the deletion that `BACKWARD` refuses |
+| exp-12g | any of the three changes on a new subject | default | — | **all accepted**: a new subject starts at `NONE`, so the registry protects nothing until the level is set |
 
 ## Licensing, because it is a real question
 

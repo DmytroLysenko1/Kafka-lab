@@ -1,0 +1,20 @@
+meta:
+  name: exp12.evolution
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-12: four records written as four generations of one schema, read by a consumer
+    built against the first. One partition, because the question is what each record does
+    to the reader, not how the work spreads. RF 3 and min.insync.replicas 2 match the
+    catalog so that nothing on the producer side can be mistaken for a decoding failure.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false
