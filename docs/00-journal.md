@@ -1022,3 +1022,55 @@ rather than in the adapter, and with the guard switched off the test says so in 
 
 **Carried into:** the KR3 row of the [README](../README.md); the relay and the Kafka
 publisher are the next slice.
+
+## The payments service, part 3 — the relay, and the timestamp that is not the event's
+
+Date: 2026-09-25 · `make test-integration` and a hand run of `cmd/outbox-relay` against the
+live stand · [`internal/infrastructure/kafka/`](../internal/infrastructure/kafka/)
+
+**Hypothesis.** The outbox rows are already correct, so publishing them is mechanical:
+encode as Protobuf, register the schema, key by `payment_id`, publish with `acks=all`, mark
+published after the ack.
+
+**What the cluster did instead.** Every publish was refused: `INVALID_TIMESTAMP: The
+timestamp of the message is out of acceptable range`. The producer was stamping each record
+with the time the payment was authorised, which is what the outbox row carries, and the
+broker will not take a record dated further ahead than
+`log.message.timestamp.after.max.ms` — 3 600 000 ms on this stand, read out of the broker's
+own config, while `before.max.ms` is unbounded.
+
+**Why it matters beyond the test.** The record timestamp belongs to the log: retention and
+time-based seeking use it. Business time belongs in the payload, where `occurred_at` already
+was. Had the event time stayed in the record, one event dated by a skewed clock — a client
+clock, a service an hour ahead — would be refused for good, and because the relay publishes
+in outbox order, every record queued behind it would wait there with it. The fix is one
+deleted line, and a test now asserts the two times are different things: the payload keeps
+`2026-09-25T09:00:00Z`, the record is stamped within a minute of now.
+
+**End to end, by hand.** One row inserted into `outbox`, `cmd/outbox-relay` started on a
+throwaway topic: `outbox published records=1`, the row came back `published = t`, and the
+console consumer showed the record in partition 2 with headers
+`event_id:20102, event_type:payment.authorized`, the key equal to the payment id, and a
+value beginning `00 00 00 00 01 00` — magic byte, schema id 1, message index 0, then the
+protobuf. That prefix is the whole point of the registry: a consumer reads the id out of
+the bytes and fetches the exact schema they were written against.
+
+**One more thing the stand said and the banner did not.** Apicurio's `/system/info` reports
+"Apicurio Registry (In Memory)" even when it is not: the log says `Using postgresql SQL
+storage` and the tables are in the `apicurio` database. Worth knowing before someone
+concludes their schemas are about to be lost.
+
+**What the fresh-context review caught.** The producer put the whole registry URL into its
+failure message, and that message is logged by the relay. Here it is `localhost:8080` with
+nothing to hide, but a registry url is exactly where basic-auth or an `access_token=` query
+lives — and the Postgres adapter two files away already refuses to print its connection
+string for that reason. The rule was applied in one place and broken in the other. Errors
+now name only scheme, host and path, and a unit test feeds the function a password and a
+token and checks neither survives. The same review also flagged the database url as unsafe;
+that one was wrong, and the code says so — `postgres.New` parses the url before connecting
+and never passes the driver error out, so a failure names `host:port/database` and nothing
+else.
+
+**Carried into:** the KR3 row of the [README](../README.md). Next are the consumer side
+with its inbox, exp-11 (poison pill to the dead letter topic) and exp-12 (schema evolution),
+which is why the registry keeps its history in Postgres rather than in memory.

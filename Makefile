@@ -11,14 +11,16 @@ KAFKA_BIN := docker exec $(KAFKA_CONTAINER) /opt/kafka/bin
 BOOTSTRAP := --bootstrap-server localhost:9092
 
 DATABASE_URL ?= postgres://lab:lab@localhost:5432/lab?sslmode=disable
-export DATABASE_URL
+KAFKA_BROKERS ?= localhost:19092,localhost:29092,localhost:39092
+SCHEMA_REGISTRY_URL ?= http://localhost:8080/apis/ccompat/v7
+export DATABASE_URL KAFKA_BROKERS SCHEMA_REGISTRY_URL
 
 TOPICS ?=
 TOPIC ?=
 GROUP ?=
 EXP ?=
 
-.PHONY: up stop down logs topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag build vet lint test test-race test-integration verify tidy
+.PHONY: up stop down logs proto topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag migrate build vet lint test test-race test-integration verify tidy
 
 up:
 	$(COMPOSE) up -d --wait
@@ -97,6 +99,17 @@ lag:
 	$(if $(GROUP),,$(error GROUP is required, e.g. make lag GROUP=payments-consumer))
 	$(KAFKA_BIN)/kafka-consumer-groups.sh $(BOOTSTRAP) --describe --group '$(GROUP)'
 
+# Regenerates gen/ from proto/. The same .proto text is embedded and registered with the
+# schema registry at runtime, so the schema consumers resolve is the one this generated.
+proto:
+	buf lint
+	buf generate
+
+# Applied by a command of its own, never by a service on boot: two replicas coming up
+# together would race through the same schema change.
+migrate:
+	go run ./cmd/migrate
+
 build:
 	go build ./...
 
@@ -112,8 +125,9 @@ test:
 test-race:
 	go test -race ./...
 
-# What a fake cannot prove: ON CONFLICT under a real race, the CHECK constraints, and that
-# FOR UPDATE SKIP LOCKED hands each outbox record to exactly one relay. Needs `make up`.
+# What a fake cannot prove: ON CONFLICT under a real race, the CHECK constraints, that
+# FOR UPDATE SKIP LOCKED hands each outbox record to exactly one relay, and that a consumer
+# can decode what the publisher wrote by the schema id inside it. Needs `make up`.
 test-integration:
 	go test -race -count=1 -tags=integration ./internal/...
 

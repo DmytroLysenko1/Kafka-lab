@@ -20,8 +20,11 @@ require (
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/pierrec/lz4/v4 v4.1.30 // indirect
+	github.com/samber/lo v1.53.0 // indirect
 	github.com/sethvargo/go-retry v0.4.0 // indirect
 	github.com/twmb/franz-go/pkg/kmsg v1.14.0 // indirect
+	github.com/twmb/franz-go/pkg/sr v1.8.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )

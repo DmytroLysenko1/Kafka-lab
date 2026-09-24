@@ -120,6 +120,7 @@ services:
       # Postgres 18 wants the mount one level up, at /var/lib/postgresql: the image refuses
       # to start on a volume mounted at .../data, which is where 17 and earlier put it.
       - postgres-data:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     deploy:
       resources:
         limits:
@@ -132,6 +133,40 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  # The schema registry the payments service publishes against. Apicurio speaks Confluent's
+  # wire protocol under /apis/ccompat/v7, which is the format the producer writes: magic
+  # byte, schema id, message indexes, payload. Its storage is a database of its own inside
+  # the lab Postgres, so a registered schema survives a restart — exp-12 needs the history.
+  apicurio:
+    image: apicurio/apicurio-registry:3.0.9
+    hostname: apicurio
+    container_name: kafka-lab-apicurio
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      APICURIO_STORAGE_KIND: sql
+      APICURIO_STORAGE_SQL_KIND: postgresql
+      APICURIO_DATASOURCE_URL: jdbc:postgresql://postgres:5432/apicurio
+      APICURIO_DATASOURCE_USERNAME: ${POSTGRES_LAB_USER:-lab}
+      APICURIO_DATASOURCE_PASSWORD: ${POSTGRES_LAB_PASSWORD:-lab}
+      QUARKUS_HTTP_CORS_ORIGINS: "*"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1000M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/apis/registry/v3/system/info >/dev/null"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
 
 volumes:
   kafka1-data:
