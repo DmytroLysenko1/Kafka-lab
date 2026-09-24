@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package payment.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/DmytroLysenko1/Kafka-lab/gen/payment/v1;paymentv1";
+
+// PaymentAuthorized is what the outbox relay publishes to payments.main, keyed by
+// payment_id. Field numbers are the contract: consumers on an older build must keep
+// reading these messages, so a number is never reused and a field is never re-typed.
+message PaymentAuthorized {
+  string payment_id = 1;
+  string merchant_id = 2;
+  // Minor units — cents. Never a float: a payment of 19.99 is 1999, exactly.
+  int64 amount_minor = 3;
+  string currency = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+}
