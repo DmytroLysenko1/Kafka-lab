@@ -106,8 +106,13 @@ non-obvious parts: the retry topics run on `LogAppendTime`, or a forwarded recor
 original timestamp and its delay evaluates to zero; and the chain is for single failures,
 not for an outage.
 
-exp-11 — a poison record straight to the DLQ against a partition stuck retrying it forever —
-is listed in the plan and has not been run. This section is the design, not a measurement.
+exp-11 measured the difference on the service's own consumer, changing one thing between
+the cells: whether it had a dead letter topic. Without one, a single undecodable record
+among a hundred good ones left 10 payments counted, the offset parked at 10, 91 records
+never read, and the process crash-looping — 124 and 125 restarts in 30 seconds across two
+runs, with no end in sight. With one, the same content drained in 207–322 ms: 100 payments
+counted and one record archived with the reason attached. The cost of not having the route
+is not the one record; it is everything behind it.
 
 ### What blocking instead costs, measured
 
@@ -161,7 +166,7 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 ## What this document does not claim
 
 - **CDC and stream enrichment** are reasoned from the mechanics, not run here.
-- **The retry chain itself** (exp-11) and **schema evolution** (exp-12,
+- **The retry chain itself** and **schema evolution** (exp-12,
   [case 09](static/09-schema-evolution.md)) are designed and written up; neither has a run
   behind it yet.
 - The anti-pattern table reports what these experiments measured on a three-broker stand on

@@ -1,0 +1,21 @@
+meta:
+  name: exp11.blocked
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-11, cell A: the same records as cell B, read by a consumer with no dead letter
+    route. One partition on purpose — the claim under test is that a record nobody can
+    decode stops everything behind it, and on one partition "behind it" is unambiguous.
+    RF 3 and min.insync.replicas 2 match the catalog: nothing on the producer side should
+    be able to lose a record and be mistaken for the stall this experiment measures.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false
