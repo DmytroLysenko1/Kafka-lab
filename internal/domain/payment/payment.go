@@ -12,6 +12,7 @@ var (
 	ErrMerchantTooLong   = errors.New("payment: merchant id is longer than allowed")
 	ErrIDFormat          = errors.New("payment: id is not a uuid")
 	ErrAmountNotPositive = errors.New("payment: an authorised payment is for a positive amount")
+	ErrStorage           = errors.New("payment: storage failure")
 )
 
 const merchantIDMaxLength = 64
@@ -104,6 +105,11 @@ func (p *Payment) Amount() Money { return p.amount }
 func (p *Payment) Status() Status { return p.status }
 
 func (p *Payment) AuthorizedAt() time.Time { return p.authorizedAt }
+
+// IsFor answers whether two authorisations are the same intent. What "the same" means is
+// the payment's own business: a caller comparing fields from outside would have to be told
+// again on the day an authorisation grows one.
+func (p *Payment) IsFor(amount Money) bool { return p.amount == amount }
 
 // PullEvents hands the pending events over and forgets them, so the repository that stores
 // the aggregate is the only place that can publish them and can only do it once.

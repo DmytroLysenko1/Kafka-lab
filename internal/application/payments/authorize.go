@@ -9,11 +9,17 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/payment"
 )
 
-var ErrIdempotencyKeyRequired = errors.New("payments: idempotency key is required")
+var (
+	ErrIdempotencyKeyRequired = errors.New("payments: idempotency key is required")
+	ErrIdempotencyKeyReused   = errors.New("payments: the idempotency key was used for a different amount")
+)
 
 // paymentStore stores the aggregate and the events it is holding in one transaction, and
 // refuses to store the same idempotency key twice: the key belongs to the caller's protocol,
-// not to the payment, so it travels beside the aggregate rather than inside it.
+// not to the payment, so it travels beside the aggregate rather than inside it. A replayed
+// key that asks for a different amount is ErrIdempotencyKeyReused, never the earlier
+// payment: a caller told its 5 000.00 succeeded when 19.99 was authorised is worse off than
+// one told to look again.
 type paymentStore interface {
 	CreateOrGet(ctx context.Context, authorized *payment.Payment, idempotencyKey string) (payment.ID, bool, error)
 }

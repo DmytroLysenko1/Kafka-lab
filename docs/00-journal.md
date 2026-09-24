@@ -977,3 +977,48 @@ commit-marking added to exp-14 still holds when the member goes away mid-stream.
 
 **Carried into:** the `session.timeout.ms` row of [`tuning-checklist.md`](tuning-checklist.md)
 and the group README.
+
+## The payments service, part 2 — the database half of the outbox
+
+Date: 2026-09-24 · `make test-integration` against the compose Postgres ·
+[`internal/infrastructure/postgres/`](../internal/infrastructure/postgres/)
+
+**What was expected.** That the transaction boundary, the idempotent insert and
+`FOR UPDATE SKIP LOCKED` would behave the way the case files say they do — and that tests
+written against them would catch it if they did not.
+
+**What the database did.** Eight goroutines authorising the same `(merchant, idempotency
+key)` at once ended with one row in `payments`, one row in `outbox`, and exactly one caller
+told it had created anything; the other seven were handed the same payment id. Two relays
+holding open transactions claimed two records each, disjoint, without either waiting for
+the other. A second `MarkPublished` on an already-published record changed nothing rather
+than pushing its timestamp an hour forward. The `CHECK` refused an amount of 0 and of −1
+even though the insert came straight from the test, bypassing the domain entirely.
+
+**The part worth keeping.** A passing test proves nothing until it has been made to fail,
+so both claims were re-run against a deliberately broken adapter. With `SKIP LOCKED` taken
+out of the claim, the second relay stopped stepping over the first's rows and blocked until
+the test's own 15 s deadline killed it — the queue-into-one-lane failure, seen directly.
+With `CreateOrGet` changed to report `created` unconditionally, both idempotency tests
+failed on the line that matters: *the replay reported a stored payment; the merchant would
+be charged twice*.
+
+**Borrowed rather than invented.** The unit of work is the shape already proven in
+`utils/storage`: a closure that owns the boundary, a savepoint when one is already open,
+the transaction carried in the context under an unexported key so no other package can join
+it, and — the detail worth stealing — commit and rollback run on `context.WithoutCancel`
+with their own timeout. A caller who walks away mid-commit leaves the outcome genuinely
+unknown, and the code says so (`ErrCommitUnknown`) instead of reporting a failure it cannot
+prove.
+
+**Two holes found by reading the diff as a stranger.** `Claim` refused to run outside a
+transaction, `CreateOrGet` did not — so the call that promises "the payment and its event
+land together" would have quietly split into two autocommits if anyone ever forgot the
+wrapper. And a replay that reused a key for a *different* amount was handed the earlier
+payment, which would tell a caller its 5 000.00 went through when 19.99 was authorised.
+Both refuse now, the comparison of "the same authorisation" lives on the payment itself
+rather than in the adapter, and with the guard switched off the test says so in words:
+`err = <nil>, want payments: the idempotency key was used for a different amount`.
+
+**Carried into:** the KR3 row of the [README](../README.md); the relay and the Kafka
+publisher are the next slice.
