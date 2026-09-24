@@ -128,6 +128,9 @@ test-race:
 # What a fake cannot prove: ON CONFLICT under a real race, the CHECK constraints, that
 # FOR UPDATE SKIP LOCKED hands each outbox record to exactly one relay, and that a consumer
 # can decode what the publisher wrote by the schema id inside it. Needs `make up`.
+# The packages share one Postgres and run in parallel; they stay hermetic by owning
+# disjoint tables — the payments side truncates payments and outbox, the consumer side
+# inbox and merchant_totals.
 test-integration:
 	go test -race -count=1 -tags=integration ./internal/...
 
