@@ -1,0 +1,113 @@
+{
+  "uid": "kafka-lab-payments",
+  "title": "Payments — outbox, consumer, API",
+  "description": "The four questions an operator asks during an incident, in the order they ask them: is anything piling up, is anything moving, is anything being thrown away, and is the front door still answering.",
+  "tags": ["kafka-lab"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Outbox backlog — records waiting to be published",
+      "description": "The first number to look at when Kafka is unwell. It grows while nothing can be published, which is the outbox doing its job, and falls once the relay drains. A flat non-zero line means the relay is not running at all.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } }, "overrides": [] },
+      "targets": [
+        { "expr": "outbox_backlog_records", "legendFormat": "waiting", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Outbox sweeps per second, by outcome",
+      "description": "A failing sweep is still a sweep: if this drops to nothing rather than turning red, the relay is gone, not blocked.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum by (outcome) (rate(outbox_sweeps_total[1m]))", "legendFormat": "{{outcome}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Records published per second",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "expr": "rate(outbox_records_published_total[1m])", "legendFormat": "published", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Events handled per second — counted against duplicate",
+      "description": "Duplicates are at-least-once delivery working. A burst of them after a restart is healthy; a steady stream of them is a relay republishing something it cannot mark.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum by (outcome) (rate(payment_events_handled_total[1m]))", "legendFormat": "{{outcome}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Consumer group lag",
+      "description": "Read from the cluster, not from the consumer: a consumer that has stopped cannot report its own lag, and that is the moment the number matters.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag)", "legendFormat": "{{consumergroup}} · {{topic}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Dead letters per second, by reason",
+      "description": "Anything here is a record no retry will fix. Undecodable means bytes nobody can read; refused means the consumer understood it and will not take it.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum by (reason) (rate(payment_events_dead_lettered_total[1m]))", "legendFormat": "{{reason}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "API requests per second, by status",
+      "description": "The question this answers during a broker outage: is the front door still taking payments while the events pile up behind it.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum by (status) (rate(http_requests_total[1m]))", "legendFormat": "{{status}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Under-replicated partitions",
+      "description": "Non-zero means a broker is missing from an ISR somewhere. With min.insync.replicas=2 the writes keep going until the second replica goes too.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(kafka_topic_partition_under_replicated_partition)", "legendFormat": "under-replicated", "refId": "A" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "API latency, 95th percentile",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[1m])))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

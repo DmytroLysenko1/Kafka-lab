@@ -1,0 +1,29 @@
+# A 5 s scrape interval, not the usual 15 s: the experiments here measure what happens in
+# the seconds after a broker dies, and a graph sampled every 15 s would draw a recovery
+# that took two points to notice as a straight line.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # The services run on the host, not in this network: the lab runs them from a terminal so
+  # that they can be killed, restarted and attached to at will.
+  - job_name: payments
+    static_configs:
+      - targets: ["host.docker.internal:9101"]
+        labels: { service: outbox-relay }
+      - targets: ["host.docker.internal:9102"]
+        labels: { service: payments-consumer }
+      - targets: ["host.docker.internal:9103"]
+        labels: { service: payments-api }
+
+  # Consumer group lag and partition health, read from the cluster rather than from the
+  # services: a consumer that has stopped cannot report its own lag, and that is exactly
+  # the moment the number matters.
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
