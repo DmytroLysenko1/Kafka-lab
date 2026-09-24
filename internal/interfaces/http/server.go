@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -22,25 +23,32 @@ const (
 	shutdownTimeout   = 20 * time.Second
 )
 
+// observer is told about each request in terms of the route pattern, never the path: a
+// path carries merchant ids, and a label made of those grows without limit.
+type observer interface {
+	Served(route, status string, took time.Duration)
+}
+
 type Server struct {
 	authorize authorizer
 	totals    totalReader
 	apiKey    []byte
 	logger    *slog.Logger
+	observer  observer
 }
 
-func NewServer(authorize authorizer, totals totalReader, apiKey string, logger *slog.Logger) (*Server, error) {
+func NewServer(authorize authorizer, totals totalReader, apiKey string, logger *slog.Logger, watch observer) (*Server, error) {
 	if apiKey == "" {
 		return nil, ErrAPIKeyRequired
 	}
-	return &Server{authorize: authorize, totals: totals, apiKey: []byte(apiKey), logger: logger}, nil
+	return &Server{authorize: authorize, totals: totals, apiKey: []byte(apiKey), logger: logger, observer: watch}, nil
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.Handle("POST /payments", s.authenticated(http.HandlerFunc(s.authorizePayment)))
-	mux.Handle("GET /merchants/{merchantID}/total", s.authenticated(http.HandlerFunc(s.merchantTotal)))
+	mux.Handle("POST /payments", s.observed("POST /payments", s.authenticated(http.HandlerFunc(s.authorizePayment))))
+	mux.Handle("GET /merchants/{merchantID}/total", s.observed("GET /merchants/{id}/total", s.authenticated(http.HandlerFunc(s.merchantTotal))))
 	return mux
 }
 
@@ -85,6 +93,28 @@ func (s *Server) authenticated(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// observed times the request and records the status the caller actually received, which
+// means wrapping the writer: the status is not knowable any other way once the handler has
+// written it.
+func (s *Server) observed(route string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
+		s.observer.Served(route, strconv.Itoa(recorder.status), time.Since(started))
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
 }
 
 func (s *Server) respond(ctx context.Context, w http.ResponseWriter, status int, body any) {

@@ -98,6 +98,15 @@ go run ./cmd/payments-consumer   # read the topic, deduplicate, keep merchant to
 PAYMENTS_API_KEY=... go run ./cmd/payments-api   # POST /payments, GET /merchants/{id}/total
 ```
 
+Each service serves its metrics on a listener of its own — the relay on `:9101`, the
+consumer on `:9102`, the API on `:9103` — so a scrape can never take a connection a payment
+needed. What they publish is what an operator reads during an incident:
+`outbox_backlog_records` (grows while the broker is away, falls when the relay drains),
+`outbox_sweeps_total{outcome}`, `payment_events_handled_total{outcome}` where a duplicate
+is counted apart from a fresh event, `payment_events_dead_lettered_total{reason}`, and
+`http_requests_total{route,status}` labelled by route pattern rather than path, because a
+label built from merchant ids grows a new series per customer.
+
 The API binds to loopback and requires `X-API-Key`; it refuses to start without
 `PAYMENTS_API_KEY`, because a service that moves money should not have a mode where it
 serves callers it cannot name. There is no TLS and one shared key — enough for a lab, not

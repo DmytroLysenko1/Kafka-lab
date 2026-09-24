@@ -110,6 +110,14 @@ func appendString(body []byte, field protowire.Number, value string) []byte {
 	return protowire.AppendString(body, value)
 }
 
+// unwatched stands in for the metrics the services publish: this experiment reads the
+// database and the topics directly.
+type unwatched struct{}
+
+func (unwatched) Handled(bool, time.Duration) {}
+
+func (unwatched) DeadLettered(string) {}
+
 type settings struct {
 	phase       string
 	topic       string
@@ -225,7 +233,7 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 		storage,
 		time.Now,
 	)
-	consumer, err := kafka.NewConsumer(brokers(), s.topic, s.group, record, dead, slog.New(slog.DiscardHandler))
+	consumer, err := kafka.NewConsumer(brokers(), s.topic, s.group, record, dead, slog.New(slog.DiscardHandler), unwatched{})
 	if err != nil {
 		return err
 	}

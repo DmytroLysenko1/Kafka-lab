@@ -25,6 +25,9 @@ ORDER BY id
 LIMIT $1
 FOR UPDATE SKIP LOCKED`
 
+const countBacklog = `
+SELECT count(*) FROM outbox WHERE published_at IS NULL`
+
 const markPublished = `
 UPDATE outbox SET published_at = $2 WHERE id = ANY($1) AND published_at IS NULL`
 
@@ -65,6 +68,17 @@ func (s *OutboxStore) Claim(ctx context.Context, limit int) ([]outbox.Record, er
 		return nil, fmt.Errorf("postgres.Claim: %w", errors.Join(ErrOutbox, err))
 	}
 	return claimed, nil
+}
+
+// Backlog is what an operator watches while a broker is away: it grows while nothing can
+// be published and falls back once the relay drains. It reads outside a transaction — a
+// count that took locks would stand in the way of the relay it is reporting on.
+func (s *OutboxStore) Backlog(ctx context.Context) (int, error) {
+	var waiting int
+	if err := s.storage.conn(ctx).QueryRow(ctx, countBacklog).Scan(&waiting); err != nil {
+		return 0, fmt.Errorf("postgres.Backlog: %w", errors.Join(ErrOutbox, err))
+	}
+	return waiting, nil
 }
 
 // MarkPublished is written to survive a relay that published and then died before it could

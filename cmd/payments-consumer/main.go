@@ -11,8 +11,11 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
 
@@ -24,6 +27,7 @@ type config struct {
 	topic       string
 	dlqTopic    string
 	group       string
+	metricsAddr string
 }
 
 func main() {
@@ -71,7 +75,8 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 	defer dead.Close()
 
-	consumer, err := kafka.NewConsumer(settings.brokers, settings.topic, settings.group, record, dead, logger)
+	observed := metrics.New()
+	consumer, err := kafka.NewConsumer(settings.brokers, settings.topic, settings.group, record, dead, logger, observed)
 	if err != nil {
 		return err
 	}
@@ -81,8 +86,13 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		"topic", settings.topic,
 		"group", settings.group,
 		"dead_letter_topic", settings.dlqTopic,
+		"metrics", settings.metricsAddr,
 	)
-	return consumer.Run(ctx)
+
+	running, stop := errgroup.WithContext(ctx)
+	running.Go(func() error { return consumer.Run(stop) })
+	running.Go(func() error { return metrics.Serve(stop, settings.metricsAddr, observed.Gatherer()) })
+	return running.Wait()
 }
 
 func load() (config, error) {
@@ -91,6 +101,7 @@ func load() (config, error) {
 		topic:       envOr("CONSUMER_TOPIC", "payments.main"),
 		dlqTopic:    envOr("CONSUMER_DLQ_TOPIC", "payments-consumer.dlq"),
 		group:       envOr("CONSUMER_GROUP", "payments-consumer"),
+		metricsAddr: envOr("METRICS_ADDR", "127.0.0.1:9102"),
 	}
 	for _, broker := range strings.Split(os.Getenv("KAFKA_BROKERS"), ",") {
 		if broker = strings.TrimSpace(broker); broker != "" {
