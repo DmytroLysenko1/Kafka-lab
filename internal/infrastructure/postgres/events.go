@@ -1,0 +1,54 @@
+package postgres
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/payment"
+)
+
+const eventTypeAuthorized = "payment.authorized"
+
+var errUnknownEvent = errors.New("postgres: no outbox mapping for the event")
+
+type outboxRow struct {
+	aggregateID string
+	eventType   string
+	payload     []byte
+	occurredAt  time.Time
+}
+
+type authorizedPayload struct {
+	PaymentID   string    `json:"payment_id"`
+	MerchantID  string    `json:"merchant_id"`
+	AmountMinor int64     `json:"amount_minor"`
+	Currency    string    `json:"currency"`
+	OccurredAt  time.Time `json:"occurred_at"`
+}
+
+func encodeEvent(event payment.Event) (outboxRow, error) {
+	authorized, isAuthorized := event.(*payment.Authorized)
+	if !isAuthorized {
+		return outboxRow{}, fmt.Errorf("postgres.encodeEvent %T: %w", event, errUnknownEvent)
+	}
+
+	payload, err := json.Marshal(authorizedPayload{
+		PaymentID:   authorized.PaymentID().String(),
+		MerchantID:  authorized.Merchant().String(),
+		AmountMinor: authorized.Amount().Minor(),
+		Currency:    authorized.Amount().Currency().String(),
+		OccurredAt:  authorized.OccurredAt(),
+	})
+	if err != nil {
+		return outboxRow{}, fmt.Errorf("postgres.encodeEvent %s: %w", eventTypeAuthorized, err)
+	}
+
+	return outboxRow{
+		aggregateID: authorized.PaymentID().String(),
+		eventType:   eventTypeAuthorized,
+		payload:     payload,
+		occurredAt:  authorized.OccurredAt(),
+	}, nil
+}

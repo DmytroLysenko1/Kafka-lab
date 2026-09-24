@@ -23,11 +23,13 @@ func eur(t *testing.T, minor int64) payment.Money {
 	return amount
 }
 
-func merchant(t *testing.T, value string) payment.MerchantID {
+const merchantUnderTest = "m-42"
+
+func merchant(t *testing.T) payment.MerchantID {
 	t.Helper()
-	id, err := payment.ParseMerchantID(value)
+	id, err := payment.ParseMerchantID(merchantUnderTest)
 	if err != nil {
-		t.Fatalf("parse merchant %q: %v", value, err)
+		t.Fatalf("parse merchant %q: %v", merchantUnderTest, err)
 	}
 	return id
 }
@@ -36,7 +38,7 @@ func TestAuthorizeKeepsTheAmountItWasGivenAndStampsTheEventWithTheSameTime(t *te
 	at := time.Date(2026, time.September, 24, 9, 30, 0, 0, time.FixedZone("Kyiv", 3*60*60))
 	id := payment.NewID()
 
-	authorized, err := payment.Authorize(id, merchant(t, "m-42"), eur(t, 1999), at)
+	authorized, err := payment.Authorize(id, merchant(t), eur(t, 1999), at)
 	if err != nil {
 		t.Fatalf("authorize: %v", err)
 	}
@@ -73,7 +75,7 @@ func TestAuthorizeKeepsTheAmountItWasGivenAndStampsTheEventWithTheSameTime(t *te
 // The repository publishes what PullEvents hands it. If a second call handed the same event
 // again, a retried Save would publish the authorisation twice.
 func TestPullEventsHandsEachEventOverExactlyOnce(t *testing.T) {
-	authorized, err := payment.Authorize(payment.NewID(), merchant(t, "m-42"), eur(t, 500), time.Now())
+	authorized, err := payment.Authorize(payment.NewID(), merchant(t), eur(t, 500), time.Now())
 	if err != nil {
 		t.Fatalf("authorize: %v", err)
 	}
@@ -86,8 +88,44 @@ func TestPullEventsHandsEachEventOverExactlyOnce(t *testing.T) {
 	}
 }
 
+// Two amounts are the same only if the currency matches too: 1999 EUR and 1999 USD are the
+// trap a replay check would fall into if it compared minor units alone.
+func TestIsForSeparatesTheAmountFromItsCurrency(t *testing.T) {
+	usd, err := payment.ParseCurrency("USD")
+	if err != nil {
+		t.Fatalf("parse currency: %v", err)
+	}
+	sameMinorOtherCurrency, err := payment.NewMoney(1999, usd)
+	if err != nil {
+		t.Fatalf("new money: %v", err)
+	}
+
+	authorized, err := payment.Authorize(payment.NewID(), merchant(t), eur(t, 1999), time.Now())
+	if err != nil {
+		t.Fatalf("authorize: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		args payment.Money
+		want bool
+	}{
+		{name: "the same amount", args: eur(t, 1999), want: true},
+		{name: "a different amount", args: eur(t, 2000)},
+		{name: "the same number in another currency", args: sameMinorOtherCurrency},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := authorized.IsFor(tt.args); got != tt.want {
+				t.Errorf("IsFor = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAuthorizeRefusesAnAmountThatReservesNothing(t *testing.T) {
-	_, err := payment.Authorize(payment.NewID(), merchant(t, "m-42"), eur(t, 0), time.Now())
+	_, err := payment.Authorize(payment.NewID(), merchant(t), eur(t, 0), time.Now())
 	if !errors.Is(err, payment.ErrAmountNotPositive) {
 		t.Errorf("err = %v, want %v", err, payment.ErrAmountNotPositive)
 	}

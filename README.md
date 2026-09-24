@@ -8,15 +8,17 @@ marked `TBD` until that experiment has run.
 **Status.** The diagrams and the internals documentation are in place, and so is the
 cluster they describe: `make up` brings up three KRaft brokers, and the topics are
 declared as YAML in [`deploy/topics/`](deploy/topics/) and applied with
-[topicctl](https://github.com/segmentio/topicctl). The payments service described below is the
-target of the service stage — **its code is not in this repository yet**, and the
-architecture diagram is labelled accordingly rather than quietly implying otherwise.
+[topicctl](https://github.com/segmentio/topicctl). The payments service described below has
+started: the domain, the authorise use case and the Postgres side of it — schema, unit of
+work, idempotent insert and the outbox — are in `internal/`. **Nothing produces to or
+consumes from Kafka yet**, and no HTTP port is open; the diagram is labelled accordingly
+rather than quietly implying otherwise.
 
 | KR (PDP) | Deliverable | Where it lives | State |
 |---|---|---|---|
 | Fundamentals and internals | cheat sheet with write and read path diagrams | [`docs/static/`](docs/static/) — index plus cases 01–04 | diagrams done; exp-01…04 measured — a key is worth 6 827 – 8 721 ordering violations per 10 000 events over seven runs; a skewed key makes seven consumers only 15% faster than one; compaction turned 2 010 records into 50; a killed broker is noticed within about ten seconds and never gives its leadership back, and raising `broker.session.timeout.ms` to 20 s moves that to 20.3 s while the lag timer everyone quotes stays put. Cases 01 and 03 are filled in; `TBD` rows remain in case 02 (exp-03b/c/d), 06 (exp-13), 07 (exp-11) and 09 (exp-12), case 02 lists three things exp-03 did not show, and case 04 lists exp-04b as blocked on this stand |
 | Delivery guarantees and tuning | notes on semantics plus a tuning checklist | cases 05, 08, 10; [`docs/tuning-checklist.md`](docs/tuning-checklist.md) | mechanics and checklist written; exp-05/06/07 measured — the same crash loses 49 payments, charges 50 twice, or costs nothing, depending on where one line sits; exp-08 measured — `acks=all` with `min.insync.replicas=3` refused all 2 000 writes once a broker died, while `acks=1`, with the followers paused to hold the replication window open, lost all 2 000 records it had acknowledged; exp-09 measured — with idempotence off franz-go reordered nothing in three runs and duplicated 80–291 events, in the one run that counted retries every duplicate was a record the leader appended before answering `REQUEST_TIMED_OUT`, which the idempotent producer's broker dropped; exp-10 measured — a Kafka transaction rolled a crashed batch back exactly, left 50 Postgres rows duplicated beside it, and one stuck transaction hid an unrelated producer's records for 23.2 s; exp-05b/06b measured — franz-go's default autocommit is at-least-once and its greedy flavour loses the unwritten rest of a batch; exp-14 measured — eager revoked every partition for 39–75 ms, cooperative only the three that moved, for 0.52–0.68 s, and KIP-848 for 4.9–6.5 s, around its 5 s heartbeat; exp-16 measured — through a dependency outage lag is the same whatever the handler does, but retrying inline got the member removed and its stale commit rewound the group, while pausing fetches kept it whole; exp-17 measured — compression ratio is set by batching, not by the codec, and Java's `linger.ms` default is 5 ms since Kafka 4.0, not the 0 every guide quotes; exp-17b measured — flat out, compression raised throughput 1.1–4.7× because bytes were the ceiling. `acks=all` at `min.insync.replicas=1` cannot be staged on three combined nodes |
-| Production-shaped Go app | working repo, README, architecture diagram | `cmd/`, `internal/` (created at the service stage), this file | no Go code yet; the service is the next stage |
+| Production-shaped Go app | working repo, README, architecture diagram | [`internal/`](internal/), `cmd/` (still to come), this file | domain and the authorise use case written; Postgres adapter written — goose migrations, `WithinTx` as a closure, `CreateOrGet` deciding insert-or-replay inside one `INSERT … ON CONFLICT`, and the outbox claimed with `FOR UPDATE SKIP LOCKED`. Proven against the real database by `make test-integration`: eight concurrent authorisations with one idempotency key store one payment and one event, a rollback takes the event with it, two relays never claim the same row, and the schema itself refuses an amount of zero. Kafka publisher, relay, HTTP layer and `cmd/` are outstanding |
 | Operate, observe, stress | Compose, Grafana dashboard, failure report, runbook | [`deploy/`](deploy/), `docs/failure-report.md`, `docs/runbook.md` | three-broker Compose runs; exp-14 and exp-16 are measured under KR2; metrics stack, exp-13 and exp-15 outstanding |
 | Patterns and anti-patterns | recommendations doc | [`docs/patterns.md`](docs/patterns.md) | written: every pattern points at a case file, every anti-pattern at the run where the damage is a number — ordering assumptions, hot partitions, retention, commit order, `acks=1`, idempotence off, blocking retries, open transactions. CDC, stream enrichment and the retry chain's own run are marked as reasoned rather than measured |
 | Share findings | write-up or tech talk | `docs/talk.md`, and the walkthroughs in [`docs/dynamic/`](docs/dynamic/) | the talk is outstanding; the interactive cases are its backbone and already run |
@@ -81,6 +83,21 @@ only. There is no restart policy on purpose: an experiment that kills a broker n
 to stay dead until the experiment brings it back. Several broker defaults are pinned in
 the Compose file for the same reason — auto leader rebalance and the retention check both
 run on 300 s timers that would otherwise decide an experiment's outcome instead of Kafka.
+
+## Running the service's tests
+
+```
+make verify                      # build, vet, lint, and the unit tests under -race
+make test-integration            # the same, against the Postgres from make up
+```
+
+`make verify` needs nothing running: the use case is tested against a fake that stages its
+writes and applies them only on commit, so a rollback is distinguishable from a write that
+never happened. What a fake cannot prove goes to `make test-integration`, which talks to
+the compose Postgres over `DATABASE_URL` and is skipped by a plain `go test` through the
+`integration` build tag: `ON CONFLICT` under eight concurrent authorisations of one
+idempotency key, the `CHECK` constraints as the last line of defence under the domain, and
+`FOR UPDATE SKIP LOCKED` handing each outbox row to exactly one relay.
 
 ## Target architecture
 

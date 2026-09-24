@@ -61,7 +61,15 @@ func (db *fakeDB) CreateOrGet(_ context.Context, authorized *payment.Payment, id
 	key := authorized.Merchant().String() + "|" + idempotencyKey
 	if existing, taken := db.byKey[key]; taken {
 		id, err := payment.ParseID(existing)
-		return id, false, err
+		if err != nil {
+			return payment.ID{}, false, err
+		}
+		// The real store compares the replay against the row the key already bought; a fake
+		// that skipped the comparison would allow a test the database would refuse.
+		if db.payments[existing].Minor != authorized.Amount().Minor() {
+			return payment.ID{}, false, ErrIdempotencyKeyReused
+		}
+		return id, false, nil
 	}
 
 	id := authorized.ID()
@@ -159,6 +167,38 @@ func TestAuthorizeReplayedWithTheSameKeyChargesTheMerchantOnce(t *testing.T) {
 	}
 	if diff := cmp.Diff(1, db.payments[initial.PaymentID].Events); diff != "" {
 		t.Errorf("events stored mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// A caller who reuses a key for a different amount is not replaying; it is a bug on their
+// side. Handing back the earlier payment would tell them an amount they never authorised
+// went through.
+func TestAuthorizeReusingAKeyForADifferentAmountIsRefused(t *testing.T) {
+	db := newFakeDB()
+	uc := harness(t, db,
+		mustID(t, "11111111-1111-4111-8111-111111111111"),
+		mustID(t, "22222222-2222-4222-8222-222222222222"),
+	)
+
+	first, err := uc.Execute(t.Context(), validCommand())
+	if err != nil {
+		t.Fatalf("first authorize: %v", err)
+	}
+
+	larger := validCommand()
+	larger.AmountMinor = 500_000
+	got, err := uc.Execute(t.Context(), larger)
+	if !errors.Is(err, ErrIdempotencyKeyReused) {
+		t.Fatalf("err = %v, want %v", err, ErrIdempotencyKeyReused)
+	}
+	if diff := cmp.Diff(AuthorizeResult{}, got); diff != "" {
+		t.Errorf("a refused reuse still reported a payment (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(int64(1999), db.payments[first.PaymentID].Minor); diff != "" {
+		t.Errorf("the stored amount changed (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(1, len(db.payments)); diff != "" {
+		t.Errorf("payments stored (-want +got):\n%s", diff)
 	}
 }
 

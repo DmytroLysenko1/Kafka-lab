@@ -18,7 +18,7 @@ TOPIC ?=
 GROUP ?=
 EXP ?=
 
-.PHONY: up stop down logs topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag build vet lint test test-race verify tidy
+.PHONY: up stop down logs topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag build vet lint test test-race test-integration verify tidy
 
 up:
 	$(COMPOSE) up -d --wait
@@ -111,6 +111,11 @@ test:
 
 test-race:
 	go test -race ./...
+
+# What a fake cannot prove: ON CONFLICT under a real race, the CHECK constraints, and that
+# FOR UPDATE SKIP LOCKED hands each outbox record to exactly one relay. Needs `make up`.
+test-integration:
+	go test -race -count=1 -tags=integration ./internal/...
 
 # The module has no packages until the service stage; go vet and golangci-lint fail on an
 # empty module, so verify says so instead of reporting a red build for code that is absent.
