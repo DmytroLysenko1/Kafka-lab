@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 var ErrTotals = errors.New("postgres: merchant totals")
@@ -25,6 +27,22 @@ type TotalsStore struct {
 
 func NewTotalsStore(storage *Storage) *TotalsStore {
 	return &TotalsStore{storage: storage}
+}
+
+const readTotal = `SELECT authorized_minor FROM merchant_totals WHERE merchant_id = $1`
+
+// Total reads outside a transaction on purpose: it answers a question, it does not take
+// part in one, and a reader that took a row lock would stand in the consumer's way.
+func (s *TotalsStore) Total(ctx context.Context, merchantID string) (int64, error) {
+	var total int64
+	err := s.storage.conn(ctx).QueryRow(ctx, readTotal, merchantID).Scan(&total)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return 0, nil
+	case err != nil:
+		return 0, fmt.Errorf("postgres.Total %s: %w", merchantID, errors.Join(ErrTotals, err))
+	}
+	return total, nil
 }
 
 func (s *TotalsStore) Add(ctx context.Context, merchantID string, minor int64, at time.Time) error {
