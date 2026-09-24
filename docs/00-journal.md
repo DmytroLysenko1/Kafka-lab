@@ -1135,3 +1135,40 @@ rather than blocking the partition.
 
 **Carried into:** the KR3 row of the [README](../README.md). The dead letter path is the
 groundwork exp-11 will measure; the retry topics in the catalog are still unused.
+
+## The payments service, part 5 — the front door, and the loop closing
+
+Date: 2026-09-25 · hand run of all three services against the live stand ·
+[`internal/interfaces/http/`](../internal/interfaces/http/), [`cmd/payments-api`](../cmd/payments-api/)
+
+**What was built.** `POST /payments` and `GET /merchants/{id}/total`, behind a required
+`X-API-Key` compared in constant time. The body is bounded and decoded with unknown fields
+refused — a stray `"amount": 19.99` beside `amount_minor` is a typo that must not be
+ignored silently. Every domain refusal becomes a status in one table, not in each handler:
+missing idempotency key 400, key reused for a different amount 409, storage unreachable
+503, anything unclassified 500 with a fixed phrase and nothing from the error itself.
+
+**The whole path, measured rather than asserted.** Three services running, one topic:
+
+| Request | Answer |
+|---|---|
+| `POST /payments` with `Idempotency-Key: e2e-1` | **201 Created** |
+| the same request again, as a retrying client sends it | **200 OK**, same payment id |
+| the same key with `amount_minor: 500000` | **409 Conflict** |
+| the same request with no `X-API-Key` | **401 Unauthorized** |
+| `GET /merchants/m-e2e/total`, five seconds later | `{"authorized_minor":1999}` |
+
+and in the database afterwards: one payment, one outbox row marked published, one inbox
+row. The relay logged `outbox published records=1` in between. That is the design's claim
+— state and event together, published once, counted once — running as one thing rather
+than as five test suites that each believe it separately.
+
+**Two small decisions worth naming.** The API refuses to start without a key rather than
+offering an anonymous mode: a flag that disables authentication is a flag somebody sets in
+production. And the amount is minor units in the wire format as well as in the domain, so
+nothing in the service ever has to decide what 19.99 rounds to — the test that sends
+`"amount_minor": 19.99` expects a 400, and gets one.
+
+**Carried into:** the KR3 row of the [README](../README.md). KR3 is now complete end to
+end; what remains is exp-11 and exp-12 on top of the dead letter topic and the registry,
+and the observability of KR4.
