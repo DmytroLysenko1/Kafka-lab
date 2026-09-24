@@ -38,16 +38,25 @@ type deadLetters interface {
 	Send(ctx context.Context, record *kgo.Record, reason string) error
 }
 
+// observer hears what happened to each record. The reason it is given is one of a handful
+// of fixed words, never the error text: an error carries offsets and identifiers, and a
+// label made of those grows without limit.
+type observer interface {
+	Handled(counted bool, took time.Duration)
+	DeadLettered(reason string)
+}
+
 type Consumer struct {
-	client *kgo.Client
-	handle handler
-	dead   deadLetters
-	logger *slog.Logger
+	client   *kgo.Client
+	handle   handler
+	dead     deadLetters
+	logger   *slog.Logger
+	observer observer
 }
 
 // NewConsumer turns autocommit off: the offset must move only after the database has the
 // result, and franz-go's autocommit runs on a timer that knows nothing about that.
-func NewConsumer(brokers []string, topic, group string, handle handler, dead deadLetters, logger *slog.Logger) (*Consumer, error) {
+func NewConsumer(brokers []string, topic, group string, handle handler, dead deadLetters, logger *slog.Logger, watch observer) (*Consumer, error) {
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
 		kgo.ConsumerGroup(group),
@@ -62,7 +71,7 @@ func NewConsumer(brokers []string, topic, group string, handle handler, dead dea
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrConsume, err)
 	}
-	return &Consumer{client: client, handle: handle, dead: dead, logger: logger}, nil
+	return &Consumer{client: client, handle: handle, dead: dead, logger: logger, observer: watch}, nil
 }
 
 func (c *Consumer) Close() { c.client.Close() }
@@ -124,19 +133,21 @@ func (c *Consumer) poll(ctx context.Context) error {
 func (c *Consumer) handleRecord(ctx context.Context, record *kgo.Record) (bool, error) {
 	event, err := decodeEvent(record)
 	if err != nil {
-		return c.deadLetter(ctx, record, err)
+		return c.deadLetter(ctx, record, err, "undecodable")
 	}
 
 	handling, cancel := context.WithTimeout(ctx, handlingTimeout)
 	defer cancel()
 
+	started := time.Now()
 	counted, err := c.handle.Execute(handling, event)
 	switch {
 	case errors.Is(err, merchants.ErrUnprocessable):
-		return c.deadLetter(ctx, record, err)
+		return c.deadLetter(ctx, record, err, "refused")
 	case err != nil:
 		return false, err
 	}
+	c.observer.Handled(counted, time.Since(started))
 
 	c.logger.DebugContext(ctx, "record handled",
 		"event_id", event.EventID,
@@ -150,10 +161,11 @@ func (c *Consumer) handleRecord(ctx context.Context, record *kgo.Record) (bool, 
 // deadLetter is the only way a record leaves the partition unhandled. If the dead letter
 // topic itself refuses it, the offset stays put: a record nobody can store is still better
 // stuck than silently gone.
-func (c *Consumer) deadLetter(ctx context.Context, record *kgo.Record, reason error) (bool, error) {
+func (c *Consumer) deadLetter(ctx context.Context, record *kgo.Record, reason error, class string) (bool, error) {
 	if err := c.dead.Send(ctx, record, reason.Error()); err != nil {
 		return false, fmt.Errorf("%w: %w", ErrDeadLetter, err)
 	}
+	c.observer.DeadLettered(class)
 	c.logger.ErrorContext(ctx, "record sent to the dead letter topic",
 		"partition", record.Partition,
 		"offset", record.Offset,

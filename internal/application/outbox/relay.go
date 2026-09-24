@@ -12,9 +12,31 @@ import (
 
 var ErrInterval = errors.New("outbox: the relay needs a positive sweep interval")
 
+const (
+	// The publish inside a sweep is bounded by the publisher and the commit by the store,
+	// each on its own timeout; this is the outer fence around the pair, so a database that
+	// stops answering cannot hold the claimed rows and the loop with them. The commit runs
+	// on a context that cannot be cancelled, so this deadline can never truncate it.
+	sweepTimeout = 30 * time.Second
+	// The backlog is a number for a dashboard, not work. It gets a short leash of its own:
+	// a slow count must not delay the sweep that follows it.
+	backlogTimeout = 2 * time.Second
+)
+
 type claimStore interface {
 	Claim(ctx context.Context, limit int) ([]Record, error)
 	MarkPublished(ctx context.Context, ids []int64, at time.Time) error
+	Backlog(ctx context.Context) (int, error)
+}
+
+// observer is told what each sweep did, in the relay's own words. What those numbers are
+// called once they leave here is the metrics adapter's business, not this package's. The
+// backlog is reported separately because it can be unavailable on its own: a sweep that
+// failed must still be counted as a failed sweep, and a backlog nobody could read must not
+// be reported as a backlog of zero.
+type observer interface {
+	Swept(published int, took time.Duration, err error)
+	Backlog(records int)
 }
 
 type eventPublisher interface {
@@ -34,10 +56,11 @@ type Relay struct {
 	now       Clock
 	batch     int
 	logger    *slog.Logger
+	observer  observer
 }
 
-func NewRelay(outbox claimStore, publisher eventPublisher, tx txManager, now Clock, batch int, logger *slog.Logger) *Relay {
-	return &Relay{outbox: outbox, publisher: publisher, tx: tx, now: now, batch: batch, logger: logger}
+func NewRelay(outbox claimStore, publisher eventPublisher, tx txManager, now Clock, batch int, logger *slog.Logger, watch observer) *Relay {
+	return &Relay{outbox: outbox, publisher: publisher, tx: tx, now: now, batch: batch, logger: logger, observer: watch}
 }
 
 // Sweep publishes one batch and reports how many records went out. The order is the whole
@@ -95,7 +118,13 @@ func (r *Relay) Run(ctx context.Context, every time.Duration) error {
 }
 
 func (r *Relay) sweepOnce(ctx context.Context) {
-	published, err := r.Sweep(ctx)
+	sweeping, cancel := context.WithTimeout(ctx, sweepTimeout)
+	defer cancel()
+
+	started := r.now()
+	published, err := r.Sweep(sweeping)
+	r.observe(ctx, published, r.now().Sub(started), err)
+
 	switch {
 	case err != nil && ctx.Err() != nil:
 		return
@@ -104,4 +133,22 @@ func (r *Relay) sweepOnce(ctx context.Context) {
 	case published > 0:
 		r.logger.InfoContext(ctx, "outbox published", "records", published)
 	}
+}
+
+// observe reports the sweep first and the backlog second: the sweep is what happened and
+// must be counted even when the database is too unwell to answer how much is waiting. A
+// backlog that cannot be read leaves the last known one standing rather than reporting a
+// zero, which an operator would read as "nothing is waiting" at the worst possible moment.
+func (r *Relay) observe(ctx context.Context, published int, took time.Duration, sweepErr error) {
+	r.observer.Swept(published, took, sweepErr)
+
+	counting, cancel := context.WithTimeout(ctx, backlogTimeout)
+	defer cancel()
+
+	backlog, err := r.outbox.Backlog(counting)
+	if err != nil {
+		r.logger.WarnContext(ctx, "outbox backlog unavailable", "error", err)
+		return
+	}
+	r.observer.Backlog(backlog)
 }

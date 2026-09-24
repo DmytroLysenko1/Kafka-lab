@@ -56,6 +56,14 @@ func (l *lines) printf(format string, args ...any) {
 	_, l.err = fmt.Fprintf(l.out, format, args...)
 }
 
+// unwatched stands in for the metrics the services publish: this experiment counts what
+// reached the database and the topics, not what a scrape would have shown.
+type unwatched struct{}
+
+func (unwatched) Handled(bool, time.Duration) {}
+
+func (unwatched) DeadLettered(string) {}
+
 type settings struct {
 	phase        string
 	topic        string
@@ -204,7 +212,7 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 	// fetch position, so reusing the client would walk past the record that killed it and
 	// measure the harness instead of the service.
 	newConsumer := func() (*kafka.Consumer, error) {
-		return kafka.NewConsumer(brokers(), s.topic, s.group, record, dead, slog.New(slog.DiscardHandler))
+		return kafka.NewConsumer(brokers(), s.topic, s.group, record, dead, slog.New(slog.DiscardHandler), unwatched{})
 	}
 
 	bounded, cancel := context.WithTimeout(ctx, s.budget)

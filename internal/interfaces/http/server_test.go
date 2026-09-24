@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -44,9 +45,27 @@ func (f *fakeTotals) Execute(_ context.Context, merchantID string) (int64, error
 	return f.total, f.err
 }
 
+// watcher records what the server reported about each request, so a test can check the
+// route label is the pattern rather than the path — a label built from paths would grow a
+// new series per merchant.
+type watcher struct {
+	routes   []string
+	statuses []string
+}
+
+func (w *watcher) Served(route, status string, _ time.Duration) {
+	w.routes = append(w.routes, route)
+	w.statuses = append(w.statuses, status)
+}
+
 func harness(t *testing.T, authorize *fakeAuthorizer, totals *fakeTotals) http.Handler {
 	t.Helper()
-	server, err := payhttp.NewServer(authorize, totals, apiKey, slog.New(slog.DiscardHandler))
+	return watched(t, authorize, totals, &watcher{})
+}
+
+func watched(t *testing.T, authorize *fakeAuthorizer, totals *fakeTotals, watch *watcher) http.Handler {
+	t.Helper()
+	server, err := payhttp.NewServer(authorize, totals, apiKey, slog.New(slog.DiscardHandler), watch)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
@@ -77,7 +96,7 @@ func decodeFailure(t *testing.T, response *httptest.ResponseRecorder) string {
 // A service that moves money does not serve callers it cannot name, and there is no flag to
 // turn that off: refusing to start is the only setting.
 func TestAServerWithoutAnAPIKeyRefusesToStart(t *testing.T) {
-	_, err := payhttp.NewServer(&fakeAuthorizer{}, &fakeTotals{}, "", slog.New(slog.DiscardHandler))
+	_, err := payhttp.NewServer(&fakeAuthorizer{}, &fakeTotals{}, "", slog.New(slog.DiscardHandler), &watcher{})
 	if !errors.Is(err, payhttp.ErrAPIKeyRequired) {
 		t.Fatalf("err = %v, want %v", err, payhttp.ErrAPIKeyRequired)
 	}
@@ -280,5 +299,27 @@ func TestAMerchantIdTheProjectionCannotHoldIsRefused(t *testing.T) {
 	}
 	if diff := cmp.Diff("merchant_invalid", decodeFailure(t, response)); diff != "" {
 		t.Errorf("failure code mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// The label must be the route pattern, not the path: one series per merchant would be a
+// metric that gets more expensive the more customers the service has.
+func TestRequestsAreReportedByRoutePatternAndStatus(t *testing.T) {
+	watch := &watcher{}
+	handler := watched(t, &fakeAuthorizer{err: payments.ErrIdempotencyKeyReused}, &fakeTotals{total: 7}, watch)
+
+	handler.ServeHTTP(httptest.NewRecorder(), authorizeRequest(t,
+		`{"merchant_id":"m-42","amount_minor":1999,"currency":"EUR"}`,
+		map[string]string{"Idempotency-Key": "key-1"}))
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/merchants/m-42/total", nil)
+	request.Header.Set("X-API-Key", apiKey)
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	if diff := cmp.Diff([]string{"POST /payments", "GET /merchants/{id}/total"}, watch.routes); diff != "" {
+		t.Errorf("routes reported (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]string{"409", "200"}, watch.statuses); diff != "" {
+		t.Errorf("statuses reported (-want +got):\n%s", diff)
 	}
 }

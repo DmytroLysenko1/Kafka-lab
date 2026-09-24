@@ -19,6 +19,7 @@ func TestMain(m *testing.M) {
 }
 
 var (
+	errStore  = errors.New("the database is not answering")
 	errBroker = errors.New("the broker is not answering")
 	errCommit = errors.New("the transaction could not be committed")
 )
@@ -27,11 +28,13 @@ var (
 // written inside WithinTx lands only when it commits, so a test can tell a record that was
 // published-and-forgotten from one that was never published.
 type fakeOutbox struct {
-	mu         sync.Mutex
-	records    []Record
-	published  map[int64]time.Time
-	staged     []func()
-	failCommit error
+	mu           sync.Mutex
+	records      []Record
+	published    map[int64]time.Time
+	staged       []func()
+	failCommit   error
+	failBacklog  error
+	stallBacklog bool
 }
 
 func newFakeOutbox(records ...Record) *fakeOutbox {
@@ -83,6 +86,23 @@ func (f *fakeOutbox) MarkPublished(_ context.Context, ids []int64, at time.Time)
 	return nil
 }
 
+func (f *fakeOutbox) Backlog(ctx context.Context) (int, error) {
+	f.mu.Lock()
+	stall := f.stallBacklog
+	failure := f.failBacklog
+	waiting := len(f.records) - len(f.published)
+	f.mu.Unlock()
+
+	if stall {
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+	if failure != nil {
+		return 0, failure
+	}
+	return waiting, nil
+}
+
 func (f *fakeOutbox) unpublished() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -93,6 +113,37 @@ func (f *fakeOutbox) breakCommit(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failCommit = err
+}
+
+// watcher is what the relay reports to. It records rather than counts: a test that only
+// knew how many times the relay reported could not tell a backlog of 3 from a backlog of 0.
+type watcher struct {
+	mu       sync.Mutex
+	sweeps   []sweep
+	backlogs []int
+}
+
+type sweep struct {
+	published int
+	failed    bool
+}
+
+func (w *watcher) Swept(published int, _ time.Duration, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.sweeps = append(w.sweeps, sweep{published: published, failed: err != nil})
+}
+
+func (w *watcher) Backlog(records int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.backlogs = append(w.backlogs, records)
+}
+
+func (w *watcher) reported() ([]sweep, []int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.sweeps), slices.Clone(w.backlogs)
 }
 
 type fakePublisher struct {
@@ -139,8 +190,13 @@ func authorized(id int64) Record {
 
 func harness(t *testing.T, outbox *fakeOutbox, publisher *fakePublisher, batch int) *Relay {
 	t.Helper()
+	return watched(t, outbox, publisher, batch, &watcher{})
+}
+
+func watched(t *testing.T, outbox *fakeOutbox, publisher *fakePublisher, batch int, watch *watcher) *Relay {
+	t.Helper()
 	swept := time.Date(2026, time.September, 25, 12, 0, 0, 0, time.UTC)
-	return NewRelay(outbox, publisher, outbox, func() time.Time { return swept }, batch, slog.New(slog.DiscardHandler))
+	return NewRelay(outbox, publisher, outbox, func() time.Time { return swept }, batch, slog.New(slog.DiscardHandler), watch)
 }
 
 func TestSweepPublishesTheClaimedRecordsAndMarksThem(t *testing.T) {
@@ -320,6 +376,91 @@ func TestRunKeepsSweepingAfterAFailedSweep(t *testing.T) {
 		cancel()
 		if err := <-stopped; err != nil {
 			t.Fatalf("run: %v", err)
+		}
+	})
+}
+
+// The two numbers an operator reads during an outage: how each sweep went, and how much is
+// still waiting behind it.
+func TestEachSweepIsReportedWithTheBacklogBehindIt(t *testing.T) {
+	outbox := newFakeOutbox(authorized(1), authorized(2), authorized(3))
+	watch := &watcher{}
+	relay := watched(t, outbox, &fakePublisher{}, 2, watch)
+
+	relay.sweepOnce(t.Context())
+	relay.sweepOnce(t.Context())
+
+	sweeps, backlogs := watch.reported()
+	if diff := cmp.Diff([]sweep{{published: 2}, {published: 1}}, sweeps, cmp.AllowUnexported(sweep{})); diff != "" {
+		t.Errorf("sweeps reported (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]int{1, 0}, backlogs); diff != "" {
+		t.Errorf("backlogs reported (-want +got):\n%s", diff)
+	}
+}
+
+// A failed sweep must still be counted as one — an outage that silenced the counter would
+// leave the graph looking like a service with nothing to do.
+func TestAFailedSweepIsStillReported(t *testing.T) {
+	outbox := newFakeOutbox(authorized(1))
+	watch := &watcher{}
+	relay := watched(t, outbox, &fakePublisher{fail: errBroker}, 10, watch)
+
+	relay.sweepOnce(t.Context())
+
+	sweeps, _ := watch.reported()
+	if diff := cmp.Diff([]sweep{{published: 0, failed: true}}, sweeps, cmp.AllowUnexported(sweep{})); diff != "" {
+		t.Errorf("sweeps reported (-want +got):\n%s", diff)
+	}
+}
+
+// A backlog nobody could read is not a backlog of zero: reporting it as one would tell an
+// operator that everything had drained at the exact moment the database stopped answering.
+func TestABacklogThatCannotBeReadIsNotReportedAsZero(t *testing.T) {
+	outbox := newFakeOutbox(authorized(1))
+	outbox.failBacklog = errStore
+	watch := &watcher{}
+	relay := watched(t, outbox, &fakePublisher{}, 10, watch)
+
+	relay.sweepOnce(t.Context())
+
+	sweeps, backlogs := watch.reported()
+	if diff := cmp.Diff(1, len(sweeps)); diff != "" {
+		t.Errorf("sweeps reported (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(0, len(backlogs)); diff != "" {
+		t.Errorf("backlogs reported despite the failure (-want +got):\n%s", diff)
+	}
+}
+
+// A database too slow to count the backlog must not hold up the sweeps: the number is for
+// a dashboard, the sweeps are the work.
+func TestABacklogThatNeverAnswersDoesNotHoldUpTheRelay(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		outbox := newFakeOutbox(authorized(1))
+		outbox.stallBacklog = true
+		watch := &watcher{}
+		relay := watched(t, outbox, &fakePublisher{}, 10, watch)
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			relay.sweepOnce(t.Context())
+		}()
+
+		synctest.Wait()
+		select {
+		case <-done:
+		case <-time.After(backlogTimeout + time.Second):
+			t.Fatal("the sweep is still waiting on a backlog count")
+		}
+
+		sweeps, backlogs := watch.reported()
+		if diff := cmp.Diff(1, len(sweeps)); diff != "" {
+			t.Errorf("sweeps reported (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(0, len(backlogs)); diff != "" {
+			t.Errorf("a backlog was reported although the count never answered (-want +got):\n%s", diff)
 		}
 	})
 }

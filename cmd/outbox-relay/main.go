@@ -12,8 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
 
@@ -26,6 +29,7 @@ type config struct {
 	topic       string
 	batch       int
 	interval    time.Duration
+	metricsAddr string
 }
 
 func main() {
@@ -67,6 +71,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 	defer publisher.Close()
 
+	observed := metrics.New()
 	relay := outbox.NewRelay(
 		postgres.NewOutboxStore(storage),
 		publisher,
@@ -74,14 +79,22 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		time.Now,
 		settings.batch,
 		logger,
+		observed,
 	)
 
 	logger.InfoContext(ctx, "outbox relay started",
 		"topic", settings.topic,
 		"batch", settings.batch,
 		"interval", settings.interval.String(),
+		"metrics", settings.metricsAddr,
 	)
-	return relay.Run(ctx, settings.interval)
+
+	// The relay and its metrics stop together: a scrape endpoint that outlived the work it
+	// reports on would answer a health check for a service that is no longer running.
+	running, stop := errgroup.WithContext(ctx)
+	running.Go(func() error { return relay.Run(stop, settings.interval) })
+	running.Go(func() error { return metrics.Serve(stop, settings.metricsAddr, observed.Gatherer()) })
+	return running.Wait()
 }
 
 func load() (config, error) {
@@ -89,6 +102,7 @@ func load() (config, error) {
 		databaseURL: os.Getenv("DATABASE_URL"),
 		registryURL: os.Getenv("SCHEMA_REGISTRY_URL"),
 		topic:       envOr("OUTBOX_TOPIC", "payments.main"),
+		metricsAddr: envOr("METRICS_ADDR", "127.0.0.1:9101"),
 	}
 	for _, broker := range strings.Split(os.Getenv("KAFKA_BROKERS"), ",") {
 		if broker = strings.TrimSpace(broker); broker != "" {
