@@ -166,8 +166,13 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 ## What this document does not claim
 
 - **CDC and stream enrichment** are reasoned from the mechanics, not run here.
-- **The retry chain itself** and **schema evolution** (exp-12,
-  [case 09](static/09-schema-evolution.md)) are designed and written up; neither has a run
-  behind it yet.
+- **The retry chain itself** — the 5 s / 1 m / 10 m topics — is designed and written up but
+  has no run behind it. What has a run is the end of that road: exp-11 measured the dead
+  letter route, and without it one unreadable record left 91 payments unread behind it.
+- **Schema evolution** is measured now (exp-12): a new subject starts at `NONE` and accepts
+  every breaking change; `FULL` lets through a field deletion that `BACKWARD` refuses; and
+  neither a removed field nor a retyped one raises a decoding error — the amount simply
+  arrives as zero, and the domain rule that an authorised payment is positive is the only
+  layer that notices.
 - The anti-pattern table reports what these experiments measured on a three-broker stand on
   one laptop. The shapes transfer; the magnitudes are the stand's.

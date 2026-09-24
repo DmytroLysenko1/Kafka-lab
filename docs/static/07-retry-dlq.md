@@ -237,7 +237,6 @@ healthy ones.
 ## To be measured
 
 | Run | What it shows | Status |
-|---|---|---|
-| exp-11 | poison pill: straight to DLQ and the partition keeps flowing, versus infinite retry and a permanently stuck partition | **measured**: with no dead letter route, 10 of 100 payments counted, the offset stuck at 10, 91 records never read, and 124–125 consumer restarts in 30 s. With one, all 100 counted and the record archived, in 207–322 ms ([exp-11](../../experiments/transaction_guarantee/exp-11-poison-pill/)) |
+|---|---|---| exp-11 | poison pill: straight to DLQ and the partition keeps flowing, versus infinite retry and a permanently stuck partition | **measured**: with no dead letter route, 10 of 100 payments counted, the offset stuck at 10, 91 records never read, and 124–125 consumer restarts in 30 s. With one, all 100 counted and the record archived, in 207–322 ms ([exp-11](../../experiments/transaction_guarantee/exp-11-poison-pill/)) |
 | exp-16 | a 20 s outage with a member joining mid-way: retry inline, holding the batch, against pause-and-rewind | **measured**: the same lag, 7 940–8 501 records, either way. Inline: the member removed after the 8 s rebalance timeout, one commit refused, its next commit rewinding a partition 1 726–1 732 records, 1 739 handled twice in one run of three. Paused: none of that ([exp-16](../../experiments/transaction_guarantee/exp-16-lag-backpressure/)) |
 | one slow merchant among healthy ones | a single poll loop stalls every partition the member owns, not only the slow one's | not run — argued from the loop |

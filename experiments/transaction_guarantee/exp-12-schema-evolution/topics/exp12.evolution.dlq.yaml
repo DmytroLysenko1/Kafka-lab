@@ -1,0 +1,18 @@
+meta:
+  name: exp12.evolution.dlq
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-12's dead letter topic. Where a record written to a schema the reader cannot use
+    ends up — and the reason header is the evidence this experiment reads back.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 1440
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

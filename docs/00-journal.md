@@ -1230,3 +1230,64 @@ measured with a different tool.
 
 **Carried into:** the exp-11 row of [case 07](static/07-retry-dlq.md) and the retry section
 of [patterns.md](patterns.md), which until now said this was designed but not measured.
+
+## exp-12 — the registry is off by default, and protobuf will not tell you
+
+Date: 2026-09-25 · [run logs](../experiments/transaction_guarantee/exp-12-schema-evolution/results/) ·
+`make exp-12` — two runs, Apicurio 3.0.9
+
+**Hypothesis.** Adding a field is safe, removing one or retyping it is not, and the registry
+is what stops the unsafe ones from being published.
+
+**What the registry did.** Each change asked on a subject of its own, seeded with the
+schema the service really publishes under, at three settings:
+
+| change | NONE | BACKWARD | FULL |
+|---|---|---|---|
+| add an optional field | accepted | accepted | accepted |
+| remove a field | accepted | **refused** | accepted |
+| retype a field, keeping its number | accepted | **refused** | **refused** |
+
+Two of those cells are not what the design notes expected. **A new subject starts at
+`NONE`** — the global level reads `{"compatibilityLevel":"NONE"}` and every change goes
+through, so running a schema registry buys nothing until somebody sets the level; the
+server is not the protection, the setting is. And **`FULL` is not `BACKWARD` plus more**:
+this version accepts a field deletion under `FULL` while refusing it under `BACKWARD`,
+which is the opposite of what the names suggest. Case 09 expected the deletion to be
+accepted under `BACKWARD` and recorded the refusal instead — the trap it describes is real,
+but it is one setting over.
+
+**What the bytes did.** The same three changes written as records and read by a consumer
+built against the baseline:
+
+| record | outcome |
+|---|---|
+| v1 | counted |
+| a field added at the end | **counted**, unknown field skipped |
+| the amount removed | dead letter: *an authorised amount is positive* |
+| the amount retyped to a string, same number | dead letter: *an authorised amount is positive* |
+
+**The part worth keeping.** Neither destructive change produced a decoding error. Protobuf
+skipped what it could not match and handed over a message whose `amount_minor` was zero —
+no error at the transport, none at the parser, none at the schema id, which was valid and
+pointed at the right schema. The only layer that noticed was the domain rule that an
+authorised payment is for a positive amount. Without that line the merchant's projection
+would have taken two payments of zero and every component would have reported success.
+
+**Two mistakes this experiment made first, both caught by numbers that could not be true.**
+The first compatibility matrix said adding a field was incompatible — because `BACKWARD`
+had been set *after* an incompatible version was already registered under that subject, so
+each candidate was compared against that rather than the baseline. Fresh subject per cell
+now, with the level read back before asking. Then the wire half reported a decoding error
+for the added field: it had been written at number 5, which is `occurred_at` in the real
+schema, so the cell measured a reused number instead of an added field. Both halves derive
+from the service's own schema text now, so the numbering cannot drift apart again.
+
+**And one defect in the service, found by the experiment rather than by review.** The
+consumer treated a context *deadline* as a failure to report while treating a
+*cancellation* as an orderly stop. In production the context is cancelled by a signal, so
+it never showed; under a test budget it turned a clean shutdown into an error. Both are
+shutdowns now.
+
+**Carried into:** the measured matrix in [case 09](static/09-schema-evolution.md), which
+until now was a table of expectations.
