@@ -35,15 +35,18 @@ newest event is not a violation — at-least-once delivery produces those, and c
 would inflate every run. Both rules are covered by `violations_test.go`, because the
 instrument has to be trustworthy before the measurement means anything.
 
-## Result — 2026-09-20, three runs
+## Result — seven runs, 2026-09-20 to 2026-09-24
 
 | Run | Payments split across partitions | Order violations |
 |---|---|---|
-| keyless | 100 of 100, every time | 7 964 · 7 964 · 8 721 of 10 000 |
-| keyed | 0 | 0 · 0 · 0 |
+| keyless | 100 of 100, every time | 6 827 · 7 206 · 7 962 · 7 964 · 7 964 · 8 343 · 8 721 of 10 000 |
+| keyed | 0 | 0, every run |
 
 The keyless figure is a shape, not a constant: partition switching and fetch order vary
-between runs. The keyed column is exactly zero every time, which is the difference between
+between runs. Three runs made it look tighter than it is — the first three landed on
+7 964, 7 964 and 8 721, and the next four widened the spread to 6 827–8 721, about a fifth
+of the lowest. What does not vary is that every payment is split and most of its events
+arrive out of order. The keyed column is exactly zero every time, which is the difference between
 a guarantee and a tendency — and it is also the control on the instrument, since a non-zero
 number there would mean the counter was broken rather than Kafka.
 

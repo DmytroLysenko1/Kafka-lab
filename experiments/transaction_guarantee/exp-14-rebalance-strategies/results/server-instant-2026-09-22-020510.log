@@ -1,4 +1,4 @@
-exp-14 — a second consumer joins, strategy: server, handler: instant
+закexp-14 — a second consumer joins, strategy: server, handler: instant
 date: 2026-09-22-020510
 client: franz-go v1.22.0
 
