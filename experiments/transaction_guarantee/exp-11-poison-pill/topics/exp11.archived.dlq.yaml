@@ -1,0 +1,19 @@
+meta:
+  name: exp11.archived.dlq
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-11, cell B's dead letter topic. Longer retention than the topic it archives from:
+    a record lands here because a person has to look at it, and a person is slower than
+    an hour. One partition, matching the topic it takes records out of.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 1440
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

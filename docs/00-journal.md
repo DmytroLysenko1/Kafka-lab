@@ -1172,3 +1172,61 @@ nothing in the service ever has to decide what 19.99 rounds to — the test that
 **Carried into:** the KR3 row of the [README](../README.md). KR3 is now complete end to
 end; what remains is exp-11 and exp-12 on top of the dead letter topic and the registry,
 and the observability of KR4.
+
+## exp-11 — what one unreadable record costs, and what the first run measured instead
+
+Date: 2026-09-25 · [run logs](../experiments/transaction_guarantee/exp-11-poison-pill/results/) ·
+`make exp-11` — two runs
+
+**Hypothesis.** A record nobody can decode blocks everything behind it unless it has
+somewhere to go. With a dead letter topic the partition keeps moving; without one the
+consumer crash-loops on the same offset forever.
+
+**Setup.** 100 good records with one undecodable record after the tenth, on a single
+partition — "behind it" has to be unambiguous. The consumer is the service's own; the only
+difference between the cells is the sink it hands an unreadable record to: the real dead
+letter topic in one, a refusing one in the other, which is what a service that never
+configured the route amounts to. Separate topics, groups, merchants and event id ranges,
+because the inbox deduplicates by event id and overlapping ranges would make one cell's
+records look like the other's duplicates.
+
+**Result.**
+
+| | no dead letter route | dead letter topic |
+|---|---|---|
+| payments counted | **10** of 100 | **100** of 100 |
+| records archived | 0 | 1 |
+| committed offset | 10, with **91 records never read** | 101 |
+| consumer restarts | **125 · 124** in 30 s | 0 |
+| outcome | never drained | drained in **322 ms · 207 ms** |
+
+**What the first run measured, and why it was thrown away.** It reported 11 payments
+counted and the offset at 101 — everything committed, almost nothing handled. Those two
+numbers cannot both be true of a stuck partition, so the run was not published. The inbox
+said what had happened: rows for events 110000–110009 **and 110099** — the first ten and
+the very last. The supervisor was calling `Run` again on the same franz-go client, and the
+client keeps its own fetch position: the "restart" resumed after the record that had killed
+it, and then a later batch committed an offset that swept everything below it. The harness,
+not the service, was walking past the poison.
+
+A restart is now a new client, which starts from the last committed offset — what a
+restarted pod actually does. The numbers changed from incoherent to flat: ten handled, ten
+committed, ninety-one never read.
+
+**What it shows.** The cost of a poison pill is not the record; it is the queue behind it.
+Ninety-one payments were produced, acknowledged and never read, on a partition the broker
+considers perfectly healthy — every replica in sync, nothing lost. The failure is in the
+consumer and it hides well: it comes back, reads, dies, and the lag graph is a flat line
+rather than a spike. The route out is the whole difference, and the classification is what
+makes it safe: only "this will never work" leaves the partition, while a database that is
+down still holds the offset, because giving up on those is how payments go missing quietly.
+
+**And one more instrument fix, from the review rather than from the numbers.** The backoff
+between restarts was a plain `time.Sleep`, which no cancellation can interrupt: the cell
+ran 30.162 s against a 30 s budget, and the overshoot was exactly that sleep. It is a
+`select` on the budget now, the cell gives up at 30.003 s, and the runs above are the ones
+taken after the change — the earlier pair was deleted rather than kept beside numbers
+measured with a different tool.
+
+**Carried into:** the exp-11 row of [case 07](static/07-retry-dlq.md) and the retry section
+of [patterns.md](patterns.md), which until now said this was designed but not measured.

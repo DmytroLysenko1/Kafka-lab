@@ -1,0 +1,19 @@
+meta:
+  name: exp11.archived
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-11, cell B: the same records as cell A, read by the same consumer with a dead
+    letter topic configured. One partition, so the difference between the two cells is
+    the routing decision and nothing else.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false
