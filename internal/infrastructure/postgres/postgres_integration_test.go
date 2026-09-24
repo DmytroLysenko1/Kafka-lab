@@ -406,11 +406,18 @@ func TestClaimHandsEachRecordToExactlyOneRelay(t *testing.T) {
 		t.Fatalf("two relays claiming: %v", err)
 	}
 
-	if diff := cmp.Diff(2, len(first)); diff != "" {
-		t.Fatalf("records the first relay claimed (-want +got):\n%s", diff)
-	}
-	if diff := cmp.Diff(2, len(second)); diff != "" {
-		t.Fatalf("records the second relay claimed (-want +got):\n%s", diff)
+	if len(first) != 2 || len(second) != 2 {
+		var waiting, locked int
+		if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM outbox WHERE published_at IS NULL").Scan(&waiting); err != nil {
+			t.Fatalf("count unpublished: %v", err)
+		}
+		if err := pool.QueryRow(t.Context(),
+			"SELECT count(*) FROM pg_locks l JOIN pg_class c ON c.oid = l.relation WHERE c.relname = 'outbox' AND l.granted",
+		).Scan(&locked); err != nil {
+			t.Fatalf("count locks: %v", err)
+		}
+		t.Fatalf("relays claimed %d and %d of 4; %d rows were unpublished and %d locks were held on outbox",
+			len(first), len(second), waiting, locked)
 	}
 	held := map[int64]bool{}
 	for _, record := range slices.Concat(first, second) {

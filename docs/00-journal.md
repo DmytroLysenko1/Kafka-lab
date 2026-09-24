@@ -1074,3 +1074,64 @@ else.
 **Carried into:** the KR3 row of the [README](../README.md). Next are the consumer side
 with its inbox, exp-11 (poison pill to the dead letter topic) and exp-12 (schema evolution),
 which is why the registry keeps its history in Postgres rather than in memory.
+
+## The payments service, part 4 — the consumer, and a ghost that was stealing its rows
+
+Date: 2026-09-25 · `make test-integration` against the live stand ·
+[`internal/application/merchants/`](../internal/application/merchants/),
+[`internal/infrastructure/kafka/consumer.go`](../internal/infrastructure/kafka/consumer.go)
+
+**What was built.** The other end of the outbox: a consumer group that reads
+`payments.main` with autocommit off, decodes the Confluent header and the protobuf behind
+it, claims the event in an inbox keyed by the `event_id` the relay set, adds the amount to
+a per-merchant total, and only then commits the offset. The claim and the total are one
+transaction, so a crash between them takes both — the retry counts the payment rather than
+finding an event already marked handled and skipping it forever.
+
+**What the stand confirmed.** The same event published twice moves the total once and
+leaves one inbox row. A record that was never protobuf lands in the dead letter topic with
+its bytes unchanged, a `dlq_reason` and where it came from, and the good record behind it
+is handled — the partition keeps moving. An event the consumer can decode but must refuse
+— an amount of zero — takes the same route: `ErrUnprocessable` is the line between "try
+again later" and "this will never work", and only the second one leaves the partition.
+
+**The part that cost the afternoon.** `TestClaimHandsEachRecordToExactlyOneRelay` started
+failing about one run in six — but only in a full suite run, never alone, and never twenty
+times in a row on its own. The first suspicion was the obvious one: two packages sharing a
+database, `go test` running them in parallel. `-p 1` did not fix it, which was the first
+sign the diagnosis was wrong, and the fix was reverted rather than left in as a charm.
+
+Making the failure explain itself is what found it. The assertion now prints what each
+relay claimed, how many rows were unpublished and how many locks were held:
+
+```
+relays claimed 2 and 1 of 4; 4 rows were unpublished and 1 locks were held on outbox
+```
+
+Four rows, three claimed, one held by somebody else. That somebody was a relay from an
+earlier hand run, still alive 43 minutes later: `go run ./cmd/outbox-relay` had been stopped
+with a signal to the `go run` process, which does not pass it on to the program it built.
+The child kept sweeping the outbox twice a second against the same database, taking rows
+the test expected to find free — and rolling back, because the topic it published to had
+been deleted, which is why the rows were still unpublished when the test looked.
+
+Two things worth keeping from that. Stopping a `go run` is not stopping the service: build
+the binary and run that, or the process outlives the terminal it was started from. And a
+test that fails one time in six is not necessarily flaky — this one was reporting a fact
+about the environment, and the fastest way to that fact was making the failure message
+carry the evidence instead of just the mismatch.
+
+**What the fresh-context reviews caught.** Two things, both of the same shape: a rule I had
+already applied elsewhere and then missed here. The offset commit ran on a context that
+cannot be cancelled — right, so a shutdown does not throw away work already done — but with
+no timeout, which is what `storage.commit` and `deadletters.Send` both have: an unreachable
+broker would have hung the poll loop until the orchestrator killed the process. And the two
+identifiers that become primary keys, `event_id` from a record header and `merchant_id`
+from the payload, were stored unbounded; the code's own comment says the consumer does not
+trust what arrives on a topic, and then it trusted a header's length. Both are bounded at
+64 characters now — what the producing domain allows a merchant id to be — in the use case
+and again in the schema, and an event that breaks the bound goes to the dead letter topic
+rather than blocking the partition.
+
+**Carried into:** the KR3 row of the [README](../README.md). The dead letter path is the
+groundwork exp-11 will measure; the retry topics in the catalog are still unused.
