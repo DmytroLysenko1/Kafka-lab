@@ -943,3 +943,37 @@ tendency; it is not enough to bound the tendency.
 
 **Carried into:** [`static/01-write-path.md`](static/01-write-path.md), the group README and
 the root README.
+
+
+## exp-14b — the other half of a rebalance
+
+Date: 2026-09-24 · `make exp-14b` · two runs of four cells
+
+exp-14 measures a member joining. A deploy does the opposite several times a day, so the
+same program now also takes the second member away at 25 s — for good, or for two seconds —
+with and without a `group.instance.id`, on cooperative-sticky throughout and a session
+timeout cut to 12 s so the run outlives it.
+
+| Membership | The member | Its partitions idle | Assignment changes |
+|---|---|---|---|
+| dynamic | gone for good | 0.57–0.61 s | one |
+| dynamic | back after 2 s | 0.58–0.59 s | three |
+| static | gone for good | **12.58–12.61 s** | one, after the session timeout |
+| static | back after 2 s | **2.05 s** | none |
+
+**Static membership is the session timeout, seen from both sides.** With an instance ID
+franz-go sends no `LeaveGroup` at all when the client closes (the classic path returns early;
+under KIP-848 it sends a heartbeat with member epoch −2 instead), so the group learns of a
+death only when the session expires — 12.6 s of partitions nobody read. The same silence is
+why a restart is free: the member came back inside the timeout, kept its assignment, and the
+group never rebalanced. The only gap was the two seconds the process was down.
+
+Dynamic membership is the mirror image: a leave is answered in 0.6 s, and a restart costs a
+second rebalance, moving the partitions to the survivor and back again — the same waste
+eager rebalancing spends on partitions that were never going anywhere.
+
+Nothing was handled twice and nothing was missed in any cell, which is the check that the
+commit-marking added to exp-14 still holds when the member goes away mid-stream.
+
+**Carried into:** the `session.timeout.ms` row of [`tuning-checklist.md`](tuning-checklist.md)
+and the group README.

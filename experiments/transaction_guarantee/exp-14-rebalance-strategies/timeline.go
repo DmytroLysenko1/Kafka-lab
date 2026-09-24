@@ -46,21 +46,23 @@ type change struct {
 // timeline collects what both members did. The consumers write from their own goroutines,
 // and the group's callbacks from franz-go's, so every access goes through the lock.
 type timeline struct {
-	mu       sync.Mutex
-	start    time.Time
-	joinedAt time.Duration
-	log      []handling
-	changes  []change
+	mu         sync.Mutex
+	start      time.Time
+	measuredAt time.Duration
+	log        []handling
+	changes    []change
 }
 
 func newTimeline(start time.Time) *timeline {
 	return &timeline{start: start}
 }
 
-func (t *timeline) markJoin() {
+// markMeasured records the moment the report's windows are placed around: the second
+// member joining, or leaving when the run is about a departure.
+func (t *timeline) markMeasured() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.joinedAt = time.Since(t.start)
+	t.measuredAt = time.Since(t.start)
 }
 
 func (t *timeline) handled(member string, partition int32, seq int64, at time.Time) {
@@ -102,15 +104,15 @@ func (t *timeline) record(member, kind string, partitions []int32) {
 
 // recording is a finished timeline, copied out from under the lock.
 type recording struct {
-	joinedAt time.Duration
-	handled  []handling
-	changes  []change
+	measuredAt time.Duration
+	handled    []handling
+	changes    []change
 }
 
 func (t *timeline) snapshot() recording {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return recording{joinedAt: t.joinedAt, handled: slices.Clone(t.log), changes: slices.Clone(t.changes)}
+	return recording{measuredAt: t.measuredAt, handled: slices.Clone(t.log), changes: slices.Clone(t.changes)}
 }
 
 // longestGaps is, per partition, the longest stretch inside [from, to) in which nothing of
@@ -193,8 +195,8 @@ func sortedByTime(handled []handling) []handling {
 }
 
 func report(cfg *settings, group string, r recording) []string {
-	baseFrom, baseTo := r.joinedAt-joinMargin-baselineWindow, r.joinedAt-joinMargin
-	joinFrom, joinTo := r.joinedAt-joinMargin, r.joinedAt+afterJoinWindow
+	baseFrom, baseTo := r.measuredAt-joinMargin-baselineWindow, r.measuredAt-joinMargin
+	joinFrom, joinTo := r.measuredAt-joinMargin, r.measuredAt+afterJoinWindow
 	before := longestGaps(r.handled, baseFrom, baseTo)
 	after := longestGaps(r.handled, joinFrom, joinTo)
 
@@ -203,12 +205,13 @@ func report(cfg *settings, group string, r recording) []string {
 		fmt.Sprintf("group\t%s", group),
 		fmt.Sprintf("load\t%d records/s over %d partitions", cfg.rate, partitions),
 		fmt.Sprintf("handler\t%s", describeHandler(cfg)),
-		fmt.Sprintf("second consumer joined at\t%s", r.joinedAt.Round(10*time.Millisecond)),
+		fmt.Sprintf("membership\t%s", describeMembership(cfg)),
+		fmt.Sprintf("%s\t%s", measuredEvent(cfg), r.measuredAt.Round(10*time.Millisecond)),
 		"",
 		"assignment changes after the first",
 	}
 	for _, c := range r.changes {
-		if c.at < r.joinedAt {
+		if c.at < r.measuredAt {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("  %s\t%s %s %v", c.at.Round(10*time.Millisecond), c.member, c.kind, c.partitions))
@@ -237,4 +240,18 @@ func render(out io.Writer, lines []string) error {
 		}
 	}
 	return table.Flush()
+}
+
+func describeMembership(cfg *settings) string {
+	if cfg.static {
+		return fmt.Sprintf("static, group.instance.id per member, session timeout %s", cfg.sessionTimeout)
+	}
+	return fmt.Sprintf("dynamic, session timeout %s", cfg.sessionTimeout)
+}
+
+func measuredEvent(cfg *settings) string {
+	if cfg.leaveAfter > 0 {
+		return "second consumer left at"
+	}
+	return "second consumer joined at"
 }
