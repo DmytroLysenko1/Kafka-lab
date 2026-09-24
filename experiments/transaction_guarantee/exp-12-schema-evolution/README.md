@@ -54,6 +54,14 @@ a line in the domain, written long before this experiment: *an authorised paymen
 positive amount*. Validation at the edge of the consumer is not paperwork; on this evidence
 it is the only layer that noticed.
 
+## Why the run ends by cancelling
+
+The consumer reports a context deadline as a failure and a cancellation as an orderly stop,
+and that asymmetry is deliberate: the deadlines it can see are its own — the offset commit
+and the handling of a record each have one — so treating them as clean exits would turn a
+failed commit into a silent one. The budget here therefore cancels the consumer instead of
+giving it a deadline.
+
 ## Two mistakes this experiment made first
 
 The first compatibility matrix was contaminated: `BACKWARD` was set *after* an incompatible
