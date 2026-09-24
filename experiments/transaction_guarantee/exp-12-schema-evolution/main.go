@@ -231,9 +231,15 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 	}
 	defer consumer.Close()
 
-	bounded, cancel := context.WithTimeout(ctx, s.budget)
-	defer cancel()
-	if err := consumer.Run(bounded); err != nil {
+	// The budget stops the consumer by cancelling it, not by giving it a deadline: a
+	// deadline would also cut short the commit the consumer runs on its own timeout, and
+	// the consumer is right to report that as a failure rather than as a clean stop.
+	running, stop := context.WithCancel(ctx)
+	defer stop()
+	budget := time.AfterFunc(s.budget, stop)
+	defer budget.Stop()
+
+	if err := consumer.Run(running); err != nil {
 		return err
 	}
 

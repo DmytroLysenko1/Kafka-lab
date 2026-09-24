@@ -70,9 +70,11 @@ func (c *Consumer) Close() { c.client.Close() }
 func (c *Consumer) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
 		if err := c.poll(ctx); err != nil {
-			// A deadline is as much a shutdown as a cancellation: both mean this consumer
-			// was told to stop, and neither is a failure to report upwards.
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, kgo.ErrClientClosed) {
+			// Only a cancellation is an orderly stop. A deadline is not: the ones that can
+			// reach here come from this consumer's own timeouts — the offset commit and the
+			// handling of a record — and reporting either as a clean exit would turn a
+			// failed commit into a silent one.
+			if errors.Is(err, context.Canceled) || errors.Is(err, kgo.ErrClientClosed) {
 				break
 			}
 			return err

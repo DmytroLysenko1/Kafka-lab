@@ -1283,11 +1283,21 @@ for the added field: it had been written at number 5, which is `occurred_at` in 
 schema, so the cell measured a reused number instead of an added field. Both halves derive
 from the service's own schema text now, so the numbering cannot drift apart again.
 
-**And one defect in the service, found by the experiment rather than by review.** The
-consumer treated a context *deadline* as a failure to report while treating a
-*cancellation* as an orderly stop. In production the context is cancelled by a signal, so
-it never showed; under a test budget it turned a clean shutdown into an error. Both are
-shutdowns now.
+**A defect the experiment found, and the wrong fix it tempted me into.** The consume phase
+ended with `context deadline exceeded` where it should simply have finished, because the
+consumer reports a deadline as a failure while treating a cancellation as an orderly stop.
+The quick fix was to call a deadline a shutdown too — and a fresh-context review showed why
+that is wrong: the deadlines that reach that line are the consumer's *own*, from the offset
+commit and from the handling of a record, so accepting them as clean exits would report a
+failed commit as a normal stop. The consumer is unchanged; what changed is the harness,
+which now ends the run by cancelling rather than by deadline. A deadline is a limit on
+work, a cancellation is an instruction to stop, and only the second one is a shutdown.
+
+The same review also flagged the commit's `context.WithTimeout(context.WithoutCancel(ctx),
+5s)` as leaking the parent's deadline into the commit. It does not: `WithoutCancel` returns
+a context with no deadline at all — `Deadline()` reports `ok=false` — so the commit gets
+its five seconds whatever the caller's budget was. Checked in the standard library rather
+than argued.
 
 **Carried into:** the measured matrix in [case 09](static/09-schema-evolution.md), which
 until now was a table of expectations.
