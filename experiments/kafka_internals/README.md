@@ -6,7 +6,7 @@ cleaner keeps, and what a dead broker does to the ISR.
 
 | Run | Question | Answer |
 |---|---|---|
-| [exp-01](exp-01-partition-keys/) | does the key decide the order a payment is handled in? | keyless: 7 964 – 8 721 ordering violations per 10 000 events, every payment split across partitions. Keyed: zero, every time |
+| [exp-01](exp-01-partition-keys/) | does the key decide the order a payment is handled in? | keyless: 6 827 – 8 721 ordering violations per 10 000 events over seven runs, every payment split across partitions. Keyed: zero, every time |
 | [exp-02](exp-02-hot-partition/) | a hot key — does adding consumers help? | 85% of records on one partition; seven consumers drained it 15% faster than one, and the seventh sat idle |
 | [exp-03](exp-03-segments-retention/) | what does the cleaner keep? | compaction turned 2 010 records into 50 and kept all 10 tombstones; retention dropped every closed segment |
 | [exp-04](exp-04-isr-leader-election/) | what does a killed broker cost? | noticed in about ten seconds, writes never stopped with zero margin left, and leadership never came back on its own |

@@ -919,3 +919,27 @@ here".
 
 **Not everything the audit reported was real:** it read exp-09's test package as missing
 `goleak`, which it has had since the package was written.
+
+
+## exp-01 again — three runs were not enough to call a spread
+
+Date: 2026-09-24 · `make exp-01` · four more runs on top of the three from 2026-09-20
+
+The entry at the top of this journal calls the keyless number "a shape, not a figure" and
+then quotes three runs: 7 964, 7 964 and 8 721. A fourth run, left uncommitted on
+2026-09-21, read 6 827 — below everything the docs claimed. Rather than drop it, the run
+was repeated three more times: 8 343, 7 206, 7 962.
+
+| Runs | Keyless violations per 10 000 | Keyed |
+|---|---|---|
+| seven | **6 827 – 8 721**, median 7 964 | 0, every run |
+
+The spread is about a fifth of the lowest reading, and two runs landing on the same number
+early on made it look tighter than it is. Nothing about the finding changes — every payment
+is split across partitions, most of its events are handled out of order, and the keyed
+column is exactly zero every time — but the published range now covers what the instrument
+actually produces. Three runs is enough to show a difference between a guarantee and a
+tendency; it is not enough to bound the tendency.
+
+**Carried into:** [`static/01-write-path.md`](static/01-write-path.md), the group README and
+the root README.
