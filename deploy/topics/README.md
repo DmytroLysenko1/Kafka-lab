@@ -116,7 +116,11 @@ the shape the service runs on, and `make check` keeps checking only that.
   before and after the change land in different partitions. Treat it as a migration, not
   as a one-line diff — exp-02 shows the cost.
 - **Replication factor** is a reassignment with throttling (exp-15), which topicctl
-  declines to do.
+  declines to do — it refuses outright once the observed ISR no longer matches the YAML.
+  exp-15 measured the move: 60 MiB onto a third replica took 2.2–2.5 s unthrottled and
+  24.1–24.8 s at 1 MiB/s, which is the per-broker rate rather than the cluster's. Producer
+  latency did not move either way on this stand. `--verify` is not optional: it is what
+  removes the throttle `--execute` set.
 - **Settings** change in the YAML, then `make topics`. A setting added by hand is reported
   by `make check`; `make reset-topic TOPIC=<name>` drops the topic and recreates it from
   its YAML, log included.
