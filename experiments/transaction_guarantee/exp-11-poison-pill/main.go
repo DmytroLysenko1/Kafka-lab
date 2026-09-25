@@ -131,7 +131,9 @@ func produce(ctx context.Context, s *settings, out io.Writer) error {
 		return err
 	}
 
-	written := &lines{out: out}
+	written := &lines{
+		out: out,
+	}
 	written.printf("produced %d good records with one undecodable record after %d of them\n", s.records, s.poisonAt)
 	return written.err
 }
@@ -214,14 +216,19 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 	// A restart is a new client: labkit.Supervise explains why reusing one would measure
 	// the harness instead of the service.
 	newConsumer := func() (labkit.Runner, error) {
-		return kafka.NewConsumer(brokers(), kafka.Stage{Topic: s.topic, Group: s.group}, record, dead, slog.New(slog.DiscardHandler), metrics.Discard{})
+		return kafka.NewConsumer(brokers(), kafka.Stage{
+			Topic: s.topic,
+			Group: s.group,
+		}, record, dead, slog.New(slog.DiscardHandler), metrics.Discard{})
 	}
 
 	bounded, cancel := context.WithTimeout(ctx, s.budget)
 	defer cancel()
 
 	started := time.Now()
-	restarts, drained, err := labkit.Supervise(bounded, newConsumer, func() bool { return handled(ctx, storage, s) >= int64(s.records) })
+	restarts, drained, err := labkit.Supervise(bounded, newConsumer, func() bool {
+		return handled(ctx, storage, s) >= int64(s.records)
+	})
 	if err != nil {
 		return err
 	}
@@ -284,7 +291,9 @@ func measure(ctx context.Context, s *settings) (measured, error) {
 	}
 
 	var result measured
-	ends.Each(func(offset kadm.ListedOffset) { result.produced += offset.Offset })
+	ends.Each(func(offset kadm.ListedOffset) {
+		result.produced += offset.Offset
+	})
 	committed.Each(func(offset kadm.OffsetResponse) {
 		if offset.At > 0 {
 			result.read += offset.At
@@ -301,7 +310,9 @@ func measure(ctx context.Context, s *settings) (measured, error) {
 	if err := archived.Error(); err != nil {
 		return measured{}, fmt.Errorf("%w: end offsets of %s: %w", errListing, s.dlqTopic, err)
 	}
-	archived.Each(func(offset kadm.ListedOffset) { result.archived += offset.Offset })
+	archived.Each(func(offset kadm.ListedOffset) {
+		result.archived += offset.Offset
+	})
 	return result, nil
 }
 
@@ -316,7 +327,9 @@ func report(ctx context.Context, out io.Writer, storage *postgres.Storage, s *se
 		route = s.dlqTopic
 	}
 
-	written := &lines{out: out}
+	written := &lines{
+		out: out,
+	}
 	written.printf("dead letter route: %s\n", route)
 	written.printf("records in the topic: %d (%d good, 1 undecodable after %d of them)\n", result.produced, s.records, s.poisonAt)
 	written.printf("payments counted: %d of %d\n", handled(ctx, storage, s), s.records)

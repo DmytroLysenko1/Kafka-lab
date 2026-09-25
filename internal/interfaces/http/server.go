@@ -42,12 +42,20 @@ func NewServer(authorize authorizer, totals totalReader, apiKey string, logger *
 	if apiKey == "" {
 		return nil, ErrAPIKeyRequired
 	}
-	return &Server{authorize: authorize, totals: totals, apiKey: []byte(apiKey), logger: logger, observer: watch}, nil
+	return &Server{
+		authorize: authorize,
+		totals:    totals,
+		apiKey:    []byte(apiKey),
+		logger:    logger,
+		observer:  watch,
+	}, nil
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 	mux.Handle("POST /payments", s.observed("POST /payments", s.authenticated(http.HandlerFunc(s.authorizePayment))))
 	mux.Handle("GET /merchants/{merchantID}/total", s.observed("GET /merchants/{id}/total", s.authenticated(http.HandlerFunc(s.merchantTotal))))
 	return mux
@@ -73,7 +81,10 @@ func (s *Server) authenticated(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		presented := []byte(r.Header.Get("X-API-Key"))
 		if subtle.ConstantTimeCompare(presented, s.apiKey) != 1 {
-			s.respond(r.Context(), w, http.StatusUnauthorized, failure{Code: "unauthorized", Message: "a valid X-API-Key header is required"})
+			s.respond(r.Context(), w, http.StatusUnauthorized, failure{
+				Code:    "unauthorized",
+				Message: "a valid X-API-Key header is required",
+			})
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -86,7 +97,10 @@ func (s *Server) authenticated(next http.Handler) http.Handler {
 func (s *Server) observed(route string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
-		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		recorder := &statusRecorder{
+			ResponseWriter: w,
+			status:         http.StatusOK,
+		}
 		next.ServeHTTP(recorder, r)
 		s.observer.Served(route, strconv.Itoa(recorder.status), time.Since(started))
 	})

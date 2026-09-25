@@ -106,7 +106,11 @@ func flatOut(ctx context.Context, client *kgo.Client, d time.Duration, pool []re
 	for i := 0; time.Now().Before(deadline); i++ {
 		r := pool[i%len(pool)]
 		handed := time.Now()
-		client.Produce(ctx, &kgo.Record{Topic: topic, Key: r.key, Value: r.value}, func(_ *kgo.Record, err error) {
+		client.Produce(ctx, &kgo.Record{
+			Topic: topic,
+			Key:   r.key,
+			Value: r.value,
+		}, func(_ *kgo.Record, err error) {
 			rec.record(time.Since(handed), err)
 		})
 		if ctx.Err() != nil {
@@ -123,7 +127,13 @@ func flatOut(ctx context.Context, client *kgo.Client, d time.Duration, pool []re
 	}
 
 	counted := rec.snapshot()
-	return saturated{acked: len(counted.lat), failed: counted.failed, elapsed: elapsed, cpu: cpuAfter - cpuBefore, lat: counted.lat}, nil
+	return saturated{
+		acked:   len(counted.lat),
+		failed:  counted.failed,
+		elapsed: elapsed,
+		cpu:     cpuAfter - cpuBefore,
+		lat:     counted.lat,
+	}, nil
 }
 
 func cpuTime() (time.Duration, error) {

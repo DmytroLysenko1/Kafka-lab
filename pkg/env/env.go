@@ -33,7 +33,9 @@ type Reader struct {
 	problems []error
 }
 
-func (r *Reader) Err() error { return errors.Join(r.problems...) }
+func (r *Reader) Err() error {
+	return errors.Join(r.problems...)
+}
 
 func (r *Reader) Required(name string) string {
 	value := os.Getenv(name)

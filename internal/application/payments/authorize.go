@@ -40,7 +40,12 @@ type AuthorizePayment struct {
 }
 
 func NewAuthorizePayment(payments paymentStore, tx txManager, now Clock, newID IDs) *AuthorizePayment {
-	return &AuthorizePayment{payments: payments, tx: tx, now: now, newID: newID}
+	return &AuthorizePayment{
+		payments: payments,
+		tx:       tx,
+		now:      now,
+		newID:    newID,
+	}
 }
 
 type AuthorizeCommand struct {
@@ -71,7 +76,10 @@ func (uc *AuthorizePayment) Execute(ctx context.Context, cmd AuthorizeCommand) (
 		if err != nil {
 			return err
 		}
-		stored = AuthorizeResult{PaymentID: id.String(), Stored: created}
+		stored = AuthorizeResult{
+			PaymentID: id.String(),
+			Stored:    created,
+		}
 		return nil
 	})
 	if err != nil {

@@ -60,7 +60,15 @@ type Relay struct {
 }
 
 func NewRelay(outbox claimStore, publisher eventPublisher, tx txManager, now Clock, batch int, logger *slog.Logger, watch observer) *Relay {
-	return &Relay{outbox: outbox, publisher: publisher, tx: tx, now: now, batch: batch, logger: logger, observer: watch}
+	return &Relay{
+		outbox:    outbox,
+		publisher: publisher,
+		tx:        tx,
+		now:       now,
+		batch:     batch,
+		logger:    logger,
+		observer:  watch,
+	}
 }
 
 // Sweep publishes one batch and reports how many records went out. The order is the whole
@@ -82,7 +90,9 @@ func (r *Relay) Sweep(ctx context.Context) (int, error) {
 			return err
 		}
 
-		ids := lo.Map(claimed, func(record Record, _ int) int64 { return record.ID })
+		ids := lo.Map(claimed, func(record Record, _ int) int64 {
+			return record.ID
+		})
 		if err := r.outbox.MarkPublished(ctx, ids, r.now()); err != nil {
 			return err
 		}

@@ -98,7 +98,9 @@ func preload(ctx context.Context, s *settings, out io.Writer) error {
 	records := s.megabytes * 1024 * 1024 / recordBytes
 	batch := make([]*kgo.Record, 0, 1000)
 	for i := range records {
-		batch = append(batch, &kgo.Record{Value: noise()})
+		batch = append(batch, &kgo.Record{
+			Value: noise(),
+		})
 		if len(batch) < cap(batch) && i != records-1 {
 			continue
 		}
@@ -113,7 +115,9 @@ func preload(ctx context.Context, s *settings, out io.Writer) error {
 		return err
 	}
 
-	written := &lines{out: out}
+	written := &lines{
+		out: out,
+	}
 	written.printf("preloaded %d MiB as %d records; %s on disk across the cluster\n",
 		s.megabytes, records, mib(stored))
 	return written.err
@@ -193,7 +197,10 @@ func produce(ctx context.Context, client *kgo.Client, started time.Time, writes 
 				continue
 			}
 			select {
-			case writes <- latency{at: at, took: time.Since(sent)}:
+			case writes <- latency{
+				at:   at,
+				took: time.Since(sent),
+			}:
 			default:
 			}
 		}

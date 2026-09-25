@@ -99,7 +99,9 @@ func New() *Registry {
 	return metrics
 }
 
-func (m *Registry) Gatherer() prometheus.Gatherer { return m.registry }
+func (m *Registry) Gatherer() prometheus.Gatherer {
+	return m.registry
+}
 
 // Swept records one pass of the relay.
 func (m *Registry) Swept(published int, took time.Duration, err error) {

@@ -51,7 +51,12 @@ type RecordAuthorized struct {
 }
 
 func NewRecordAuthorized(inbox inboxStore, totals totalsStore, tx txManager, now Clock) *RecordAuthorized {
-	return &RecordAuthorized{inbox: inbox, totals: totals, tx: tx, now: now}
+	return &RecordAuthorized{
+		inbox:  inbox,
+		totals: totals,
+		tx:     tx,
+		now:    now,
+	}
 }
 
 // Execute reports whether the event was counted; a redelivery is not an error, it is the

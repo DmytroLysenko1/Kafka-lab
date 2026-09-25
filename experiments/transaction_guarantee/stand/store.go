@@ -134,5 +134,10 @@ func (s *store) counts(ctx context.Context, runID string, mode Mode, produced in
 	if err != nil {
 		return Tally{}, fmt.Errorf("stand: count handled payments: %w", err)
 	}
-	return Tally{Produced: produced, Rows: rows, Distinct: distinct, Refused: refused}, nil
+	return Tally{
+		Produced: produced,
+		Rows:     rows,
+		Distinct: distinct,
+		Refused:  refused,
+	}, nil
 }

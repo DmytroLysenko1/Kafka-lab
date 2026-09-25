@@ -38,7 +38,10 @@ type health struct {
 }
 
 func inspect(partitions []partition) health {
-	state := health{Partitions: len(partitions), SmallestISR: -1}
+	state := health{
+		Partitions:  len(partitions),
+		SmallestISR: -1,
+	}
 	for _, part := range partitions {
 		state.count(part)
 	}
@@ -66,7 +69,9 @@ func (h *health) count(p partition) {
 func leaders(partitions []partition) []int32 {
 	ordered := make([]partition, len(partitions))
 	copy(ordered, partitions)
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].ID < ordered[j].ID
+	})
 
 	result := make([]int32, 0, len(ordered))
 	for _, part := range ordered {

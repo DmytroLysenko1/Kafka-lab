@@ -42,15 +42,26 @@ func NewDetours(brokers []string, dlqTopic string, watch detoursObserver) (*Deto
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDetours, err)
 	}
-	return &Detours{client: client, dlqTopic: dlqTopic, observer: watch}, nil
+	return &Detours{
+		client:   client,
+		dlqTopic: dlqTopic,
+		observer: watch,
+	}, nil
 }
 
-func (d *Detours) Close() { d.client.Close() }
+func (d *Detours) Close() {
+	d.client.Close()
+}
 
 // Retry moves a record into a retry tier as its given attempt. The key goes with it, so a
 // tier keeps the same payment on the same partition number it had before.
 func (d *Detours) Retry(ctx context.Context, record *kgo.Record, topic string, attempt int) error {
-	moved := &kgo.Record{Topic: topic, Key: record.Key, Value: record.Value, Headers: retryHeaders(record, attempt, time.Now())}
+	moved := &kgo.Record{
+		Topic:   topic,
+		Key:     record.Key,
+		Value:   record.Value,
+		Headers: retryHeaders(record, attempt, time.Now()),
+	}
 	if err := d.produce(ctx, moved); err != nil {
 		return fmt.Errorf("%w: %s: %w", ErrRetryTopic, topic, err)
 	}
@@ -60,7 +71,12 @@ func (d *Detours) Retry(ctx context.Context, record *kgo.Record, topic string, a
 
 // Replay puts a dead letter back at the start of a chain, as a first attempt.
 func (d *Detours) Replay(ctx context.Context, record *kgo.Record, topic string) error {
-	replayed := &kgo.Record{Topic: topic, Key: record.Key, Value: record.Value, Headers: replayHeaders(record)}
+	replayed := &kgo.Record{
+		Topic:   topic,
+		Key:     record.Key,
+		Value:   record.Value,
+		Headers: replayHeaders(record),
+	}
 	if err := d.produce(ctx, replayed); err != nil {
 		return fmt.Errorf("%w: replay into %s: %w", ErrRetryTopic, topic, err)
 	}

@@ -28,10 +28,14 @@ func ParseID(value string) (ID, error) {
 	if err != nil {
 		return ID{}, ErrIDFormat
 	}
-	return ID{value: parsed}, nil
+	return ID{
+		value: parsed,
+	}, nil
 }
 
-func (id ID) String() string { return id.value.String() }
+func (id ID) String() string {
+	return id.value.String()
+}
 
 type MerchantID struct {
 	value string
@@ -44,10 +48,14 @@ func ParseMerchantID(value string) (MerchantID, error) {
 	case len(value) > merchantIDMaxLength:
 		return MerchantID{}, ErrMerchantTooLong
 	}
-	return MerchantID{value: value}, nil
+	return MerchantID{
+		value: value,
+	}, nil
 }
 
-func (m MerchantID) String() string { return m.value }
+func (m MerchantID) String() string {
+	return m.value
+}
 
 type Status uint8
 
@@ -96,20 +104,32 @@ func Authorize(id ID, merchant MerchantID, amount Money, at time.Time) (*Payment
 	return authorized, nil
 }
 
-func (p *Payment) ID() ID { return p.id }
+func (p *Payment) ID() ID {
+	return p.id
+}
 
-func (p *Payment) Merchant() MerchantID { return p.merchant }
+func (p *Payment) Merchant() MerchantID {
+	return p.merchant
+}
 
-func (p *Payment) Amount() Money { return p.amount }
+func (p *Payment) Amount() Money {
+	return p.amount
+}
 
-func (p *Payment) Status() Status { return p.status }
+func (p *Payment) Status() Status {
+	return p.status
+}
 
-func (p *Payment) AuthorizedAt() time.Time { return p.authorizedAt }
+func (p *Payment) AuthorizedAt() time.Time {
+	return p.authorizedAt
+}
 
 // IsFor answers whether two authorisations are the same intent. What "the same" means is
 // the payment's own business: a caller comparing fields from outside would have to be told
 // again on the day an authorisation grows one.
-func (p *Payment) IsFor(amount Money) bool { return p.amount == amount }
+func (p *Payment) IsFor(amount Money) bool {
+	return p.amount == amount
+}
 
 // PullEvents hands the pending events over and forgets them, so the repository that stores
 // the aggregate is the only place that can publish them and can only do it once.

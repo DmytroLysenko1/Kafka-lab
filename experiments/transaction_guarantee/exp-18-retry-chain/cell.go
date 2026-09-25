@@ -144,7 +144,9 @@ func (c *cell) runChain(ctx context.Context, work *errgroup.Group, finish contex
 	for _, stage := range c.stages() {
 		consumer, err := kafka.NewConsumer(brokers(), stage, c.record, c.detours, slog.New(slog.DiscardHandler), metrics.Discard{})
 		if err != nil {
-			work.Go(func() error { return err })
+			work.Go(func() error {
+				return err
+			})
 			return
 		}
 		work.Go(func() error {
@@ -162,9 +164,16 @@ func (c *cell) runChain(ctx context.Context, work *errgroup.Group, finish contex
 func (c *cell) stages() []kafka.Stage {
 	chainOf := chainTiers()
 	chain := make([]kafka.Stage, 0, 1+len(chainOf))
-	chain = append(chain, kafka.Stage{Topic: c.s.topic("main"), Group: c.s.group("main")})
+	chain = append(chain, kafka.Stage{
+		Topic: c.s.topic("main"),
+		Group: c.s.group("main"),
+	})
 	for _, next := range chainOf {
-		chain = append(chain, kafka.Stage{Topic: c.s.topic(next.suffix), Group: c.s.group(next.suffix), Delay: next.delay})
+		chain = append(chain, kafka.Stage{
+			Topic: c.s.topic(next.suffix),
+			Group: c.s.group(next.suffix),
+			Delay: next.delay,
+		})
 	}
 	return kafka.Chain(chain...)
 }
@@ -174,7 +183,9 @@ func (c *cell) stages() []kafka.Stage {
 // offset and dies — which is what the service did before the chain existed.
 func (c *cell) startBlind() (labkit.Runner, error) {
 	return kafka.NewConsumer(brokers(), kafka.Stage{Topic: c.s.topic("main"), Group: c.s.group("main")},
-		blindToContention{inner: c.record}, c.detours, slog.New(slog.DiscardHandler), metrics.Discard{})
+		blindToContention{
+			inner: c.record,
+		}, c.detours, slog.New(slog.DiscardHandler), metrics.Discard{})
 }
 
 // operate is the person or the job on the other side of the lock. In cells A and B it lets
@@ -251,7 +262,9 @@ func endOffsets(ctx context.Context, admin *kadm.Client, topic string) (int64, e
 		return 0, fmt.Errorf("end offsets of %s: %w", topic, err)
 	}
 	var total int64
-	ends.Each(func(end kadm.ListedOffset) { total += end.Offset })
+	ends.Each(func(end kadm.ListedOffset) {
+		total += end.Offset
+	})
 	return total, nil
 }
 

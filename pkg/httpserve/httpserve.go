@@ -28,7 +28,9 @@ func Serve(ctx context.Context, server *http.Server, shutdownTimeout time.Durati
 // not cancel: stopping the server must not cut a request off half-way, which is what the
 // shutdown window is for.
 func ServeOn(ctx context.Context, server *http.Server, listener net.Listener, shutdownTimeout time.Duration) error {
-	server.BaseContext = func(net.Listener) context.Context { return context.WithoutCancel(ctx) }
+	server.BaseContext = func(net.Listener) context.Context {
+		return context.WithoutCancel(ctx)
+	}
 
 	served := make(chan error, 1)
 	go func() { served <- server.Serve(listener) }()

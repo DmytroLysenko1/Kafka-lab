@@ -28,7 +28,9 @@ func measure(ctx context.Context, cfg *Settings, out io.Writer) error {
 	}
 	defer pool.Close()
 
-	db := &store{pool: pool}
+	db := &store{
+		pool: pool,
+	}
 	if err := db.prepare(ctx); err != nil {
 		return err
 	}
@@ -56,11 +58,19 @@ func produce(ctx context.Context, cfg *Settings) error {
 	records := make([]*kgo.Record, 0, cfg.Payments)
 	for seq := range cfg.Payments {
 		id := fmt.Sprintf("%s-%05d", cfg.RunID, seq)
-		value, err := json.Marshal(Payment{RunID: cfg.RunID, PaymentID: id, Seq: seq})
+		value, err := json.Marshal(Payment{
+			RunID:     cfg.RunID,
+			PaymentID: id,
+			Seq:       seq,
+		})
 		if err != nil {
 			return fmt.Errorf("%s: encode payment %s: %w", cfg.Name, id, err)
 		}
-		records = append(records, &kgo.Record{Topic: cfg.Topic, Key: []byte(id), Value: value})
+		records = append(records, &kgo.Record{
+			Topic: cfg.Topic,
+			Key:   []byte(id),
+			Value: value,
+		})
 	}
 
 	// Anything less than every payment accepted and the run is measuring the producer, not

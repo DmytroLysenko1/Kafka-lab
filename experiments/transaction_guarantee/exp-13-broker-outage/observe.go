@@ -28,7 +28,9 @@ func watch(ctx context.Context, pool *pgxpool.Pool, topic string, started time.T
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			reading := sample{at: time.Since(started)}
+			reading := sample{
+				at: time.Since(started),
+			}
 
 			reading.backlog, reading.backlogKnown = count(ctx, pool, countWaiting)
 			reading.underReplicated, reading.leaderless, reading.clusterKnown = replication(ctx, topic)
@@ -98,7 +100,9 @@ func load(ctx context.Context, s *settings, started time.Time, record func(attem
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	client := &http.Client{Timeout: requestBudget}
+	client := &http.Client{
+		Timeout: requestBudget,
+	}
 	sent := 0
 
 	for {
@@ -107,7 +111,10 @@ func load(ctx context.Context, s *settings, started time.Time, record func(attem
 			return
 		case <-ticker.C:
 			sent++
-			record(attempt{at: time.Since(started), accepted: pay(ctx, client, s, sent)})
+			record(attempt{
+				at:       time.Since(started),
+				accepted: pay(ctx, client, s, sent),
+			})
 		}
 	}
 }
@@ -137,7 +144,9 @@ func pay(ctx context.Context, client *http.Client, s *settings, number int) bool
 	if err != nil {
 		return false
 	}
-	defer func() { _ = response.Body.Close() }()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
 	return response.StatusCode == http.StatusCreated
 }

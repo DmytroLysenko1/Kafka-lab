@@ -17,7 +17,9 @@ type InboxStore struct {
 }
 
 func NewInboxStore(storage *Storage) *InboxStore {
-	return &InboxStore{storage: storage}
+	return &InboxStore{
+		storage: storage,
+	}
 }
 
 // Claim reports whether this event is being handled for the first time. The decision is the

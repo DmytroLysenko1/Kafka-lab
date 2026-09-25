@@ -57,7 +57,9 @@ func newFailures() *failures {
 	}
 }
 
-func (f *failures) Level() kgo.LogLevel { return kgo.LogLevelDebug }
+func (f *failures) Level() kgo.LogLevel {
+	return kgo.LogLevelDebug
+}
 
 func (f *failures) Log(_ kgo.LogLevel, msg string, keyvals ...any) {
 	switch {

@@ -54,7 +54,9 @@ type timeline struct {
 }
 
 func newTimeline(start time.Time) *timeline {
-	return &timeline{start: start}
+	return &timeline{
+		start: start,
+	}
 }
 
 // markMeasured records the moment the report's windows are placed around: the second
@@ -68,7 +70,12 @@ func (t *timeline) markMeasured() {
 func (t *timeline) handled(member string, partition int32, seq int64, at time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.log = append(t.log, handling{at: at.Sub(t.start), member: member, partition: partition, seq: seq})
+	t.log = append(t.log, handling{
+		at:        at.Sub(t.start),
+		member:    member,
+		partition: partition,
+		seq:       seq,
+	})
 }
 
 func (t *timeline) change(member, kind string) func(context.Context, *kgo.Client, map[string][]int32) {
@@ -99,7 +106,12 @@ func (t *timeline) record(member, kind string, partitions []int32) {
 	moved := slices.Sorted(slices.Values(partitions))
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.changes = append(t.changes, change{at: time.Since(t.start), member: member, kind: kind, partitions: moved})
+	t.changes = append(t.changes, change{
+		at:         time.Since(t.start),
+		member:     member,
+		kind:       kind,
+		partitions: moved,
+	})
 }
 
 // recording is a finished timeline, copied out from under the lock.
@@ -112,7 +124,11 @@ type recording struct {
 func (t *timeline) snapshot() recording {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return recording{measuredAt: t.measuredAt, handled: slices.Clone(t.log), changes: slices.Clone(t.changes)}
+	return recording{
+		measuredAt: t.measuredAt,
+		handled:    slices.Clone(t.log),
+		changes:    slices.Clone(t.changes),
+	}
 }
 
 // longestGaps is, per partition, the longest stretch inside [from, to) in which nothing of
@@ -190,7 +206,9 @@ func missedInside(handled []handling) int {
 
 func sortedByTime(handled []handling) []handling {
 	sorted := slices.Clone(handled)
-	slices.SortStableFunc(sorted, func(a, b handling) int { return int(a.at - b.at) })
+	slices.SortStableFunc(sorted, func(a, b handling) int {
+		return int(a.at - b.at)
+	})
 	return sorted
 }
 

@@ -64,13 +64,20 @@ func consume(ctx context.Context, cfg *settings, group, member string, dep depen
 	// Close's leave forever.
 	defer client.AllowRebalance()
 
-	h := handler{client: client, member: member, dep: dep, line: line}
+	h := handler{
+		client: client,
+		member: member,
+		dep:    dep,
+		line:   line,
+	}
 	for {
 		fetches := client.PollRecords(ctx, pollRecords)
 		if ctx.Err() != nil {
 			return nil
 		}
-		fetches.EachError(func(_ string, _ int32, err error) { line.fetchFailed(member, err) })
+		fetches.EachError(func(_ string, _ int32, err error) {
+			line.fetchFailed(member, err)
+		})
 
 		records := fetches.Records()
 		if cfg.handler == handlerBlock {
@@ -168,10 +175,15 @@ func rewindTo(unhandled []*kgo.Record) map[string]map[int32]kgo.EpochOffset {
 	first := make(map[int32]kgo.EpochOffset)
 	for _, record := range unhandled {
 		if _, seen := first[record.Partition]; !seen {
-			first[record.Partition] = kgo.EpochOffset{Epoch: -1, Offset: record.Offset}
+			first[record.Partition] = kgo.EpochOffset{
+				Epoch:  -1,
+				Offset: record.Offset,
+			}
 		}
 	}
-	return map[string]map[int32]kgo.EpochOffset{topic: first}
+	return map[string]map[int32]kgo.EpochOffset{
+		topic: first,
+	}
 }
 
 // allPartitions pauses what the member owns now and whatever it is assigned while paused.

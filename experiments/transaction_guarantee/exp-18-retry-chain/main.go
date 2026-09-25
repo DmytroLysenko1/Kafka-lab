@@ -72,13 +72,21 @@ func (s *settings) validate() error {
 	return nil
 }
 
-func (s *settings) chained() bool { return s.cell != cellBlind }
+func (s *settings) chained() bool {
+	return s.cell != cellBlind
+}
 
-func (s *settings) topic(suffix string) string { return "exp18." + s.cell + "." + suffix }
+func (s *settings) topic(suffix string) string {
+	return "exp18." + s.cell + "." + suffix
+}
 
-func (s *settings) group(suffix string) string { return "exp18-" + s.cell + "-" + suffix }
+func (s *settings) group(suffix string) string {
+	return "exp18-" + s.cell + "-" + suffix
+}
 
-func (s *settings) hotMerchant() string { return "exp18-" + s.cell + "-hot" }
+func (s *settings) hotMerchant() string {
+	return "exp18-" + s.cell + "-hot"
+}
 
 // merchantFor spreads the healthy payments over nine merchants, so the locked one is one
 // merchant among several rather than the only other thing in the topic.
@@ -89,7 +97,9 @@ func (s *settings) merchantFor(i int) string {
 	return fmt.Sprintf("exp18-%s-m%d", s.cell, i%9)
 }
 
-func (s *settings) isHot(i int) bool { return i%s.hotEvery == s.hotEvery/2 }
+func (s *settings) isHot(i int) bool {
+	return i%s.hotEvery == s.hotEvery/2
+}
 
 func (s *settings) hotCount() int {
 	count := 0

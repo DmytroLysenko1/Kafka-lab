@@ -43,7 +43,9 @@ type TotalsStore struct {
 }
 
 func NewTotalsStore(storage *Storage) *TotalsStore {
-	return &TotalsStore{storage: storage}
+	return &TotalsStore{
+		storage: storage,
+	}
 }
 
 const readTotal = `SELECT authorized_minor FROM merchant_totals WHERE merchant_id = $1`

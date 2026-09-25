@@ -178,9 +178,15 @@ func experiment(ctx context.Context, cfg *settings, out io.Writer) error {
 	line := newTimeline(time.Now())
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error { return produce(gctx, cfg) })
-	g.Go(func() error { return consume(gctx, cfg, group, "A", line) })
-	g.Go(func() error { return second(gctx, cfg, group, line) })
+	g.Go(func() error {
+		return produce(gctx, cfg)
+	})
+	g.Go(func() error {
+		return consume(gctx, cfg, group, "A", line)
+	})
+	g.Go(func() error {
+		return second(gctx, cfg, group, line)
+	})
 	if err := g.Wait(); err != nil {
 		return err
 	}
