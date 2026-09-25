@@ -32,3 +32,8 @@ func (e *Authorized) Amount() Money {
 func (e *Authorized) OccurredAt() time.Time {
 	return e.occurredAt
 }
+
+// sealedPaymentEvent has no body on purpose and must not be removed: it is the unexported
+// method that seals Event, so no type outside this package can be a payment event.
+func (e *Authorized) sealedPaymentEvent() {
+}
