@@ -54,10 +54,11 @@ const (
 var phases = []string{"seed", "process", "verify"}
 
 var (
-	ErrPhase   = errors.New("eos: -phase must be seed, process or verify")
-	ErrRunID   = errors.New("eos: -run-id is required, so a rerun cannot read an earlier run's output")
-	ErrShape   = errors.New("eos: -payments or -die-after out of range")
-	ErrPartial = errors.New("eos: the cluster did not accept every input payment")
+	ErrPhase           = errors.New("eos: -phase must be seed, process or verify")
+	ErrRunID           = errors.New("eos: -run-id is required, so a rerun cannot read an earlier run's output")
+	ErrShape           = errors.New("eos: -payments or -die-after out of range")
+	ErrPartial         = errors.New("eos: the cluster did not accept every input payment")
+	ErrNotDemonstrated = errors.New("eos: the run did not show what it exists to show")
 )
 
 // Settings is one phase of one run.

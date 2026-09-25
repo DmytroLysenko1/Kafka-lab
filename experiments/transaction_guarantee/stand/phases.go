@@ -85,7 +85,8 @@ func verify(ctx context.Context, cfg *Settings, db *store, out io.Writer) error 
 	if cfg.Mode == Inbox {
 		lines = append(lines, fmt.Sprintf("  redelivered, refused by the inbox\t%d", counted.Refused))
 	}
-	lines = append(lines, fmt.Sprintf("  outcome\t%s — %s", counted.Outcome(), cfg.Mode.Verdict(counted)))
+	verdict, held := cfg.Mode.Verdict(counted)
+	lines = append(lines, fmt.Sprintf("  outcome\t%s — %s", counted.Outcome(), verdict))
 
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	for _, line := range lines {
@@ -93,5 +94,16 @@ func verify(ctx context.Context, cfg *Settings, db *store, out io.Writer) error 
 			return fmt.Errorf("%s: write report: %w", cfg.Name, err)
 		}
 	}
-	return table.Flush()
+	if err := table.Flush(); err != nil {
+		return err
+	}
+
+	// The report goes out in full first — the numbers are what the run exists to produce —
+	// and only then does the process fail. Reporting a refusal and exiting 0 leaves a run
+	// that proved nothing looking exactly like one that proved something, and run.sh, which
+	// is `set -euo pipefail`, would carry the green all the way to the committed log.
+	if !held {
+		return fmt.Errorf("%s: %w", cfg.Name, ErrNotDemonstrated)
+	}
+	return nil
 }

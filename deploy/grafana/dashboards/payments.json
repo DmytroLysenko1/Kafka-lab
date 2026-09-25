@@ -2,21 +2,143 @@
   "uid": "kafka-lab-payments",
   "title": "Payments — outbox, consumer, API",
   "description": "The four questions an operator asks during an incident, in the order they ask them: is anything piling up, is anything moving, is anything being thrown away, and is the front door still answering.",
-  "tags": ["kafka-lab"],
+  "tags": [
+    "kafka-lab"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "5s",
-  "time": { "from": "now-15m", "to": "now" },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
   "panels": [
+    {
+      "id": 100,
+      "type": "stat",
+      "title": "Is anything running? — read this row before any graph below",
+      "description": "Every zero on this dashboard means one of two things: nothing happened, or nothing is left to report it. This row is what tells them apart. Brokers below 3 while the panels below stay green is the shape of a cluster that has lost the quorum that would update them — exp-13 read 0 under-replicated through an outage in which nothing could be published.",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "up",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": []
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 3
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "up{job=\"payments\"}",
+          "legendFormat": "{{service}}",
+          "refId": "A",
+          "instant": true
+        },
+        {
+          "expr": "up{job=\"kafka\"}",
+          "legendFormat": "kafka-exporter",
+          "refId": "B",
+          "instant": true
+        },
+        {
+          "expr": "kafka_brokers",
+          "legendFormat": "brokers in the cluster",
+          "refId": "C",
+          "instant": true
+        }
+      ]
+    },
     {
       "id": 1,
       "type": "timeseries",
       "title": "Outbox backlog — records waiting to be published",
       "description": "The first number to look at when Kafka is unwell. It grows while nothing can be published, which is the outbox doing its job, and falls once the relay drains. A flat non-zero line means the relay is not running at all.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
       "targets": [
-        { "expr": "outbox_backlog_records", "legendFormat": "waiting", "refId": "A" }
+        {
+          "expr": "sum(outbox_backlog_records{service=\"outbox-relay\"})",
+          "legendFormat": "waiting",
+          "refId": "A"
+        }
       ]
     },
     {
@@ -24,20 +146,48 @@
       "type": "timeseries",
       "title": "Outbox sweeps per second, by outcome",
       "description": "A failing sweep is still a sweep: if this drops to nothing rather than turning red, the relay is gone, not blocked.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
       "targets": [
-        { "expr": "sum by (outcome) (rate(outbox_sweeps_total[1m]))", "legendFormat": "{{outcome}}", "refId": "A" }
+        {
+          "expr": "sum by (outcome) (rate(outbox_sweeps_total[30s]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
       ]
     },
     {
       "id": 3,
       "type": "timeseries",
       "title": "Records published per second",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
       "targets": [
-        { "expr": "rate(outbox_records_published_total[1m])", "legendFormat": "published", "refId": "A" }
+        {
+          "expr": "sum(rate(outbox_records_published_total{service=\"outbox-relay\"}[30s]))",
+          "legendFormat": "published",
+          "refId": "A"
+        }
       ]
     },
     {
@@ -45,10 +195,24 @@
       "type": "timeseries",
       "title": "Events handled per second — counted against duplicate",
       "description": "Duplicates are at-least-once delivery working. A burst of them after a restart is healthy; a steady stream of them is a relay republishing something it cannot mark.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
       "targets": [
-        { "expr": "sum by (outcome) (rate(payment_events_handled_total[1m]))", "legendFormat": "{{outcome}}", "refId": "A" }
+        {
+          "expr": "sum by (outcome) (rate(payment_events_handled_total[30s]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
       ]
     },
     {
@@ -56,10 +220,24 @@
       "type": "timeseries",
       "title": "Consumer group lag",
       "description": "Read from the cluster, not from the consumer: a consumer that has stopped cannot report its own lag, and that is the moment the number matters.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
       "targets": [
-        { "expr": "sum by (consumergroup, topic) (kafka_consumergroup_lag)", "legendFormat": "{{consumergroup}} · {{topic}}", "refId": "A" }
+        {
+          "expr": "kafka_consumergroup_lag{consumergroup=\"payments-consumer\", topic=\"payments.main\"}",
+          "legendFormat": "p{{partition}}",
+          "refId": "A"
+        }
       ]
     },
     {
@@ -67,10 +245,24 @@
       "type": "timeseries",
       "title": "Dead letters per second, by reason",
       "description": "Anything here is a record no retry will fix. Undecodable means bytes nobody can read; refused means the consumer understood it and will not take it.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
       "targets": [
-        { "expr": "sum by (reason) (rate(payment_events_dead_lettered_total[1m]))", "legendFormat": "{{reason}}", "refId": "A" }
+        {
+          "expr": "sum by (reason) (rate(payment_events_dead_lettered_total[30s]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
       ]
     },
     {
@@ -78,10 +270,24 @@
       "type": "timeseries",
       "title": "API requests per second, by status",
       "description": "The question this answers during a broker outage: is the front door still taking payments while the events pile up behind it.",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
-      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
       "targets": [
-        { "expr": "sum by (status) (rate(http_requests_total[1m]))", "legendFormat": "{{status}}", "refId": "A" }
+        {
+          "expr": "sum by (status) (rate(http_requests_total[30s]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
       ]
     },
     {
@@ -89,23 +295,168 @@
       "type": "timeseries",
       "title": "Under-replicated partitions",
       "description": "Non-zero means a broker is missing from an ISR somewhere. With min.insync.replicas=2 the writes keep going until the second replica goes too.",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
-      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
       "targets": [
-        { "expr": "sum(kafka_topic_partition_under_replicated_partition)", "legendFormat": "under-replicated", "refId": "A" }
+        {
+          "expr": "sum by (topic) (kafka_topic_partition_under_replicated_partition{topic=~\"payments.*\"})",
+          "legendFormat": "{{topic}}",
+          "refId": "A"
+        }
       ]
     },
     {
       "id": 9,
       "type": "timeseries",
       "title": "API latency, 95th percentile",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[1m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[30s])))",
           "legendFormat": "{{route}}",
           "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "type": "timeseries",
+      "title": "The cluster is lying — a backlog piling up while it reports itself healthy",
+      "description": "Non-empty means the relay cannot publish while the cluster reports zero under-replicated partitions for payments. That combination is the signature of a lost controller quorum: with no controller nothing updates the metadata the health panels read, so they keep showing the last value they had. exp-13 produced exactly this, and the runbook says to trust the backlog over the cluster's own account of itself.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 45
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "(sum(outbox_backlog_records{service=\"outbox-relay\"}) > 100) and on() (sum(kafka_topic_partition_under_replicated_partition{topic=~\"payments.*\"}) == 0)",
+          "legendFormat": "backlog, with the cluster claiming health",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "timeseries",
+      "title": "Consumer group — members, and offsets going backwards",
+      "description": "A dip in members is a rebalance (exp-14) or a member the coordinator dropped (exp-16). A negative bar is a committed offset moving backwards, which is a stale commit rewinding the group — the failure exp-16 proved the lag graph cannot show, because lag was the same whichever handler ran.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "kafka_consumergroup_members{consumergroup=\"payments-consumer\"} or min by (topic, partition) (delta(kafka_consumergroup_current_offset{consumergroup=\"payments-consumer\"}[1m]))",
+          "legendFormat": "{{__name__}}{{partition}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "timeseries",
+      "title": "Where the consumer is failing, by stage",
+      "description": "Without this the only sign of a failing consumer is the handled counter going quiet, which is what an idle one looks like too. exp-11 crash-looped 124–125 times in 30 s and left no mark anywhere. The stage says where to look: fetch is the broker, handle is the database or the domain, commit is the group, dead_letter is the DLQ topic itself — and that last one moving means the offset is not advancing.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 53
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 10
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (stage) (rate(payment_events_failed_total[30s]))",
+          "legendFormat": "{{stage}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 104,
+      "type": "timeseries",
+      "title": "How long the work takes — sweep and event handling, 95th percentile",
+      "description": "Both are collected on every sweep and every event and were graphed nowhere. The sweep one matters because the relay's sweep has a fence on it: a p95 climbing toward it is the warning before sweeps start failing.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 53
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(outbox_sweep_duration_seconds_bucket[30s])))",
+          "legendFormat": "outbox sweep",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(payment_event_handling_duration_seconds_bucket[30s])))",
+          "legendFormat": "event handling",
+          "refId": "B"
         }
       ]
     }

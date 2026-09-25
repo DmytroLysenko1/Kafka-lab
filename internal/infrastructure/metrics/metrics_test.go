@@ -65,6 +65,33 @@ payment_events_handled_total{outcome="duplicate"} 2
 	}
 }
 
+// A consumer that fails every record draws the handled counter to zero — which is exactly
+// what a consumer with no traffic draws. exp-11 crash-looped 124–125 times in 30 s and left
+// no mark anywhere; this is the counter that tells the two apart, and the stage is what
+// says whether to look at the broker, the handler, the commit or the dead letter topic.
+func TestEveryFailureOnTheConsumersPathIsCountedByStage(t *testing.T) {
+	observed := metrics.New()
+
+	observed.Failed("fetch")
+	observed.Failed("handle")
+	observed.Failed("handle")
+	observed.Failed("commit")
+	observed.Failed("dead_letter")
+
+	expected := `
+# HELP payment_events_failed_total Failures on the consumer's path, by the stage that failed.
+# TYPE payment_events_failed_total counter
+payment_events_failed_total{stage="commit"} 1
+payment_events_failed_total{stage="dead_letter"} 1
+payment_events_failed_total{stage="fetch"} 1
+payment_events_failed_total{stage="handle"} 2
+`
+	if err := testutil.GatherAndCompare(observed.Gatherer(), strings.NewReader(expected),
+		"payment_events_failed_total"); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestRequestsAreCountedByRouteAndStatus(t *testing.T) {
 	observed := metrics.New()
 

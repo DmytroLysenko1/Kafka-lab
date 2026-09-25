@@ -20,6 +20,7 @@ type Registry struct {
 	outboxSweepTime  prometheus.Histogram
 	outboxBacklog    prometheus.Gauge
 	eventsHandled    *prometheus.CounterVec
+	eventsFailed     *prometheus.CounterVec
 	eventsDeadLetter *prometheus.CounterVec
 	handleTime       prometheus.Histogram
 	requests         *prometheus.CounterVec
@@ -57,6 +58,10 @@ func New() *Registry {
 			Name: "payment_events_dead_lettered_total",
 			Help: "Payment events archived to the dead letter topic, by why.",
 		}, []string{"reason"}),
+		eventsFailed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "payment_events_failed_total",
+			Help: "Failures on the consumer's path, by the stage that failed.",
+		}, []string{"stage"}),
 		handleTime: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "payment_event_handling_duration_seconds",
 			Help:    "How long one event took from decode to committed database write.",
@@ -79,6 +84,7 @@ func New() *Registry {
 		metrics.outboxSweepTime,
 		metrics.outboxBacklog,
 		metrics.eventsHandled,
+		metrics.eventsFailed,
 		metrics.eventsDeadLetter,
 		metrics.handleTime,
 		metrics.requests,
@@ -124,6 +130,14 @@ func (m *Registry) Handled(counted bool, took time.Duration) {
 // unbounded cardinality.
 func (m *Registry) DeadLettered(reason string) {
 	m.eventsDeadLetter.WithLabelValues(reason).Inc()
+}
+
+// Failed takes the stage that failed, which is a fixed four-value set. Without it every
+// failure on the consumer's path is invisible: the handled counter simply stops moving,
+// which is what no traffic looks like too. A crash-looping consumer and an idle one are
+// the same picture until this exists.
+func (m *Registry) Failed(stage string) {
+	m.eventsFailed.WithLabelValues(stage).Inc()
 }
 
 func (m *Registry) Served(route, status string, took time.Duration) {

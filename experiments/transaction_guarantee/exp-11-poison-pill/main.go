@@ -65,6 +65,7 @@ type unwatched struct{}
 func (unwatched) Handled(bool, time.Duration) {}
 
 func (unwatched) DeadLettered(string) {}
+func (unwatched) Failed(string)       {}
 
 type settings struct {
 	phase        string

@@ -44,7 +44,17 @@ type deadLetters interface {
 type observer interface {
 	Handled(counted bool, took time.Duration)
 	DeadLettered(reason string)
+	Failed(stage string)
 }
+
+// The stages a record's path can fail at. A fixed set, so the label cannot grow: an error
+// carries offsets and identifiers, and one of those as a label grows a series per record.
+const (
+	stageFetch      = "fetch"
+	stageHandle     = "handle"
+	stageCommit     = "commit"
+	stageDeadLetter = "dead_letter"
+)
 
 type Consumer struct {
 	client   *kgo.Client
@@ -100,6 +110,7 @@ func (c *Consumer) poll(ctx context.Context) error {
 	defer c.client.AllowRebalance()
 
 	if err := fetches.Err(); err != nil {
+		c.observer.Failed(stageFetch)
 		return fmt.Errorf("%w: %w", ErrConsume, err)
 	}
 
@@ -124,6 +135,7 @@ func (c *Consumer) poll(ctx context.Context) error {
 		defer cancel()
 
 		if err := c.client.CommitRecords(committing, handled...); err != nil {
+			c.observer.Failed(stageCommit)
 			return fmt.Errorf("%w: commit %d records: %w", ErrConsume, len(handled), err)
 		}
 	}
@@ -145,6 +157,7 @@ func (c *Consumer) handleRecord(ctx context.Context, record *kgo.Record) (bool, 
 	case errors.Is(err, merchants.ErrUnprocessable):
 		return c.deadLetter(ctx, record, err, "refused")
 	case err != nil:
+		c.observer.Failed(stageHandle)
 		return false, err
 	}
 	c.observer.Handled(counted, time.Since(started))
@@ -163,6 +176,7 @@ func (c *Consumer) handleRecord(ctx context.Context, record *kgo.Record) (bool, 
 // stuck than silently gone.
 func (c *Consumer) deadLetter(ctx context.Context, record *kgo.Record, reason error, class string) (bool, error) {
 	if err := c.dead.Send(ctx, record, reason.Error()); err != nil {
+		c.observer.Failed(stageDeadLetter)
 		return false, fmt.Errorf("%w: %w", ErrDeadLetter, err)
 	}
 	c.observer.DeadLettered(class)
