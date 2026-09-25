@@ -88,40 +88,102 @@ func TestPullEventsHandsEachEventOverExactlyOnce(t *testing.T) {
 	}
 }
 
-// Two amounts are the same only if the currency matches too: 1999 EUR and 1999 USD are the
-// trap a replay check would fall into if it compared minor units alone.
-func TestIsForSeparatesTheAmountFromItsCurrency(t *testing.T) {
-	usd, err := payment.ParseCurrency("USD")
-	if err != nil {
-		t.Fatalf("parse currency: %v", err)
+// A replay stands only if it asks for the very payment the key bought. 1999 EUR and 1999
+// USD are the trap a check comparing minor units alone would fall into; a charge the caller
+// did not ask for is what the refusal exists to prevent.
+func TestAReplayStandsOnlyForTheSamePayment(t *testing.T) {
+	type args struct {
+		replay payment.Money
+		other  string
 	}
-	sameMinorOtherCurrency, err := payment.NewMoney(1999, usd)
-	if err != nil {
-		t.Fatalf("new money: %v", err)
-	}
-
-	authorized, err := payment.Authorize(payment.NewID(), merchant(t), eur(t, 1999), time.Now())
-	if err != nil {
-		t.Fatalf("authorize: %v", err)
-	}
-
 	tests := []struct {
-		name string
-		args payment.Money
-		want bool
+		name    string
+		args    args
+		wantErr error
 	}{
-		{name: "the same amount", args: eur(t, 1999), want: true},
-		{name: "a different amount", args: eur(t, 2000)},
-		{name: "the same number in another currency", args: sameMinorOtherCurrency},
+		{name: "the same amount for the same merchant", args: args{replay: eur(t, 1999), other: merchantUnderTest}},
+		{name: "a different amount", args: args{replay: eur(t, 2000), other: merchantUnderTest}, wantErr: payment.ErrNotTheSamePayment},
+		{name: "the same number in another currency", args: args{replay: usd(t, 1999), other: merchantUnderTest}, wantErr: payment.ErrNotTheSamePayment},
+		{name: "the same amount for another merchant", args: args{replay: eur(t, 1999), other: "m-43"}, wantErr: payment.ErrNotTheSamePayment},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := authorized.IsFor(tt.args); got != tt.want {
-				t.Errorf("IsFor = %v, want %v", got, tt.want)
+			earlier := payment.Reconstitute(payment.NewID(), merchant(t), eur(t, 1999), payment.StatusAuthorized, time.Now())
+			other, err := payment.ParseMerchantID(tt.args.other)
+			if err != nil {
+				t.Fatalf("merchant: %v", err)
+			}
+			replay, err := payment.Authorize(payment.NewID(), other, tt.args.replay, time.Now())
+			if err != nil {
+				t.Fatalf("authorize: %v", err)
+			}
+
+			if err := replay.Replays(earlier); !errors.Is(err, tt.wantErr) {
+				t.Errorf("err = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
+}
+
+// A payment rebuilt from storage to compare a replay against must not announce itself
+// again: its event went out when it was first authorised.
+func TestAReconstitutedPaymentHasNothingToPublish(t *testing.T) {
+	at := time.Date(2026, time.September, 26, 9, 0, 0, 0, time.FixedZone("EEST", 3*60*60))
+	id := payment.NewID()
+
+	stored := payment.Reconstitute(id, merchant(t), eur(t, 1999), payment.StatusAuthorized, at)
+
+	if diff := cmp.Diff(0, len(stored.PullEvents())); diff != "" {
+		t.Errorf("events (-want +got):\n%s", diff)
+	}
+	type view struct {
+		ID, Merchant, Status string
+		Minor                int64
+		At                   time.Time
+	}
+	want := view{ID: id.String(), Merchant: merchantUnderTest, Status: "authorized", Minor: 1999, At: at.UTC()}
+	got := view{ID: stored.ID().String(), Merchant: stored.Merchant().String(), Status: stored.Status().String(), Minor: stored.Amount().Minor(), At: stored.AuthorizedAt()}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("reconstituted payment (-want +got):\n%s", diff)
+	}
+}
+
+// A status read back from storage that no payment can be in is a corrupted row; reading it
+// as "unknown" would let a comparison go ahead against it.
+func TestOnlyAStatusAPaymentCanBeInIsReadBack(t *testing.T) {
+	type args struct {
+		value string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    payment.Status
+		wantErr error
+	}{
+		{name: "authorized", args: args{value: "authorized"}, want: payment.StatusAuthorized},
+		{name: "unknown", args: args{value: "unknown"}, want: payment.StatusUnknown, wantErr: payment.ErrStatusUnknown},
+		{name: "empty", args: args{value: ""}, want: payment.StatusUnknown, wantErr: payment.ErrStatusUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := payment.ParseStatus(tt.args.value)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("status (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func usd(t *testing.T, minor int64) payment.Money {
+	t.Helper()
+	amount, err := payment.ParseMoney(minor, "USD")
+	if err != nil {
+		t.Fatalf("money: %v", err)
+	}
+	return amount
 }
 
 func TestAuthorizeRefusesAnAmountThatReservesNothing(t *testing.T) {

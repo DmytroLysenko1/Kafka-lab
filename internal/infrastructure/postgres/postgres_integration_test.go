@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
-	"github.com/DmytroLysenko1/Kafka-lab/internal/application/payments"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/payment"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
@@ -114,7 +114,7 @@ func TestCreateOrGetStoresThePaymentAndTheEventItWillPublish(t *testing.T) {
 	authorized := authorize(t, 1999)
 
 	var (
-		stored  payment.ID
+		stored  *payment.Payment
 		created bool
 	)
 	err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
@@ -137,7 +137,7 @@ func TestCreateOrGetStoresThePaymentAndTheEventItWillPublish(t *testing.T) {
 	}
 	var got row
 	if err := pool.QueryRow(t.Context(),
-		"SELECT merchant_id, amount_minor, currency, status FROM payments WHERE id = $1", stored.String(),
+		"SELECT merchant_id, amount_minor, currency, status FROM payments WHERE id = $1", stored.ID().String(),
 	).Scan(&got.Merchant, &got.Minor, &got.Currency, &got.Status); err != nil {
 		t.Fatalf("read the payment back: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestCreateOrGetStoresThePaymentAndTheEventItWillPublish(t *testing.T) {
 		payload   []byte
 	)
 	if err := pool.QueryRow(t.Context(),
-		"SELECT event_type, payload FROM outbox WHERE aggregate_id = $1", stored.String(),
+		"SELECT event_type, payload FROM outbox WHERE aggregate_id = $1", stored.ID().String(),
 	).Scan(&eventType, &payload); err != nil {
 		t.Fatalf("read the event back: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestCreateOrGetStoresThePaymentAndTheEventItWillPublish(t *testing.T) {
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		t.Fatalf("decode the payload a consumer will read: %v", err)
 	}
-	wantPayload := published{PaymentID: stored.String(), MerchantID: merchantUnderTest, AmountMinor: 1999, Currency: "EUR"}
+	wantPayload := published{PaymentID: stored.ID().String(), MerchantID: merchantUnderTest, AmountMinor: 1999, Currency: "EUR"}
 	if diff := cmp.Diff(wantPayload, decoded); diff != "" {
 		t.Errorf("payload mismatch (-want +got):\n%s", diff)
 	}
@@ -207,7 +207,7 @@ func TestCreateOrGetReplayedWithTheSameKeyChargesTheMerchantOnce(t *testing.T) {
 	authorizeOnce := func(amount int64) (payment.ID, bool) {
 		t.Helper()
 		var (
-			stored  payment.ID
+			stored  *payment.Payment
 			created bool
 		)
 		err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
@@ -218,7 +218,7 @@ func TestCreateOrGetReplayedWithTheSameKeyChargesTheMerchantOnce(t *testing.T) {
 		if err != nil {
 			t.Fatalf("authorize: %v", err)
 		}
-		return stored, created
+		return stored.ID(), created
 	}
 
 	first, created := authorizeOnce(1999)
@@ -241,32 +241,51 @@ func TestCreateOrGetReplayedWithTheSameKeyChargesTheMerchantOnce(t *testing.T) {
 }
 
 // Reusing a key for a different amount is a caller's bug, and the row already in the table
-// is the authority on what that key bought.
-func TestReusingAKeyForADifferentAmountIsRefusedAndChangesNothing(t *testing.T) {
+// is the authority on what that key bought. The store's part is to hand that payment back,
+// rebuilt as it was stored, and to change nothing; refusing the replay is the payment's.
+func TestAKeyAlreadyUsedReturnsThePaymentItBoughtAndChangesNothing(t *testing.T) {
 	storage, pool := freshStorage(t)
 	store := postgres.NewPaymentStore(storage)
 
+	var first *payment.Payment
 	if err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
-		_, _, err := store.CreateOrGet(ctx, authorize(t, 1999), "key-1")
+		var err error
+		first, _, err = store.CreateOrGet(ctx, authorize(t, 1999), "key-1")
 		return err
 	}); err != nil {
 		t.Fatalf("first authorize: %v", err)
 	}
 
-	err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
-		_, _, err := store.CreateOrGet(ctx, authorize(t, 500_000), "key-1")
+	var (
+		stored  *payment.Payment
+		created bool
+	)
+	if err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
+		var err error
+		stored, created, err = store.CreateOrGet(ctx, authorize(t, 500_000), "key-1")
 		return err
-	})
-	if !errors.Is(err, payments.ErrIdempotencyKeyReused) {
-		t.Fatalf("err = %v, want %v", err, payments.ErrIdempotencyKeyReused)
+	}); err != nil {
+		t.Fatalf("replay: %v", err)
 	}
 
-	var minor int64
-	if err := pool.QueryRow(t.Context(), "SELECT amount_minor FROM payments").Scan(&minor); err != nil {
-		t.Fatalf("read the amount back: %v", err)
+	if created {
+		t.Error("a key already used reported a new payment")
 	}
-	if diff := cmp.Diff(int64(1999), minor); diff != "" {
-		t.Errorf("the stored amount changed (-want +got):\n%s", diff)
+	type view struct {
+		ID, Merchant, Currency, Status string
+		Minor                          int64
+		AuthorizedAt                   time.Time
+	}
+	want := view{ID: first.ID().String(), Merchant: merchantUnderTest, Currency: "EUR", Status: "authorized", Minor: 1999, AuthorizedAt: first.AuthorizedAt()}
+	got := view{ID: stored.ID().String(), Merchant: stored.Merchant().String(), Currency: stored.Amount().Currency().String(), Status: stored.Status().String(), Minor: stored.Amount().Minor(), AuthorizedAt: stored.AuthorizedAt()}
+	if diff := cmp.Diff(want, got, cmpopts.EquateApproxTime(time.Microsecond)); diff != "" {
+		t.Errorf("the payment handed back is not the one stored (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(0, len(stored.PullEvents())); diff != "" {
+		t.Errorf("a payment rebuilt from the table would publish again (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(1, countPayments(t, pool)); diff != "" {
+		t.Errorf("payments stored (-want +got):\n%s", diff)
 	}
 	if diff := cmp.Diff(1, countOutbox(t, pool)); diff != "" {
 		t.Errorf("events stored (-want +got):\n%s", diff)
@@ -290,11 +309,11 @@ func TestConcurrentAuthorisationsWithTheSameKeyStoreOnePayment(t *testing.T) {
 	for racer := range racers {
 		group.Go(func() error {
 			return storage.WithinTx(ctx, func(ctx context.Context) error {
-				id, created, err := store.CreateOrGet(ctx, authorize(t, 1999), "key-1")
+				stored, created, err := store.CreateOrGet(ctx, authorize(t, 1999), "key-1")
 				if err != nil {
 					return err
 				}
-				attempts[racer] = attempt{id: id, created: created}
+				attempts[racer] = attempt{id: stored.ID(), created: created}
 				return nil
 			})
 		})

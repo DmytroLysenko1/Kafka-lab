@@ -51,6 +51,15 @@ func NewMoney(minor int64, currency Currency) (Money, error) {
 	}, nil
 }
 
+// ParseMoney builds an amount from the primitives it arrives or is stored as.
+func ParseMoney(minor int64, currency string) (Money, error) {
+	code, err := ParseCurrency(currency)
+	if err != nil {
+		return Money{}, err
+	}
+	return NewMoney(minor, code)
+}
+
 func (m Money) Minor() int64 {
 	return m.minor
 }

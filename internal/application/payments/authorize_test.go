@@ -26,14 +26,14 @@ type storedPayment struct {
 // rollback from a write that never happened.
 type fakeDB struct {
 	payments   map[string]storedPayment
-	byKey      map[string]string
+	byKey      map[string]*payment.Payment
 	staged     []func()
 	failStore  error
 	failCommit error
 }
 
 func newFakeDB() *fakeDB {
-	return &fakeDB{payments: make(map[string]storedPayment), byKey: make(map[string]string)}
+	return &fakeDB{payments: make(map[string]storedPayment), byKey: make(map[string]*payment.Payment)}
 }
 
 func (db *fakeDB) WithinTx(ctx context.Context, fn func(ctx context.Context) error) error {
@@ -53,26 +53,20 @@ func (db *fakeDB) WithinTx(ctx context.Context, fn func(ctx context.Context) err
 	return nil
 }
 
-func (db *fakeDB) CreateOrGet(_ context.Context, authorized *payment.Payment, idempotencyKey string) (payment.ID, bool, error) {
+// CreateOrGet returns what the key already bought and decides nothing about it, as the real
+// store does: whether a replay may stand is the payment's call, and a fake that made it
+// would let the use case pass a test without ever asking.
+func (db *fakeDB) CreateOrGet(_ context.Context, authorized *payment.Payment, idempotencyKey string) (*payment.Payment, bool, error) {
 	if db.failStore != nil {
-		return payment.ID{}, false, db.failStore
+		return nil, false, db.failStore
 	}
 
 	key := authorized.Merchant().String() + "|" + idempotencyKey
-	if existing, taken := db.byKey[key]; taken {
-		id, err := payment.ParseID(existing)
-		if err != nil {
-			return payment.ID{}, false, err
-		}
-		// The real store compares the replay against the row the key already bought; a fake
-		// that skipped the comparison would allow a test the database would refuse.
-		if db.payments[existing].Minor != authorized.Amount().Minor() {
-			return payment.ID{}, false, ErrIdempotencyKeyReused
-		}
-		return id, false, nil
+	if earlier, taken := db.byKey[key]; taken {
+		return earlier, false, nil
 	}
 
-	id := authorized.ID()
+	id := authorized.ID().String()
 	row := storedPayment{
 		Merchant: authorized.Merchant().String(),
 		Minor:    authorized.Amount().Minor(),
@@ -80,11 +74,12 @@ func (db *fakeDB) CreateOrGet(_ context.Context, authorized *payment.Payment, id
 		Status:   authorized.Status().String(),
 		Events:   len(authorized.PullEvents()),
 	}
+	stored := payment.Reconstitute(authorized.ID(), authorized.Merchant(), authorized.Amount(), authorized.Status(), authorized.AuthorizedAt())
 	db.staged = append(db.staged, func() {
-		db.byKey[key] = id.String()
-		db.payments[id.String()] = row
+		db.byKey[key] = stored
+		db.payments[id] = row
 	})
-	return id, true, nil
+	return authorized, true, nil
 }
 
 type ids struct {
@@ -190,6 +185,9 @@ func TestAuthorizeReusingAKeyForADifferentAmountIsRefused(t *testing.T) {
 	got, err := uc.Execute(t.Context(), larger)
 	if !errors.Is(err, ErrIdempotencyKeyReused) {
 		t.Fatalf("err = %v, want %v", err, ErrIdempotencyKeyReused)
+	}
+	if !errors.Is(err, payment.ErrNotTheSamePayment) {
+		t.Errorf("err = %v, want the payment's own reason, %v, inside it", err, payment.ErrNotTheSamePayment)
 	}
 	if diff := cmp.Diff(AuthorizeResult{}, got); diff != "" {
 		t.Errorf("a refused reuse still reported a payment (-want +got):\n%s", diff)
