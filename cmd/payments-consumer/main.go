@@ -69,30 +69,78 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		time.Now,
 	)
 
-	dead, err := kafka.NewDeadLetters(settings.brokers, settings.dlqTopic)
-	if err != nil {
-		return err
-	}
-	defer dead.Close()
-
 	observed := metrics.New()
-	consumer, err := kafka.NewConsumer(settings.brokers, settings.topic, settings.group, record, dead, logger, observed)
+	detours, err := kafka.NewDetours(settings.brokers, settings.dlqTopic, observed)
 	if err != nil {
 		return err
 	}
-	defer consumer.Close()
+	defer detours.Close()
+
+	consumers, err := provideConsumers(&settings, record, detours, logger, observed)
+	defer closeAll(consumers)
+	if err != nil {
+		return err
+	}
 
 	logger.InfoContext(ctx, "payments consumer started",
 		"topic", settings.topic,
 		"group", settings.group,
+		"stages", len(consumers),
 		"dead_letter_topic", settings.dlqTopic,
 		"metrics", settings.metricsAddr,
 	)
 
 	running, stop := errgroup.WithContext(ctx)
-	running.Go(func() error { return consumer.Run(stop) })
+	for _, consumer := range consumers {
+		running.Go(func() error { return consumer.Run(stop) })
+	}
 	running.Go(func() error { return metrics.Serve(stop, settings.metricsAddr, observed.Gatherer()) })
 	return running.Wait()
+}
+
+// stages is the main topic followed by the retry tiers, each tier a group of its own: a
+// tier waiting ten minutes for its head record must not hold a rebalance of the main
+// group, and a separate group is what keeps their offsets and members apart. The tier
+// topics are the catalog's (deploy/topics/), and each carries its delay in its name so
+// that nobody reading a topic list has to guess what it holds records for.
+func stages(settings *config) []kafka.Stage {
+	tiers := []struct {
+		topic string
+		delay time.Duration
+	}{
+		{topic: "payments-consumer.retry.5s", delay: 5 * time.Second},
+		{topic: "payments-consumer.retry.1m", delay: time.Minute},
+		{topic: "payments-consumer.retry.10m", delay: 10 * time.Minute},
+	}
+
+	chain := make([]kafka.Stage, 0, 1+len(tiers))
+	chain = append(chain, kafka.Stage{Topic: settings.topic, Group: settings.group})
+	for position, tier := range tiers {
+		chain[len(chain)-1].Next = tier.topic
+		chain = append(chain, kafka.Stage{Topic: tier.topic, Group: tier.topic, Tier: position + 1, Delay: tier.delay})
+	}
+	return chain
+}
+
+// provideConsumers returns every consumer it built, even when a later one failed, so that
+// the caller closes the ones that did open.
+func provideConsumers(settings *config, record *merchants.RecordAuthorized, detours *kafka.Detours, logger *slog.Logger, observed *metrics.Registry) ([]*kafka.Consumer, error) {
+	chain := stages(settings)
+	consumers := make([]*kafka.Consumer, 0, len(chain))
+	for _, stage := range chain {
+		consumer, err := kafka.NewConsumer(settings.brokers, stage, record, detours, logger, observed)
+		if err != nil {
+			return consumers, err
+		}
+		consumers = append(consumers, consumer)
+	}
+	return consumers, nil
+}
+
+func closeAll(consumers []*kafka.Consumer) {
+	for _, consumer := range consumers {
+		consumer.Close()
+	}
 }
 
 func load() (config, error) {

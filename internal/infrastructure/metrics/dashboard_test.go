@@ -83,6 +83,7 @@ func publishedNames(t *testing.T) []string {
 	observed.Backlog(1)
 	observed.Handled(true, time.Millisecond)
 	observed.DeadLettered("undecodable")
+	observed.Retried("payments-consumer.retry.5s")
 	observed.Failed("handle")
 	observed.Served("POST /payments", "201", time.Millisecond)
 

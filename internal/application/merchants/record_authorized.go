@@ -13,6 +13,12 @@ import (
 // partition for the dead letter topic instead of blocking everything behind it.
 var ErrUnprocessable = errors.New("merchants: the event cannot be processed")
 
+// ErrContended marks an event that could not be counted now because another transaction
+// holds the row it has to write, and that is expected to succeed later. It is the one
+// failure that belongs to this record alone: stopping the partition for it would make
+// every payment behind it wait for a lock none of them needs.
+var ErrContended = errors.New("merchants: the merchant's total is held by another transaction")
+
 var (
 	ErrEventIDRequired    = errors.New("merchants: the event carries no id to deduplicate it by")
 	ErrMerchantRequired   = errors.New("merchants: the event names no merchant")

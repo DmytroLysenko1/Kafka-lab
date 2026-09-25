@@ -18,6 +18,7 @@ import (
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/encoding/protowire"
 
+	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
@@ -109,15 +110,6 @@ func appendString(body []byte, field protowire.Number, value string) []byte {
 	body = protowire.AppendTag(body, field, protowire.BytesType)
 	return protowire.AppendString(body, value)
 }
-
-// unwatched stands in for the metrics the services publish: this experiment reads the
-// database and the topics directly.
-type unwatched struct{}
-
-func (unwatched) Handled(bool, time.Duration) {}
-
-func (unwatched) DeadLettered(string) {}
-func (unwatched) Failed(string)       {}
 
 type settings struct {
 	phase       string
@@ -222,7 +214,7 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 	}
 	defer storage.Close()
 
-	dead, err := kafka.NewDeadLetters(brokers(), s.dlqTopic)
+	dead, err := kafka.NewDetours(brokers(), s.dlqTopic, labkit.Unwatched{})
 	if err != nil {
 		return err
 	}
@@ -234,7 +226,7 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 		storage,
 		time.Now,
 	)
-	consumer, err := kafka.NewConsumer(brokers(), s.topic, s.group, record, dead, slog.New(slog.DiscardHandler), unwatched{})
+	consumer, err := kafka.NewConsumer(brokers(), kafka.Stage{Topic: s.topic, Group: s.group}, record, dead, slog.New(slog.DiscardHandler), labkit.Unwatched{})
 	if err != nil {
 		return err
 	}

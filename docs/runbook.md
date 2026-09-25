@@ -61,7 +61,8 @@ reason; a manual offset bump keeps neither.
 
 ## Records are arriving in the dead letter topic
 
-Read the `dlq_reason` header. Two classes, two different problems:
+Read the `dlq_class` header first, then `dlq_reason` (the error text, cut at 1 KiB). Three
+classes, three different problems:
 
 - **`undecodable`** — bytes nobody can read. Usually a producer at another version, or
   something that is not our event at all. Support problem: the record is archived with its
@@ -70,6 +71,36 @@ Read the `dlq_reason` header. Two classes, two different problems:
   this by removing `amount_minor` from the schema: the field arrived as zero and the domain
   rule refused it. **Check what changed in the producer's schema before assuming the
   consumer is wrong.**
+- **`exhausted`** — a payment whose merchant row another transaction held through every
+  retry tier: 2 s of lock wait on the main topic, then 5 s, 1 min and 10 min tiers, each with
+  its own 2 s wait. Nothing is wrong with the payment. Find what holds the row (`SELECT pid,
+  query, xact_start FROM pg_stat_activity WHERE state LIKE 'idle in transaction%' OR
+  wait_event_type = 'Lock'`), let it finish or end it, then replay. The letter says where the
+  payment was first read (`retry_origin_*`) and when it first failed (`retry_first_failed_at`).
+
+A burst of `exhausted` letters across many merchants is not a hot row, it is something
+holding all of them — a migration, a bulk job. The chain is built for one row, not for a
+table: during such a lock every payment walks the chain and lands here. Replaying afterwards
+is safe, but stop the job first.
+
+## Replaying dead letters
+
+```
+KAFKA_BROKERS=localhost:19092 go run ./cmd/dlq-replayer                 # class exhausted
+KAFKA_BROKERS=localhost:19092 go run ./cmd/dlq-replayer -class refused  # after the fix shipped
+```
+
+It sends every letter of one class that was in the topic when it started into
+`payments-consumer.retry.5s`, as a first attempt, and exits with how many it replayed and
+how many of other classes it passed over. Each class keeps its own consumer group
+(`payments-consumer.dlq-replayer.<class>`), so replaying one class never moves past letters
+of another. Running it twice replays nothing the second time; replaying the same letter
+again under a new group is still safe, because the inbox counts the payment once — exp-18
+and `make test-integration` both check that.
+
+Do not replay `undecodable` without a reason to think the bytes have become readable: they
+will be archived again, with a new reason and the same bytes. Letters archived before the
+`dlq_class` header existed carry no class and are never replayed by this tool.
 
 ## A broker is down
 

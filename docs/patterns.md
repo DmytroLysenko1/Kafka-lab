@@ -114,6 +114,20 @@ runs, with no end in sight. With one, the same content drained in 207–322 ms: 
 counted and one record archived with the reason attached. The cost of not having the route
 is not the one record; it is everything behind it.
 
+The chain itself is measured now too. exp-18 locked one merchant's row for 30 s under 600
+payments and changed one thing between the cells: whether contention was told apart from
+any other database failure. Told apart, the six contended payments went into the tiers and
+all 594 others were counted while the row was still locked, the last at 17 s; not told
+apart, every payment behind a contended one waited out the lock, 30.5 s, through 13
+consumer restarts. Held past every tier, the six were archived as `exhausted`, replayed
+once the row was free, and counted — once, like every other payment in every cell. Two
+things the run taught that the design did not say: the stall the chain leaves is the lock
+wait, and Postgres counts `lock_timeout` per lock acquisition, so a payment queued behind a
+tier's transaction waits twice; and a tier must pause the partition that is waiting, not
+the topic — a review found the whole-topic pause holding a due backlog behind one fresh
+record, and a test now does too
+([case 07](static/07-retry-dlq.md#what-the-service-moves-into-the-chain-and-what-it-does-not)).
+
 ### What blocking instead costs, measured
 
 Waiting inside the handler is the alternative everyone writes first, and exp-16 priced it
@@ -141,6 +155,7 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 | `acks=1` on a topic that carries money | 2 000 records acknowledged, 0 readable after the leader died inside the replication window | [exp-08](../experiments/transaction_guarantee/exp-08-acks/) |
 | Turning idempotence off to "go faster" | 80–291 duplicates per run, each one a record the leader had appended before answering `REQUEST_TIMED_OUT` | [exp-09](../experiments/transaction_guarantee/exp-09-reordering/) |
 | Blocking retry inside the handler | member removed from the group, one commit refused, a partition rewound 1 726–1 732 records, 1 739 handled twice | [exp-16](../experiments/transaction_guarantee/exp-16-lag-backpressure/) |
+| One failure class for everything the database says | a row lock on one merchant read as "the database is down": every payment behind it waited out the 30 s lock, through 13 restarts | [exp-18](../experiments/transaction_guarantee/exp-18-retry-chain/) |
 | Leaving a transaction open | `read_committed` consumers saw nothing for 23.2 s behind a 20 s transaction timeout — lag with no messages, on a partition whose producer had nothing to do with the transaction | [exp-10d](../experiments/transaction_guarantee/exp-10d-hanging-transaction/) |
 | Treating a Kafka transaction as covering the database | Kafka exactly 1 000, Postgres 1 050 | [exp-10b](../experiments/transaction_guarantee/exp-10b-database-boundary/) |
 | Porting a Java config to franz-go unchanged | the defaults differ where it matters: one in-flight request instead of five, snappy instead of none, 10 ms of linger instead of 5, `AtStart` instead of `latest` | [checklist §7](tuning-checklist.md) |
@@ -156,7 +171,7 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 | Events of one entity must stay in order | key by the entity id; never rely on order across keys | keyless: up to 8 721 violations per 10 000; keyed: 0 (exp-01) |
 | A single tenant dominates the traffic | split the key or route that tenant to its own topic | adding consumers bought nothing measurable (exp-02) |
 | A payment topic's durability | `acks=all` **and** `min.insync.replicas=2`; idempotence on | `acks=1` lost 2 000 acknowledged records (exp-08); at min.isr 1 `acks=all` means one machine |
-| One record keeps failing | retry topics on `LogAppendTime`, then DLQ | a `CreateTime` retry topic evaluates a forwarded record's delay as zero ([case 07](static/07-retry-dlq.md)) |
+| One record keeps failing | retry topics on `LogAppendTime`, then DLQ; pause the waiting partition, not the tier | a locked merchant held every payment behind it for the whole 30 s lock; moved aside, the other 594 were counted while it was still locked (exp-18) |
 | A dependency is down for everybody | pause fetching, rewind, keep polling — do not wait in the handler | the blocking handler lost its membership and rewound the group (exp-16) |
 | A consumer group is deployed several times a day | `group.instance.id`, session timeout sized to cover a restart | static: a restart costs 2.05 s and no rebalance; a death costs the whole session timeout (exp-14b) |
 | Throughput matters more than a few milliseconds | linger and a codec; zstd on full batches | compression raised throughput at saturation and the ratio is set by batching, 2.9× to 5.65× (exp-17, exp-17b) |
@@ -166,9 +181,9 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 ## What this document does not claim
 
 - **CDC and stream enrichment** are reasoned from the mechanics, not run here.
-- **The retry chain itself** — the 5 s / 1 m / 10 m topics — is designed and written up but
-  has no run behind it. What has a run is the end of that road: exp-11 measured the dead
-  letter route, and without it one unreadable record left 91 payments unread behind it.
+- **The retry chain** is measured on one failure only — a merchant row held by another
+  transaction (exp-18) — and with its tiers scaled to 3 s / 6 s / 12 s. It is not measured
+  against a table-wide lock, which it does not detect and would carry into the DLQ.
 - **Schema evolution** is measured now (exp-12): a new subject checks nothing until a level
   is set on it, and accepts
   every breaking change; `FULL` lets through a field deletion that `BACKWARD` refuses; and

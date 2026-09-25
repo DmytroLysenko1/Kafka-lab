@@ -22,6 +22,7 @@ type Registry struct {
 	eventsHandled    *prometheus.CounterVec
 	eventsFailed     *prometheus.CounterVec
 	eventsDeadLetter *prometheus.CounterVec
+	eventsRetried    *prometheus.CounterVec
 	handleTime       prometheus.Histogram
 	requests         *prometheus.CounterVec
 	requestTime      *prometheus.HistogramVec
@@ -58,6 +59,10 @@ func New() *Registry {
 			Name: "payment_events_dead_lettered_total",
 			Help: "Payment events archived to the dead letter topic, by why.",
 		}, []string{"reason"}),
+		eventsRetried: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "payment_events_retried_total",
+			Help: "Payment events moved aside into a retry tier, by the tier they went to.",
+		}, []string{"tier"}),
 		eventsFailed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "payment_events_failed_total",
 			Help: "Failures on the consumer's path, by the stage that failed.",
@@ -86,6 +91,7 @@ func New() *Registry {
 		metrics.eventsHandled,
 		metrics.eventsFailed,
 		metrics.eventsDeadLetter,
+		metrics.eventsRetried,
 		metrics.handleTime,
 		metrics.requests,
 		metrics.requestTime,
@@ -125,11 +131,18 @@ func (m *Registry) Handled(counted bool, took time.Duration) {
 	m.handleTime.Observe(took.Seconds())
 }
 
-// DeadLettered takes a reason that is already a bounded set — the sentinel a record was
-// refused by — never the error text, which carries identifiers and would turn a label into
+// DeadLettered takes a class that is already a bounded set — undecodable, refused,
+// exhausted — never the error text, which carries identifiers and would turn a label into
 // unbounded cardinality.
-func (m *Registry) DeadLettered(reason string) {
-	m.eventsDeadLetter.WithLabelValues(reason).Inc()
+func (m *Registry) DeadLettered(class string) {
+	m.eventsDeadLetter.WithLabelValues(class).Inc()
+}
+
+// Retried takes the tier a record moved into, a set as long as the chain. A rising rate
+// on the first tier alone is contention that clears; the same rate on the last tier is
+// contention that does not, and the dead letter panel is about to follow it.
+func (m *Registry) Retried(tier string) {
+	m.eventsRetried.WithLabelValues(tier).Inc()
 }
 
 // Failed takes the stage that failed, which is a fixed four-value set. Without it every

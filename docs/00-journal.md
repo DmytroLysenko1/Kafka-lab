@@ -1472,3 +1472,69 @@ partition the consumer stalled on; `stand` and `eos` compute an honest verdict a
 nil regardless, so a failed run can exit 0. The dashboard has never been in front of four
 of the five failures, and its under-replicated panel is the repo's own documented lie
 rendered in Grafana.
+
+## The payments service, part 6 — the retry chain, and three things a review found in it
+
+Date: 2026-09-25 · [exp-18](../experiments/transaction_guarantee/exp-18-retry-chain/) ·
+`make exp-18`, `make test-integration`
+
+**What was missing.** KR3 asks for retries with backoff, a retry topic and a dead letter
+queue. The dead letter topic existed; the three retry topics were in the catalog and nothing
+read them, and the README said so. The obvious way to close the gap — send every transient
+error into the chain — would have been wrong for this service: its only dependency is
+Postgres, and "Postgres is down" sent through a 5 s / 1 min / 10 min chain is the whole topic
+in the dead letter topic eleven minutes into an outage. So the chain carries exactly one
+failure, the only one that belongs to a record rather than to the service: a merchant row
+another transaction holds. `TotalsStore.Add` bounds its lock wait at 2 s, SQLSTATE `55P03`
+becomes `merchants.ErrContended` in the repository, and only that goes into the tiers.
+Everything else holds the offset, as before.
+
+**Before any of it: the integration suite did not compile.** `NewConsumer` had gained a
+metrics argument in `714f593` and `consumer_integration_test.go` still called it with six,
+so `make test-integration` had been failing to build the kafka package since — and nothing
+said so, because `make verify` does not build the `integration` tag. Fixed with the rest.
+
+**Result.** exp-18, one merchant locked for 30 s under 600 payments, six of them its own:
+
+| | no chain | chain |
+|---|---|---|
+| healthy payments counted while the row was locked | 268–305 of 594 | 594 of 594 |
+| the last healthy payment | +30.5 s, just after the lock | +17.0–17.1 s |
+| consumer restarts | 13 in every run | 0 |
+| inbox rows = the merchants' totals | 600 = 600 | 600 = 600 |
+
+With the lock held past every tier, all six ended as `exhausted` dead letters, were replayed
+once the row was free, and were counted 3.0–3.5 s later — once.
+
+**The lock wait is not one `lock_timeout`.** Six contended payments should have cost the
+partition 12 s; the gaps between healthy payments added up to 16. Two of them were 4 s, and
+both were payments whose main-stage attempt queued behind a tier's attempt already waiting
+on the same row: Postgres applies `lock_timeout` per lock acquisition — the tuple lock
+first, then the row — not per statement. The bound holds, but "2 s per contended payment"
+turned out to be the floor.
+
+**Three fresh-context reviews, and what they found in code I had already called finished.**
+The concurrency review found that a tier paused its whole topic and slept until its head
+record was due. My reasoning had been that every record arriving later is due later, so
+pausing loses nothing — true for new arrivals, false for a backlog: after an outage a poll
+returns part of a long-due backlog, and one fresh record fetched from another partition put
+the rest of it to sleep for a full tier delay. Reproduced before it was fixed: 600 due
+records on one partition, one fresh on another, 11 s with the topic paused. Now only the
+waiting partition is paused, each with its own resume time, and the poll is bounded by the
+earliest of them. Fixing that surfaced the next one, found by a run rather than a reviewer:
+a resumed partition joined only the *next* fetch, and franz-go's default fetch wait is 5 s,
+so exp-18 counted replayed payments 5–8 s after the replay into a 3 s tier. Tiers now fetch
+with a 500 ms wait; the delay test measures 40–70 ms of lateness and fails at the default.
+The security review found that the attempt count and the origin of a retried record were
+read from headers a producer controls, and that dead-letter headers were appended beside
+any a producer had already set, so the forged one was read first. The attempt count now
+comes from the stage's position in the chain, and every header is written, not appended.
+And the lock wait itself sits inside a batch that holds the rebalance, so a partition full
+of one locked merchant's payments could have held it past its 60 s timeout — exp-16's
+failure — until a 20 s batch budget went in.
+
+**Left open, on purpose.** The inbox deduplicates by an `event_id` header, and a producer
+that can write to the topic can pre-empt a real payment's id. On a stand with no broker
+authentication, such a producer could as easily publish a payment outright; the fix is
+producer ACLs on every topic of the chain, and it is written down in case 07 rather than
+patched in the consumer.

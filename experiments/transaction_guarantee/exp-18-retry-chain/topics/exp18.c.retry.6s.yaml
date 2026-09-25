@@ -1,0 +1,21 @@
+meta:
+  name: exp18.c.retry.6s
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-18, cell C, the retry chain, with the merchant locked past every tier: the payments
+    are archived as exhausted and replayed once the lock is gone.
+    Retry tier of 6s: the catalog's 5s/1m/10m scaled down so a run takes minutes,
+    not eleven. LogAppendTime, as in the catalog: the delay counts from the moment the
+    broker appended the record.
+spec:
+  partitions: 6
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false
+    message.timestamp.type: LogAppendTime

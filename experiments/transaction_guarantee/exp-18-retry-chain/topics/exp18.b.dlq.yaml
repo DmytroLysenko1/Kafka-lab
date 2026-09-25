@@ -1,0 +1,17 @@
+meta:
+  name: exp18.b.dlq
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-18, cell B, the retry chain, with the merchant locked for a while and then released.
+    The dead letter topic of this cell's chain.
+spec:
+  partitions: 6
+  replicationFactor: 3
+  retentionMinutes: 1440
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false
