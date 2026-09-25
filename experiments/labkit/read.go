@@ -55,23 +55,53 @@ func spans(ctx context.Context, admin *kadm.Client, topic string) (map[int32]Spa
 	if err != nil {
 		return nil, fmt.Errorf("labkit: end offsets of %s: %w", topic, err)
 	}
+	return spansFrom(topic, starts, ends)
+}
+
+// spansFrom is kept apart from the request so that every way a listing can decline to
+// answer can be tested without a cluster. A topic the response left out is one of them:
+// ranging over a map that has no entry for it yields no partitions, no error and a reader
+// that is finished before it starts — an empty log, which is the very finding exp-03 and
+// exp-10d exist to measure.
+func spansFrom(topic string, starts, ends kadm.ListedOffsets) (map[int32]Span, error) {
+	if len(ends[topic]) == 0 {
+		return nil, fmt.Errorf("%w: %s is absent from the end offsets response", ErrNoOffsets, topic)
+	}
 
 	result := make(map[int32]Span, len(ends[topic]))
-	for partition, end := range ends[topic] {
-		start, ok := starts.Lookup(topic, partition)
-		switch {
-		case !ok:
-			return nil, fmt.Errorf("labkit: %s partition %d has no start offset", topic, partition)
-		case start.Err != nil:
-			return nil, fmt.Errorf("labkit: start offset of %s partition %d: %w", topic, partition, start.Err)
-		case end.Err != nil:
-			return nil, fmt.Errorf("labkit: end offset of %s partition %d: %w", topic, partition, end.Err)
-		case start.Offset < 0 || end.Offset < start.Offset:
-			return nil, fmt.Errorf("labkit: %s partition %d reported %d..%d", topic, partition, start.Offset, end.Offset)
+	for partition := range ends[topic] {
+		start, err := OffsetAt(starts, topic, partition)
+		if err != nil {
+			return nil, err
 		}
-		result[partition] = Span{Start: start.Offset, End: end.Offset}
+		end, err := OffsetAt(ends, topic, partition)
+		if err != nil {
+			return nil, err
+		}
+		if end < start {
+			return nil, fmt.Errorf("%w: %s partition %d reported %d..%d", ErrNoOffsets, topic, partition, start, end)
+		}
+		result[partition] = Span{Start: start, End: end}
 	}
 	return result, nil
+}
+
+// OffsetAt returns the offset a listing reported for one partition, and refuses each of
+// the three ways a broker says "I cannot answer": the partition missing from the response,
+// a load error on it, and the -1 that kadm fills in for a topic the cluster does not know.
+// Taken as a plain value, all three read as offset 0, and an experiment that measures a log
+// by its offsets would publish that zero as its result.
+func OffsetAt(listed kadm.ListedOffsets, topic string, partition int32) (int64, error) {
+	at, ok := listed.Lookup(topic, partition)
+	switch {
+	case !ok:
+		return 0, fmt.Errorf("%w: %s partition %d is absent from the response", ErrNoOffsets, topic, partition)
+	case at.Err != nil:
+		return 0, fmt.Errorf("%w: %s partition %d: %w", ErrNoOffsets, topic, partition, at.Err)
+	case at.Offset < 0:
+		return 0, fmt.Errorf("%w: %s partition %d answered %d", ErrNoOffsets, topic, partition, at.Offset)
+	}
+	return at.Offset, nil
 }
 
 // ReadAll returns every data record of the topic from each partition's start to its end,

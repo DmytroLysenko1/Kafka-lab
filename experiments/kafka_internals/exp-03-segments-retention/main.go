@@ -16,6 +16,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+
+	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 )
 
 const (
@@ -33,6 +35,7 @@ const (
 var (
 	errShape       = errors.New("exp-03: key or update count out of range")
 	errNoCleaning  = errors.New("exp-03: the log was never cleaned inside the deadline")
+	errNoPartition = errors.New("exp-03: the topic reported no partition 0")
 	errUndecodable = errors.New("exp-03: unreadable record key")
 	errShortRead   = errors.New("exp-03: the log went quiet before its last offset")
 	errIncomplete  = errors.New("exp-03: the log before cleaning does not hold what was produced")
@@ -259,23 +262,20 @@ func awaitCleaning(ctx context.Context, client *kgo.Client, admin *kadm.Client, 
 }
 
 func observe(ctx context.Context, admin *kadm.Client, cfg *settings, topic string) (observation, error) {
-	starts, err := admin.ListStartOffsets(ctx, topic)
+	extent, err := labkit.Spans(ctx, admin, topic)
 	if err != nil {
-		return observation{}, fmt.Errorf("exp-03: start offsets of %s: %w", topic, err)
+		return observation{}, fmt.Errorf("exp-03: %s: %w", topic, err)
 	}
-	ends, err := admin.ListEndOffsets(ctx, topic)
-	if err != nil {
-		return observation{}, fmt.Errorf("exp-03: end offsets of %s: %w", topic, err)
+	span, ok := extent[0]
+	if !ok {
+		return observation{}, fmt.Errorf("%s: %w", topic, errNoPartition)
 	}
 
-	start, _ := starts.Lookup(topic, 0)
-	end, _ := ends.Lookup(topic, 0)
-
-	records, err := readAll(ctx, cfg, topic, start.Offset, end.Offset)
+	records, err := readAll(ctx, cfg, topic, span.Start, span.End)
 	if err != nil {
 		return observation{}, err
 	}
-	return observation{summary: summarise(records), StartOffset: start.Offset, EndOffset: end.Offset}, nil
+	return observation{summary: summarise(records), StartOffset: span.Start, EndOffset: span.End}, nil
 }
 
 // readAll reads the log from wherever it now starts until it has seen the last offset the
