@@ -1,0 +1,20 @@
+meta:
+  name: exp13.payments
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-13: payments taken through the real API while brokers are killed underneath the
+    relay. Three partitions, RF 3 and min.insync.replicas 2, exactly like the catalog —
+    the point of the run is what those settings do when a broker or two goes away, so
+    weakening them here would measure a different service.
+
+spec:
+  partitions: 3
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false
