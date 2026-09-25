@@ -178,7 +178,10 @@ func produce(ctx context.Context, client *kgo.Client, topic, runID string, cfg s
 			return fmt.Errorf("exp-01: encode event %d: %w", i, err)
 		}
 
-		record := &kgo.Record{Topic: topic, Value: value}
+		record := &kgo.Record{
+			Topic: topic,
+			Value: value,
+		}
 		if cfg.mode == "keyed" {
 			record.Key = []byte(payment)
 		}
@@ -236,7 +239,11 @@ func ours(fetches kgo.Fetches, runID string) ([]processed, error) {
 		if decoded.RunID != runID {
 			return
 		}
-		mine = append(mine, processed{PaymentID: decoded.PaymentID, Seq: decoded.Seq, Partition: record.Partition})
+		mine = append(mine, processed{
+			PaymentID: decoded.PaymentID,
+			Seq:       decoded.Seq,
+			Partition: record.Partition,
+		})
 	})
 	return mine, failure
 }

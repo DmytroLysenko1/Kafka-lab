@@ -72,7 +72,9 @@ func run() error {
 	return measure(ctx, &cfg, os.Stdout)
 }
 
-func (cfg *settings) seeds() []string { return strings.Split(cfg.brokers, ",") }
+func (cfg *settings) seeds() []string {
+	return strings.Split(cfg.brokers, ",")
+}
 
 // measure opens a transaction and leaves it open, lets an unrelated producer write after
 // it, and times how long each isolation level takes to see the unrelated records. The stuck
@@ -110,7 +112,10 @@ func measure(ctx context.Context, cfg *settings, out io.Writer) error {
 		return err
 	}
 	return render(out, report(cfg, stall{
-		Stable: stable, Newest: newest, Uncommitted: uncommitted, Committed: committed,
+		Stable:      stable,
+		Newest:      newest,
+		Uncommitted: uncommitted,
+		Committed:   committed,
 	}))
 }
 
@@ -120,7 +125,11 @@ func openAndAbandon(ctx context.Context, stuck *kgo.Client, cfg *settings) error
 	if err := stuck.BeginTransaction(); err != nil {
 		return fmt.Errorf("exp-10d: begin: %w", err)
 	}
-	record := &kgo.Record{Topic: topic, Key: []byte(cfg.runID), Value: []byte(openMarker)}
+	record := &kgo.Record{
+		Topic: topic,
+		Key:   []byte(cfg.runID),
+		Value: []byte(openMarker),
+	}
 	if err := stuck.ProduceSync(ctx, record).FirstErr(); err != nil {
 		return fmt.Errorf("exp-10d: produce inside the transaction: %w", err)
 	}
@@ -139,7 +148,11 @@ func writeUnrelated(ctx context.Context, cfg *settings) (time.Time, error) {
 
 	records := make([]*kgo.Record, 0, cfg.records)
 	for i := range cfg.records {
-		records = append(records, &kgo.Record{Topic: topic, Key: []byte(cfg.runID), Value: fmt.Appendf(nil, "unrelated-%d", i)})
+		records = append(records, &kgo.Record{
+			Topic: topic,
+			Key:   []byte(cfg.runID),
+			Value: fmt.Appendf(nil, "unrelated-%d", i),
+		})
 	}
 	if err := client.ProduceSync(ctx, records...).FirstErr(); err != nil {
 		return time.Time{}, fmt.Errorf("exp-10d: produce the unrelated records: %w", err)

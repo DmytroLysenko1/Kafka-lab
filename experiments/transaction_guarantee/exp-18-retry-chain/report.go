@@ -42,7 +42,10 @@ func measure(ctx context.Context, pool *pgxpool.Pool, s *settings, produced paym
 	}
 	defer rows.Close()
 
-	result := counts{hotTotal: len(produced.hot), healthyTotal: len(produced.all) - len(produced.hot)}
+	result := counts{
+		hotTotal:     len(produced.hot),
+		healthyTotal: len(produced.all) - len(produced.hot),
+	}
 	for rows.Next() {
 		var eventID string
 		var consumedAt time.Time
@@ -90,7 +93,9 @@ func report(ctx context.Context, out io.Writer, pool *pgxpool.Pool, admin *kadm.
 		return err
 	}
 
-	written := &lines{out: out}
+	written := &lines{
+		out: out,
+	}
 	written.printf("payments: %d, of them %d for the locked merchant\n", s.payments, len(produced.hot))
 	written.printf("first payment counted at: +%s (the group joining and fetching, before any payment is handled)\n", seconds(result.first))
 	written.printf("healthy payments counted: %d of %d, the last at +%s\n", result.healthy, result.healthyTotal, seconds(result.healthyLast))

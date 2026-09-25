@@ -108,7 +108,9 @@ func Main(exp Experiment) {
 }
 
 func run(exp Experiment) error {
-	cfg := Settings{Experiment: exp}
+	cfg := Settings{
+		Experiment: exp,
+	}
 	flag.StringVar(&cfg.Brokers, "brokers", defaultBrokers, "comma-separated bootstrap brokers")
 	flag.StringVar(&cfg.Database, "database-url", os.Getenv("DATABASE_URL"), "postgres connection string")
 	flag.StringVar(&cfg.Phase, "phase", "", "produce, consume or verify")

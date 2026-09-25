@@ -97,7 +97,9 @@ func NewConsumer(brokers []string, stage Stage, handle handler, routes detours, 
 	}, nil
 }
 
-func (c *Consumer) Close() { c.client.Close() }
+func (c *Consumer) Close() {
+	c.client.Close()
+}
 
 func (c *Consumer) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
@@ -156,7 +158,10 @@ func (c *Consumer) poll(ctx context.Context) error {
 }
 
 func (c *Consumer) handleBatch(ctx context.Context, fetches kgo.Fetches) batch {
-	outcome := batch{handled: make([]*kgo.Record, 0, maxRecordsPerPoll), waiting: make(map[int32]*kgo.Record)}
+	outcome := batch{
+		handled: make([]*kgo.Record, 0, maxRecordsPerPoll),
+		waiting: make(map[int32]*kgo.Record),
+	}
 	now := time.Now()
 	fetches.EachPartition(func(partition kgo.FetchTopicPartition) {
 		if outcome.failure == nil {

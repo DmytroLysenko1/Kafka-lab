@@ -16,7 +16,9 @@ type ReadTotal struct {
 }
 
 func NewReadTotal(totals totalsReader) *ReadTotal {
-	return &ReadTotal{totals: totals}
+	return &ReadTotal{
+		totals: totals,
+	}
 }
 
 // Execute answers with the projection as it stands. A merchant nobody has paid yet has a

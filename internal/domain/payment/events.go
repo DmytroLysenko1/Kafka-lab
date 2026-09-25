@@ -17,12 +17,18 @@ type Authorized struct {
 	occurredAt time.Time
 }
 
-func (e *Authorized) PaymentID() ID { return e.paymentID }
+func (e *Authorized) PaymentID() ID {
+	return e.paymentID
+}
 
-func (e *Authorized) Merchant() MerchantID { return e.merchant }
+func (e *Authorized) Merchant() MerchantID {
+	return e.merchant
+}
 
-func (e *Authorized) Amount() Money { return e.amount }
+func (e *Authorized) Amount() Money {
+	return e.amount
+}
 
-func (e *Authorized) OccurredAt() time.Time { return e.occurredAt }
-
-func (e *Authorized) sealedPaymentEvent() {}
+func (e *Authorized) OccurredAt() time.Time {
+	return e.occurredAt
+}

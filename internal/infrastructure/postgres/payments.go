@@ -25,7 +25,9 @@ type PaymentStore struct {
 }
 
 func NewPaymentStore(storage *Storage) *PaymentStore {
-	return &PaymentStore{storage: storage}
+	return &PaymentStore{
+		storage: storage,
+	}
 }
 
 // CreateOrGet decides insert-or-replay inside the insert itself: a SELECT followed by an

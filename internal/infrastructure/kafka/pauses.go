@@ -14,7 +14,9 @@ import (
 // belongs to one poll loop, which is its only reader and writer.
 type pauseSchedule map[int32]time.Time
 
-func (p pauseSchedule) hold(partition int32, until time.Time) { p[partition] = until }
+func (p pauseSchedule) hold(partition int32, until time.Time) {
+	p[partition] = until
+}
 
 // takeDue removes and returns every partition whose record is due by now.
 func (p pauseSchedule) takeDue(now time.Time) []int32 {
@@ -54,13 +56,16 @@ func (c *Consumer) untilNextDue(ctx context.Context) (context.Context, context.C
 // expire a moment after the poll came back with records and a real error, and those
 // records would be dropped as if nothing had arrived.
 func pausedPartitionCameDue(ctx context.Context, fetches kgo.Fetches, err error) bool {
-	return ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && fetches.NumRecords() == 0
+	return ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) &&
+		fetches.NumRecords() == 0
 }
 
 // resumeDue starts fetching again every partition whose record is now due.
 func (c *Consumer) resumeDue(now time.Time) {
 	if due := c.paused.takeDue(now); len(due) > 0 {
-		c.client.ResumeFetchPartitions(map[string][]int32{c.stage.Topic: due})
+		c.client.ResumeFetchPartitions(map[string][]int32{
+			c.stage.Topic: due,
+		})
 	}
 }
 
@@ -81,15 +86,22 @@ func (c *Consumer) holdUntilDue(waiting map[int32]*kgo.Record) {
 	rewind := make(map[int32]kgo.EpochOffset, len(waiting))
 	notDue := make([]int32, 0, len(waiting))
 	for partition, record := range waiting {
-		rewind[partition] = kgo.EpochOffset{Epoch: -1, Offset: record.Offset}
+		rewind[partition] = kgo.EpochOffset{
+			Epoch:  -1,
+			Offset: record.Offset,
+		}
 		if wait := c.stage.untilDue(record, now); wait > 0 {
 			c.paused.hold(partition, now.Add(wait))
 			notDue = append(notDue, partition)
 		}
 	}
 
-	c.client.SetOffsets(map[string]map[int32]kgo.EpochOffset{c.stage.Topic: rewind})
+	c.client.SetOffsets(map[string]map[int32]kgo.EpochOffset{
+		c.stage.Topic: rewind,
+	})
 	if len(notDue) > 0 {
-		c.client.PauseFetchPartitions(map[string][]int32{c.stage.Topic: notDue})
+		c.client.PauseFetchPartitions(map[string][]int32{
+			c.stage.Topic: notDue,
+		})
 	}
 }

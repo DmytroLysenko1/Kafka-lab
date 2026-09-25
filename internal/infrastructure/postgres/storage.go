@@ -49,10 +49,14 @@ func New(ctx context.Context, url string) (*Storage, error) {
 		pool.Close()
 		return nil, fmt.Errorf("%w: ping %s", ErrConnect, where)
 	}
-	return &Storage{pool: pool}, nil
+	return &Storage{
+		pool: pool,
+	}, nil
 }
 
-func (s *Storage) Close() { s.pool.Close() }
+func (s *Storage) Close() {
+	s.pool.Close()
+}
 
 type txKey struct{}
 

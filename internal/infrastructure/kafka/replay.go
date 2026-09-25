@@ -61,7 +61,12 @@ func Replay(ctx context.Context, brokers []string, request ReplayRequest, sink r
 		return ReplayReport{}, err
 	}
 
-	run := replayRun{client: client, request: request, sink: sink, remaining: remaining}
+	run := replayRun{
+		client:    client,
+		request:   request,
+		sink:      sink,
+		remaining: remaining,
+	}
 	return run.untilEnd(ctx)
 }
 
@@ -88,7 +93,10 @@ func unreplayed(ctx context.Context, admin *kadm.Client, request ReplayRequest) 
 	ends.Each(func(end kadm.ListedOffset) {
 		position := startingPoint(starts, committed, end)
 		if position < end.Offset {
-			remaining[end.Partition] = offsetRange{next: position, end: end.Offset}
+			remaining[end.Partition] = offsetRange{
+				next: position,
+				end:  end.Offset,
+			}
 		}
 	})
 	return remaining, nil

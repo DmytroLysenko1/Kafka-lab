@@ -22,10 +22,14 @@ func ParseCurrency(code string) (Currency, error) {
 			return Currency{}, ErrCurrencyFormat
 		}
 	}
-	return Currency{code: code}, nil
+	return Currency{
+		code: code,
+	}, nil
 }
 
-func (c Currency) String() string { return c.code }
+func (c Currency) String() string {
+	return c.code
+}
 
 // Money is minor units — cents, kopiykas — and never a float: exp-17's payloads are not the
 // only thing that has to survive a round trip.
@@ -41,13 +45,22 @@ func NewMoney(minor int64, currency Currency) (Money, error) {
 	if currency == (Currency{}) {
 		return Money{}, ErrCurrencyFormat
 	}
-	return Money{minor: minor, currency: currency}, nil
+	return Money{
+		minor:    minor,
+		currency: currency,
+	}, nil
 }
 
-func (m Money) Minor() int64 { return m.minor }
+func (m Money) Minor() int64 {
+	return m.minor
+}
 
 // IsPositive is whether this is an amount that moves anything: Money allows zero, because a
 // balance can be zero, but zero authorises nothing.
-func (m Money) IsPositive() bool { return m.minor > 0 }
+func (m Money) IsPositive() bool {
+	return m.minor > 0
+}
 
-func (m Money) Currency() Currency { return m.currency }
+func (m Money) Currency() Currency {
+	return m.currency
+}

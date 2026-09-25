@@ -165,11 +165,19 @@ func produce(ctx context.Context, client *kgo.Client, runID string, cfg *setting
 			merchant = "m-hot"
 		}
 
-		value, err := json.Marshal(event{RunID: runID, MerchantID: merchant, Filler: filler})
+		value, err := json.Marshal(event{
+			RunID:      runID,
+			MerchantID: merchant,
+			Filler:     filler,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("exp-02: encode event %d: %w", i, err)
 		}
-		records = append(records, &kgo.Record{Topic: topic, Key: []byte(merchant), Value: value})
+		records = append(records, &kgo.Record{
+			Topic: topic,
+			Key:   []byte(merchant),
+			Value: value,
+		})
 	}
 
 	if err := client.ProduceSync(ctx, records...).FirstErr(); err != nil {
@@ -202,7 +210,10 @@ func drainWith(ctx context.Context, cfg *settings, runID string, consumers int) 
 	workers, workerCtx := errgroup.WithContext(ctx)
 	for member := range consumers {
 		workers.Go(func() error {
-			return consume(workerCtx, &completion{done: cancel, reached: &finished}, cfg, runID, group, &handled[member], &total)
+			return consume(workerCtx, &completion{
+				done:    cancel,
+				reached: &finished,
+			}, cfg, runID, group, &handled[member], &total)
 		})
 	}
 	if err := workers.Wait(); err != nil {
@@ -217,7 +228,11 @@ func drainWith(ctx context.Context, cfg *settings, runID string, consumers int) 
 	if int(total.Load()) != cfg.events {
 		return drain{}, fmt.Errorf("exp-02: %w: group of %d handled %d, produced %d", errIncomplete, consumers, total.Load(), cfg.events)
 	}
-	return drain{Consumers: consumers, Took: took, PerConsumer: perConsumer}, nil
+	return drain{
+		Consumers:   consumers,
+		Took:        took,
+		PerConsumer: perConsumer,
+	}, nil
 }
 
 // consume is one member of the group. It stops when the whole group has handled every event

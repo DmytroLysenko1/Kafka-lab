@@ -183,7 +183,9 @@ func produce(ctx context.Context, s *settings, out io.Writer) error {
 	defer client.Close()
 
 	header := sr.ConfluentHeader{}
-	written := &lines{out: out}
+	written := &lines{
+		out: out,
+	}
 
 	for _, generation := range variants {
 		prefix, err := header.AppendEncode(nil, registered.ID, []int{0})
@@ -226,7 +228,10 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 		storage,
 		time.Now,
 	)
-	consumer, err := kafka.NewConsumer(brokers(), kafka.Stage{Topic: s.topic, Group: s.group}, record, dead, slog.New(slog.DiscardHandler), metrics.Discard{})
+	consumer, err := kafka.NewConsumer(brokers(), kafka.Stage{
+		Topic: s.topic,
+		Group: s.group,
+	}, record, dead, slog.New(slog.DiscardHandler), metrics.Discard{})
 	if err != nil {
 		return err
 	}
@@ -257,7 +262,9 @@ func report(ctx context.Context, s *settings, storage *postgres.Storage, out io.
 		return err
 	}
 
-	written := &lines{out: out}
+	written := &lines{
+		out: out,
+	}
 	written.printf("%-46s %s\n", "record", "what the v1 consumer did with it")
 	for _, generation := range variants {
 		switch {

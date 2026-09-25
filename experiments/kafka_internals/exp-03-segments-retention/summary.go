@@ -44,5 +44,10 @@ func summarise(records []record) summary {
 			alive++
 		}
 	}
-	return summary{Records: len(records), LiveKeys: alive, Tombstones: tombstones, Rolls: rolls}
+	return summary{
+		Records:    len(records),
+		LiveKeys:   alive,
+		Tombstones: tombstones,
+		Rolls:      rolls,
+	}
 }

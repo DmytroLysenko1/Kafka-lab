@@ -43,7 +43,10 @@ func (s *Server) authorizePayment(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBytes))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		s.respond(r.Context(), w, http.StatusBadRequest, failure{Code: "malformed_body", Message: "the request body is not the expected json"})
+		s.respond(r.Context(), w, http.StatusBadRequest, failure{
+			Code:    "malformed_body",
+			Message: "the request body is not the expected json",
+		})
 		return
 	}
 
@@ -62,7 +65,9 @@ func (s *Server) authorizePayment(w http.ResponseWriter, r *http.Request) {
 	if result.Stored {
 		status = http.StatusCreated
 	}
-	s.respond(r.Context(), w, status, authorizeResponse{PaymentID: result.PaymentID})
+	s.respond(r.Context(), w, status, authorizeResponse{
+		PaymentID: result.PaymentID,
+	})
 }
 
 func (s *Server) merchantTotal(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +78,10 @@ func (s *Server) merchantTotal(w http.ResponseWriter, r *http.Request) {
 		s.refuse(r.Context(), w, "read a merchant total", err)
 		return
 	}
-	s.respond(r.Context(), w, http.StatusOK, totalResponse{MerchantID: merchantID, AuthorizedMinor: total})
+	s.respond(r.Context(), w, http.StatusOK, totalResponse{
+		MerchantID:      merchantID,
+		AuthorizedMinor: total,
+	})
 }
 
 // refuse is where the error finally stops: the layers below return it, this one logs it in

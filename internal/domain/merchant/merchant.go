@@ -39,10 +39,14 @@ func ParseID(value string) (ID, error) {
 	case len(value) > maxIdentifierLength:
 		return ID{}, ErrIDTooLong
 	}
-	return ID{value: value}, nil
+	return ID{
+		value: value,
+	}, nil
 }
 
-func (id ID) String() string { return id.value }
+func (id ID) String() string {
+	return id.value
+}
 
 // Authorization is one authorised amount a merchant's total is owed, and the id of the
 // event that announced it — the key a redelivery is recognised by.
@@ -63,14 +67,24 @@ func NewAuthorization(eventID, merchantID string, minor int64) (Authorization, e
 	if err := checkAmount(minor); err != nil {
 		return Authorization{}, err
 	}
-	return Authorization{eventID: eventID, merchant: merchant, minor: minor}, nil
+	return Authorization{
+		eventID:  eventID,
+		merchant: merchant,
+		minor:    minor,
+	}, nil
 }
 
-func (a Authorization) EventID() string { return a.eventID }
+func (a Authorization) EventID() string {
+	return a.eventID
+}
 
-func (a Authorization) Merchant() ID { return a.merchant }
+func (a Authorization) Merchant() ID {
+	return a.merchant
+}
 
-func (a Authorization) Minor() int64 { return a.minor }
+func (a Authorization) Minor() int64 {
+	return a.minor
+}
 
 func checkEventID(eventID string) error {
 	switch {

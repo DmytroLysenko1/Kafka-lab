@@ -64,7 +64,11 @@ func reassign(ctx context.Context, s *settings, started time.Time) (move, error)
 	if err != nil {
 		return move{}, err
 	}
-	return move{startedAt: startedAt, finished: time.Since(started), took: finished}, nil
+	return move{
+		startedAt: startedAt,
+		finished:  time.Since(started),
+		took:      finished,
+	}, nil
 }
 
 func writePlan(ctx context.Context, topic string) error {

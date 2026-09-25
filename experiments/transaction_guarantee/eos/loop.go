@@ -28,11 +28,18 @@ func seed(ctx context.Context, cfg *Settings) error {
 	records := make([]*kgo.Record, 0, cfg.Payments)
 	for i := range cfg.Payments {
 		id := fmt.Sprintf("%s-%05d", cfg.RunID, i)
-		value, err := json.Marshal(payment{RunID: cfg.RunID, PaymentID: id})
+		value, err := json.Marshal(payment{
+			RunID:     cfg.RunID,
+			PaymentID: id,
+		})
 		if err != nil {
 			return fmt.Errorf("%s: encode %s: %w", cfg.Name, id, err)
 		}
-		records = append(records, &kgo.Record{Topic: cfg.Input, Key: []byte(id), Value: value})
+		records = append(records, &kgo.Record{
+			Topic: cfg.Input,
+			Key:   []byte(id),
+			Value: value,
+		})
 	}
 	if err := client.ProduceSync(ctx, records...).FirstErr(); err != nil {
 		return fmt.Errorf("%w: %w", ErrPartial, err)
@@ -74,7 +81,11 @@ func process(ctx context.Context, cfg *Settings) error {
 		return err
 	}
 
-	loop := &loop{cfg: cfg, session: session, db: db}
+	loop := &loop{
+		cfg:     cfg,
+		session: session,
+		db:      db,
+	}
 	for !progress.Done() {
 		fetches := session.PollRecords(ctx, Batch)
 		if err := fetches.Err(); err != nil {
@@ -83,7 +94,9 @@ func process(ctx context.Context, cfg *Settings) error {
 		if err := loop.transact(ctx, fetches); err != nil {
 			return err
 		}
-		fetches.EachRecord(func(record *kgo.Record) { progress.Saw(record.Partition, record.Offset) })
+		fetches.EachRecord(func(record *kgo.Record) {
+			progress.Saw(record.Partition, record.Offset)
+		})
 	}
 	return nil
 }
@@ -143,7 +156,11 @@ func (l *loop) work(ctx context.Context, fetches kgo.Fetches) ([]*kgo.Record, er
 				return
 			}
 		}
-		out = append(out, &kgo.Record{Topic: l.cfg.Output, Key: record.Key, Value: record.Value})
+		out = append(out, &kgo.Record{
+			Topic: l.cfg.Output,
+			Key:   record.Key,
+			Value: record.Value,
+		})
 		l.handled++
 	})
 	return out, failure

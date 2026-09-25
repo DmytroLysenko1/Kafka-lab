@@ -40,8 +40,14 @@ var refusals = []struct {
 func refusalFor(err error) (int, failure) {
 	for _, refusal := range refusals {
 		if errors.Is(err, refusal.sentinel) {
-			return refusal.status, failure{Code: refusal.code, Message: refusal.message}
+			return refusal.status, failure{
+				Code:    refusal.code,
+				Message: refusal.message,
+			}
 		}
 	}
-	return http.StatusInternalServerError, failure{Code: "internal", Message: "the request could not be completed"}
+	return http.StatusInternalServerError, failure{
+		Code:    "internal",
+		Message: "the request could not be completed",
+	}
 }

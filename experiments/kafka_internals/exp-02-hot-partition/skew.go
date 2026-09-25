@@ -28,11 +28,16 @@ func distribution(perPartition map[int32]int) []share {
 		if total > 0 {
 			percent = float64(records) * 100 / float64(total)
 		}
-		shares = append(shares, share{Partition: partition, Records: records, Percent: percent})
+		shares = append(shares, share{
+			Partition: partition,
+			Records:   records,
+			Percent:   percent,
+		})
 	}
 
 	slices.SortFunc(shares, func(left, right share) int {
-		return cmp.Or(cmp.Compare(right.Records, left.Records), cmp.Compare(left.Partition, right.Partition))
+		return cmp.Or(cmp.Compare(right.Records, left.Records),
+			cmp.Compare(left.Partition, right.Partition))
 	})
 	return shares
 }

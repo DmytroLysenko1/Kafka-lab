@@ -81,7 +81,10 @@ func spansFrom(topic string, starts, ends kadm.ListedOffsets) (map[int32]Span, e
 		if end < start {
 			return nil, fmt.Errorf("%w: %s partition %d reported %d..%d", ErrNoOffsets, topic, partition, start, end)
 		}
-		result[partition] = Span{Start: start, End: end}
+		result[partition] = Span{
+			Start: start,
+			End:   end,
+		}
 	}
 	return result, nil
 }
@@ -172,7 +175,10 @@ func NewTracker(extent map[int32]Span) *Tracker {
 	for partition, span := range extent {
 		next[partition] = span.Start
 	}
-	return &Tracker{extent: extent, next: next}
+	return &Tracker{
+		extent: extent,
+		next:   next,
+	}
 }
 
 // Seed records that a partition has already been read up to next — by a consumer group

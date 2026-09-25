@@ -148,7 +148,10 @@ func compact(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *s
 		}
 	}
 	for key := range cfg.tombstones {
-		records = append(records, &kgo.Record{Topic: compactTopic, Key: []byte(fmt.Sprintf("state-%03d", key))})
+		records = append(records, &kgo.Record{
+			Topic: compactTopic,
+			Key:   []byte(fmt.Sprintf("state-%03d", key)),
+		})
 	}
 
 	if err := client.ProduceSync(ctx, records...).FirstErr(); err != nil {
@@ -237,7 +240,11 @@ func whole(before observation, produced int, topic string) error {
 // then watches until the log actually changes, rather than sleeping for a guessed while.
 func awaitCleaning(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *settings, topic string, before observation) (observation, error) {
 	for ctx.Err() == nil {
-		roll := &kgo.Record{Topic: topic, Key: []byte(rollKey), Value: []byte(`{"roll":true}`)}
+		roll := &kgo.Record{
+			Topic: topic,
+			Key:   []byte(rollKey),
+			Value: []byte(`{"roll":true}`),
+		}
 		if err := client.ProduceSync(ctx, roll).FirstErr(); err != nil {
 			return observation{}, fmt.Errorf("exp-03: roll the segment of %s: %w", topic, err)
 		}
@@ -275,7 +282,11 @@ func observe(ctx context.Context, admin *kadm.Client, cfg *settings, topic strin
 	if err != nil {
 		return observation{}, err
 	}
-	return observation{summary: summarise(records), StartOffset: span.Start, EndOffset: span.End}, nil
+	return observation{
+		summary:     summarise(records),
+		StartOffset: span.Start,
+		EndOffset:   span.End,
+	}, nil
 }
 
 // readAll reads the log from wherever it now starts until it has seen the last offset the
@@ -339,7 +350,10 @@ func readBatch(ctx context.Context, client *kgo.Client, topic string, end int64)
 			return
 		}
 		last = max(last, polled.Offset)
-		batch = append(batch, record{Key: string(polled.Key), Tombstone: polled.Value == nil})
+		batch = append(batch, record{
+			Key:       string(polled.Key),
+			Tombstone: polled.Value == nil,
+		})
 	})
 	return batch, last, failure
 }

@@ -38,7 +38,11 @@ func consume(ctx context.Context, cfg *Settings, db *store) error {
 		return err
 	}
 
-	run := &consumer{cfg: cfg, db: db, client: client}
+	run := &consumer{
+		cfg:    cfg,
+		db:     db,
+		client: client,
+	}
 	for !drained.Done() {
 		fetches := client.PollRecords(ctx, PollBatch)
 		if err := fetches.Err(); err != nil {
@@ -53,7 +57,9 @@ func consume(ctx context.Context, cfg *Settings, db *store) error {
 		if err := run.apply(ctx, fetches, batch); err != nil {
 			return err
 		}
-		fetches.EachRecord(func(record *kgo.Record) { drained.Saw(record.Partition, record.Offset) })
+		fetches.EachRecord(func(record *kgo.Record) {
+			drained.Saw(record.Partition, record.Offset)
+		})
 	}
 
 	// Reaching the end with nothing left to commit still has to commit: the last batch of
@@ -227,6 +233,8 @@ func decode(fetches kgo.Fetches, cfg *Settings) ([]Payment, error) {
 
 func records(fetches kgo.Fetches) []*kgo.Record {
 	all := make([]*kgo.Record, 0, PollBatch)
-	fetches.EachRecord(func(record *kgo.Record) { all = append(all, record) })
+	fetches.EachRecord(func(record *kgo.Record) {
+		all = append(all, record)
+	})
 	return all
 }

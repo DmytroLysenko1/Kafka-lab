@@ -70,10 +70,16 @@ func NewPublisher(ctx context.Context, brokers []string, topic string, registryU
 		return nil, fmt.Errorf("%w: %w", ErrBroker, err)
 	}
 
-	return &Publisher{client: client, serde: serde, topic: topic}, nil
+	return &Publisher{
+		client: client,
+		serde:  serde,
+		topic:  topic,
+	}, nil
 }
 
-func (p *Publisher) Close() { p.client.Close() }
+func (p *Publisher) Close() {
+	p.client.Close()
+}
 
 // Publish returns only once every record has been acknowledged, because the caller marks
 // the rows published in the transaction it returns to: reporting success before the ack

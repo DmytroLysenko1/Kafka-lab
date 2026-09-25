@@ -73,14 +73,21 @@ type Settings struct {
 	Timeout  time.Duration
 }
 
-func (cfg *Settings) brokers() []string { return strings.Split(cfg.Brokers, ",") }
+func (cfg *Settings) brokers() []string {
+	return strings.Split(cfg.Brokers, ",")
+}
 
 // transactionalID is fixed for a run and different across runs. Fixed, because the process
 // that replaces a crashed one must present the same id: that is how the broker learns the
 // old transaction is dead and aborts it. Different across runs, so a rerun does not inherit
 // an earlier run's producer epoch.
-func (cfg *Settings) transactionalID() string { return cfg.Name + "-" + cfg.RunID }
-func (cfg *Settings) group() string           { return cfg.Name + "-" + cfg.RunID }
+func (cfg *Settings) transactionalID() string {
+	return cfg.Name + "-" + cfg.RunID
+}
+
+func (cfg *Settings) group() string {
+	return cfg.Name + "-" + cfg.RunID
+}
 
 // Main is the whole of each experiment's main().
 func Main(exp Experiment) {

@@ -141,7 +141,11 @@ func grid() []point {
 	for _, linger := range lingers {
 		for _, batch := range batches {
 			for _, c := range codecs {
-				cells = append(cells, point{linger: linger, batch: batch, codec: c})
+				cells = append(cells, point{
+					linger: linger,
+					batch:  batch,
+					codec:  c,
+				})
 			}
 		}
 	}
@@ -232,7 +236,11 @@ func offer(ctx context.Context, client *kgo.Client, cfg *settings, rec *recorder
 			for range perTick {
 				key, value := source.next()
 				handed := time.Now()
-				client.Produce(ctx, &kgo.Record{Topic: topic, Key: key, Value: value}, func(_ *kgo.Record, err error) {
+				client.Produce(ctx, &kgo.Record{
+					Topic: topic,
+					Key:   key,
+					Value: value,
+				}, func(_ *kgo.Record, err error) {
 					rec.record(time.Since(handed), err)
 				})
 				offered++
@@ -262,7 +270,10 @@ func (r *recorder) record(took time.Duration, err error) {
 func (r *recorder) snapshot() outcome {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return outcome{failed: r.failed, lat: r.lat}
+	return outcome{
+		failed: r.failed,
+		lat:    r.lat,
+	}
 }
 
 // wireHook sums the client's own per-batch metrics: what actually went over the wire,

@@ -31,7 +31,8 @@ type order struct {
 }
 
 func (o order) held() bool {
-	return o.Duplicates == 0 && o.Inversions == 0 && o.RefundedFirst == 0 && o.Missing == 0
+	return o.Duplicates == 0 && o.Inversions == 0 &&
+		o.RefundedFirst == 0 && o.Missing == 0
 }
 
 // analyse reads the partition in the order it was delivered and reports what the producer
@@ -42,7 +43,10 @@ func analyse(delivered []event, produced int) order {
 	captured := make(map[string]bool, len(delivered)/2)
 	refundedFirst := make(map[string]bool)
 
-	result := order{Produced: produced, Read: len(delivered)}
+	result := order{
+		Produced: produced,
+		Read:     len(delivered),
+	}
 	highest := -1
 	for _, e := range delivered {
 		if seen[e.Seq] {

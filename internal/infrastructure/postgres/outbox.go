@@ -36,7 +36,9 @@ type OutboxStore struct {
 }
 
 func NewOutboxStore(storage *Storage) *OutboxStore {
-	return &OutboxStore{storage: storage}
+	return &OutboxStore{
+		storage: storage,
+	}
 }
 
 // Claim hands each row to exactly one relay: SKIP LOCKED steps over rows another relay is

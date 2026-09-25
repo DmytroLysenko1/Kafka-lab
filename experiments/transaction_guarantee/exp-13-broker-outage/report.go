@@ -33,7 +33,9 @@ func report(out io.Writer, s *settings, samples []sample, attempts []attempt, ki
 		{name: "after they came back", from: revived, until: s.window},
 	}
 
-	written := &lines{out: out}
+	written := &lines{
+		out: out,
+	}
 	written.printf("%-24s %-12s %10s %10s %14s %12s %10s\n",
 		"phase", "seconds", "accepted", "refused", "backlog (max)", "under-repl", "no leader")
 

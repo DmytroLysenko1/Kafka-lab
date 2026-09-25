@@ -42,7 +42,11 @@ var ErrUnknownClass = errors.New("kafka: unknown dead letter class")
 // would read the whole dead letter topic and find nothing, and say so as if that were true.
 func ParseClass(name string) (Class, error) {
 	class := Class(name)
-	if !slices.Contains([]Class{ClassUndecodable, ClassRefused, ClassExhausted}, class) {
+	if !slices.Contains([]Class{
+		ClassUndecodable,
+		ClassRefused,
+		ClassExhausted,
+	}, class) {
 		return "", fmt.Errorf("%w: %q", ErrUnknownClass, name)
 	}
 	return class, nil
@@ -125,7 +129,10 @@ func replayHeaders(record *kgo.Record) []kgo.RecordHeader {
 	kept := slices.DeleteFunc(slices.Clone(record.Headers), func(h kgo.RecordHeader) bool {
 		return h.Key == headerRetryAttempt || strings.HasPrefix(h.Key, headerDeadLetterPrefix)
 	})
-	return append(kept, kgo.RecordHeader{Key: headerRetryAttempt, Value: []byte("1")})
+	return append(kept, kgo.RecordHeader{
+		Key:   headerRetryAttempt,
+		Value: []byte("1"),
+	})
 }
 
 // reasonLimit keeps a dead letter under max.message.bytes whatever the error says: a letter
@@ -142,15 +149,22 @@ func boundedReason(reason error) string {
 }
 
 func withHeader(headers []kgo.RecordHeader, key, value string) []kgo.RecordHeader {
-	kept := slices.DeleteFunc(slices.Clone(headers), func(h kgo.RecordHeader) bool { return h.Key == key })
-	return append(kept, kgo.RecordHeader{Key: key, Value: []byte(value)})
+	kept := slices.DeleteFunc(slices.Clone(headers), func(h kgo.RecordHeader) bool {
+		return h.Key == key
+	})
+	return append(kept, kgo.RecordHeader{
+		Key:   key,
+		Value: []byte(value),
+	})
 }
 
 // headerValue is empty for a header that is absent, which every caller treats the same as
 // one that is present and empty: an event id nobody can deduplicate by, a class nobody
 // replays.
 func headerValue(headers []kgo.RecordHeader, key string) string {
-	index := slices.IndexFunc(headers, func(h kgo.RecordHeader) bool { return h.Key == key })
+	index := slices.IndexFunc(headers, func(h kgo.RecordHeader) bool {
+		return h.Key == key
+	})
 	if index < 0 {
 		return ""
 	}

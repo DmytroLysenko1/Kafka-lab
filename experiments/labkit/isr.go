@@ -50,5 +50,10 @@ func AwaitISR(ctx context.Context, admin *kadm.Client, topic string, partition i
 }
 
 // Shrunk and Whole are the two states experiments wait for.
-func Shrunk(isr, replicas int) bool { return isr < replicas }
-func Whole(isr, replicas int) bool  { return isr == replicas }
+func Shrunk(isr, replicas int) bool {
+	return isr < replicas
+}
+
+func Whole(isr, replicas int) bool {
+	return isr == replicas
+}
