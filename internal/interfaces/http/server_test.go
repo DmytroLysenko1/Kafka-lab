@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/payments"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/merchant"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/payment"
 	payhttp "github.com/DmytroLysenko1/Kafka-lab/internal/interfaces/http"
 )
@@ -287,7 +287,7 @@ func TestReadingAMerchantTotal(t *testing.T) {
 }
 
 func TestAMerchantIdTheProjectionCannotHoldIsRefused(t *testing.T) {
-	handler := harness(t, &fakeAuthorizer{}, &fakeTotals{err: merchants.ErrUnprocessable})
+	handler := harness(t, &fakeAuthorizer{}, &fakeTotals{err: merchant.ErrIDTooLong})
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/merchants/"+strings.Repeat("m", 65)+"/total", nil)
 	request.Header.Set("X-API-Key", apiKey)

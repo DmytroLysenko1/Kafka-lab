@@ -11,21 +11,22 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"slices"
 	"strings"
 	"syscall"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
+	"github.com/DmytroLysenko1/Kafka-lab/pkg/env"
 )
 
-var (
-	errMissing      = errors.New("dlq-replayer: required configuration is missing")
-	errUnknownClass = errors.New("dlq-replayer: unknown dead letter class")
-	errNotATier     = errors.New("dlq-replayer: letters are replayed only into this group's retry tiers")
-)
+var errNotATier = errors.New("dlq-replayer: letters are replayed only into this group's retry tiers")
 
 const retryTierPrefix = "payments-consumer.retry."
 
+// main keeps a skeleton of its own rather than lifecycle.Main: the services share one
+// outcome — running, or stopped with a reason — while this tool has three, and says which
+// in its exit code: 2 when it never started, 1 when it started and failed part-way, with
+// what it had replayed by then as fields an operator can query rather than as prose.
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	// os.Exit skips deferred calls, so it stays out of the function that holds them.
@@ -59,7 +60,7 @@ func start(logger *slog.Logger) int {
 }
 
 func replay(ctx context.Context, brokers []string, request kafka.ReplayRequest) (kafka.ReplayReport, error) {
-	detours, err := kafka.NewDetours(brokers, request.DeadLetterTopic, unwatched{})
+	detours, err := kafka.NewDetours(brokers, request.DeadLetterTopic, metrics.Discard{})
 	if err != nil {
 		return kafka.ReplayReport{}, err
 	}
@@ -67,13 +68,6 @@ func replay(ctx context.Context, brokers []string, request kafka.ReplayRequest) 
 
 	return kafka.Replay(ctx, brokers, request, detours)
 }
-
-// unwatched is the replayer's observer: it only replays, and a run that exits in seconds
-// has no scrape to publish to — its counts are what it prints.
-type unwatched struct{}
-
-func (unwatched) Retried(string)      {}
-func (unwatched) DeadLettered(string) {}
 
 // load defaults the class to the only one a replay can fix by itself: an undecodable record
 // will be just as undecodable the second time, and a refused one needs its producer fixed,
@@ -85,11 +79,11 @@ func load() (kafka.ReplayRequest, []string, error) {
 	flag.StringVar(&request.Into, "into", "payments-consumer.retry.5s", "first tier of the chain the letters go back into")
 	flag.Parse()
 
-	request.Class = kafka.Class(*class)
-	classes := []kafka.Class{kafka.ClassExhausted, kafka.ClassRefused, kafka.ClassUndecodable}
-	if !slices.Contains(classes, request.Class) {
-		return kafka.ReplayRequest{}, nil, fmt.Errorf("%w: %q", errUnknownClass, *class)
+	parsed, err := kafka.ParseClass(*class)
+	if err != nil {
+		return kafka.ReplayRequest{}, nil, err
 	}
+	request.Class = parsed
 	request.Group = "payments-consumer.dlq-replayer." + *class
 	// A replay goes back to the group's own chain and nowhere else: into payments.main it
 	// would reach every group reading that topic, and one without an inbox counts it twice.
@@ -97,14 +91,7 @@ func load() (kafka.ReplayRequest, []string, error) {
 		return kafka.ReplayRequest{}, nil, fmt.Errorf("%w: %q", errNotATier, request.Into)
 	}
 
-	var brokers []string
-	for _, broker := range strings.Split(os.Getenv("KAFKA_BROKERS"), ",") {
-		if broker = strings.TrimSpace(broker); broker != "" {
-			brokers = append(brokers, broker)
-		}
-	}
-	if len(brokers) == 0 {
-		return kafka.ReplayRequest{}, nil, fmt.Errorf("%w: KAFKA_BROKERS", errMissing)
-	}
-	return request, brokers, nil
+	var read env.Reader
+	brokers := read.List("KAFKA_BROKERS")
+	return request, brokers, read.Err()
 }

@@ -198,13 +198,7 @@ func (r *replayRun) advance(record *kgo.Record) {
 }
 
 func (r *replayRun) commit(ctx context.Context, done []*kgo.Record) error {
-	if len(done) == 0 {
-		return nil
-	}
-	committing, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitTimeout)
-	defer cancel()
-
-	if err := r.client.CommitRecords(committing, done...); err != nil {
+	if err := commitRecords(ctx, r.client, done); err != nil {
 		return fmt.Errorf("%w: commit %d letters: %w", ErrReplay, len(done), err)
 	}
 	return nil

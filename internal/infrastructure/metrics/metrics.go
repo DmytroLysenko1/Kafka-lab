@@ -157,3 +157,16 @@ func (m *Registry) Served(route, status string, took time.Duration) {
 	m.requests.WithLabelValues(route, status).Inc()
 	m.requestTime.WithLabelValues(route).Observe(took.Seconds())
 }
+
+// Discard hears everything and keeps nothing, like io.Discard: for a one-shot tool that
+// has no scrape to publish to, and for an experiment or a test that counts what reached
+// the database and the topics rather than what a dashboard would have shown.
+type Discard struct{}
+
+func (Discard) Swept(int, time.Duration, error)      {}
+func (Discard) Backlog(int)                          {}
+func (Discard) Handled(bool, time.Duration)          {}
+func (Discard) Retried(string)                       {}
+func (Discard) DeadLettered(string)                  {}
+func (Discard) Failed(string)                        {}
+func (Discard) Served(string, string, time.Duration) {}

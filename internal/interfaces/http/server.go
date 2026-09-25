@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/DmytroLysenko1/Kafka-lab/pkg/httpserve"
 )
 
 var ErrAPIKeyRequired = errors.New("http: an api key is required; this service moves money and does not serve anonymous callers")
@@ -56,30 +57,14 @@ func (s *Server) Handler() http.Handler {
 // time to finish. A payment that is mid-transaction when the pod is told to stop should be
 // allowed to finish rather than be cut off and retried by a client that cannot tell which.
 func (s *Server) Listen(ctx context.Context, address string) error {
-	server := &http.Server{
+	return httpserve.Serve(ctx, &http.Server{
 		Addr:              address,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
 		IdleTimeout:       idleTimeout,
-		BaseContext:       func(_ net.Listener) context.Context { return context.WithoutCancel(ctx) },
-	}
-
-	served := make(chan error, 1)
-	go func() { served <- server.ListenAndServe() }()
-
-	select {
-	case err := <-served:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
-	case <-ctx.Done():
-		stopping, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
-		defer cancel()
-		return server.Shutdown(stopping)
-	}
+	}, shutdownTimeout)
 }
 
 // authenticated compares in constant time: a comparison that returns early tells a caller

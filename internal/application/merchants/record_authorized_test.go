@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/merchant"
 )
 
 var errStore = errors.New("the database is not answering")
@@ -52,11 +54,11 @@ func (f *fakeStore) Claim(_ context.Context, eventID string, _ time.Time) (bool,
 	return true, nil
 }
 
-func (f *fakeStore) Add(_ context.Context, merchantID string, minor int64, _ time.Time) error {
+func (f *fakeStore) Add(_ context.Context, authorization merchant.Authorization, _ time.Time) error {
 	if f.failAdd != nil {
 		return f.failAdd
 	}
-	f.staged = append(f.staged, func() { f.totals[merchantID] += minor })
+	f.staged = append(f.staged, func() { f.totals[authorization.Merchant().String()] += authorization.Minor() })
 	return nil
 }
 
@@ -166,50 +168,36 @@ func TestWhenTheInboxFailsNothingIsCounted(t *testing.T) {
 	}
 }
 
-func TestRecordRefusesEventsItCannotTrust(t *testing.T) {
+// Which events are countable is the domain's rule and is tested there. What the use case
+// owns is the consequence: a refused event is unprocessable — the consumer's cue to archive
+// it rather than hold the partition — it still says why, and it moves no total.
+func TestAnEventTheDomainRefusesIsUnprocessableAndCountsNothing(t *testing.T) {
 	type args struct {
 		mutate func(event *AuthorizedEvent)
 	}
-
 	tests := []struct {
 		name    string
 		args    args
+		want    error
 		wantErr error
 	}{
 		{
-			name:    "no event id: nothing to deduplicate by, so a redelivery would double the total",
+			name:    "no event id",
 			args:    args{mutate: func(event *AuthorizedEvent) { event.EventID = "" }},
-			wantErr: ErrEventIDRequired,
+			want:    merchant.ErrEventIDRequired,
+			wantErr: ErrUnprocessable,
 		},
 		{
-			name:    "no merchant",
-			args:    args{mutate: func(event *AuthorizedEvent) { event.MerchantID = "" }},
-			wantErr: ErrMerchantRequired,
+			name:    "a merchant id longer than the payments domain can ever issue",
+			args:    args{mutate: func(event *AuthorizedEvent) { event.MerchantID = strings.Repeat("m", 65) }},
+			want:    merchant.ErrIDTooLong,
+			wantErr: ErrUnprocessable,
 		},
 		{
 			name:    "zero",
 			args:    args{mutate: func(event *AuthorizedEvent) { event.AmountMinor = 0 }},
-			wantErr: ErrAmountNotPositive,
-		},
-		{
-			name:    "negative: a producer at another version could send one",
-			args:    args{mutate: func(event *AuthorizedEvent) { event.AmountMinor = -1 }},
-			wantErr: ErrAmountNotPositive,
-		},
-		{
-			name:    "an event id a hostile producer could put a megabyte in",
-			args:    args{mutate: func(event *AuthorizedEvent) { event.EventID = strings.Repeat("e", 65) }},
-			wantErr: ErrIdentifierTooLong,
-		},
-		{
-			name:    "a merchant id longer than the producing domain can ever issue",
-			args:    args{mutate: func(event *AuthorizedEvent) { event.MerchantID = strings.Repeat("m", 65) }},
-			wantErr: ErrIdentifierTooLong,
-		},
-		{
-			name:    "an amount that would take the total out of any sane range",
-			args:    args{mutate: func(event *AuthorizedEvent) { event.AmountMinor = 1<<62 + 1 }},
-			wantErr: ErrAmountOutOfBalance,
+			want:    merchant.ErrAmountNotPositive,
+			wantErr: ErrUnprocessable,
 		},
 	}
 
@@ -224,11 +212,14 @@ func TestRecordRefusesEventsItCannotTrust(t *testing.T) {
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
+			if !errors.Is(err, tt.want) {
+				t.Errorf("err = %v, want it to still name %v", err, tt.want)
+			}
 			if counted {
 				t.Error("a refused event was reported as counted")
 			}
-			if diff := cmp.Diff(0, len(store.totals)); diff != "" {
-				t.Errorf("a refused event still moved a total (-want +got):\n%s", diff)
+			if diff := cmp.Diff(0, len(store.totals)+len(store.claimed)); diff != "" {
+				t.Errorf("a refused event still moved a total or claimed the inbox (-want +got):\n%s", diff)
 			}
 		})
 	}

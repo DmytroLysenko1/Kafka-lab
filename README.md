@@ -178,6 +178,21 @@ and a consumer decoding a published record through the registry — key, headers
 Each of those runs against a topic of its own, created and deleted by the test, so nothing
 lands in the topics the experiments count.
 
+## Code layout
+
+| Where | What lives there | Imports |
+|---|---|---|
+| `internal/domain/payment`, `internal/domain/merchant` | the rules: a payment is authorised for a positive amount; an authorisation the consumer counts carries an event id, a merchant and an amount the total can take. Values that break a rule cannot be made | nothing internal |
+| `internal/application/*` | use cases — authorise a payment, record an authorisation once, read a total, publish the outbox — and the small interfaces each one needs | the domain |
+| `internal/infrastructure/*` | Postgres (unit of work, idempotent insert, outbox, inbox, totals), Kafka (publisher, the chain's stages, detours, replay), metrics | application ports, domain |
+| `internal/interfaces/http` | the HTTP front door and the one table that turns a domain refusal into a status | application, domain errors |
+| `cmd/*` | the three services, each a `run` function handed to `lifecycle.Main`, and `dlq-replayer`, a one-shot tool that keeps its own `main` because it has three outcomes, not two — exit 2 when it never started, 1 when it failed part-way, 0 when done | everything |
+| `pkg/env`, `pkg/lifecycle`, `pkg/httpserve` | what every process needs and no business rule touches: configuration that reports every problem at once, the signal-and-exit-code skeleton, graceful HTTP serving | the standard library |
+
+The same boundary is drawn twice on purpose: `payment.MerchantID` and `merchant.ID` have the
+same rule today, and belong to two contexts — the one that issues merchant ids and the one
+that counts them — so that neither has to change when the other does.
+
 ## Architecture
 
 ```mermaid

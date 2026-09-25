@@ -22,6 +22,7 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
 
@@ -213,7 +214,7 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 	// A restart is a new client: labkit.Supervise explains why reusing one would measure
 	// the harness instead of the service.
 	newConsumer := func() (labkit.Runner, error) {
-		return kafka.NewConsumer(brokers(), kafka.Stage{Topic: s.topic, Group: s.group}, record, dead, slog.New(slog.DiscardHandler), labkit.Unwatched{})
+		return kafka.NewConsumer(brokers(), kafka.Stage{Topic: s.topic, Group: s.group}, record, dead, slog.New(slog.DiscardHandler), metrics.Discard{})
 	}
 
 	bounded, cancel := context.WithTimeout(ctx, s.budget)
@@ -233,7 +234,7 @@ func deadLetters(s *settings) (deadLetterSink, func(), error) {
 	if s.dlqTopic == "" {
 		return refusingDeadLetters{}, func() {}, nil
 	}
-	dead, err := kafka.NewDetours(brokers(), s.dlqTopic, labkit.Unwatched{})
+	dead, err := kafka.NewDetours(brokers(), s.dlqTopic, metrics.Discard{})
 	if err != nil {
 		return nil, func() {}, err
 	}
