@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/payments"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/merchant"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/payment"
 )
 
@@ -30,7 +30,8 @@ var refusals = []struct {
 	{payment.ErrCurrencyFormat, http.StatusBadRequest, "currency_invalid", "currency must be three upper-case letters"},
 	{payment.ErrAmountNegative, http.StatusBadRequest, "amount_invalid", "amount_minor must be a positive number of minor units"},
 	{payment.ErrAmountNotPositive, http.StatusBadRequest, "amount_invalid", "amount_minor must be a positive number of minor units"},
-	{merchants.ErrUnprocessable, http.StatusBadRequest, "merchant_invalid", "the merchant id is not one this service can hold"},
+	{merchant.ErrIDRequired, http.StatusBadRequest, "merchant_invalid", "the merchant id is not one this service can hold"},
+	{merchant.ErrIDTooLong, http.StatusBadRequest, "merchant_invalid", "the merchant id is not one this service can hold"},
 	{payment.ErrStorage, http.StatusServiceUnavailable, "storage_unavailable", "the service cannot reach its storage"},
 }
 

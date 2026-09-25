@@ -18,10 +18,10 @@ import (
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/encoding/protowire"
 
-	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 	schemas "github.com/DmytroLysenko1/Kafka-lab/proto"
 )
@@ -214,7 +214,7 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 	}
 	defer storage.Close()
 
-	dead, err := kafka.NewDetours(brokers(), s.dlqTopic, labkit.Unwatched{})
+	dead, err := kafka.NewDetours(brokers(), s.dlqTopic, metrics.Discard{})
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 		storage,
 		time.Now,
 	)
-	consumer, err := kafka.NewConsumer(brokers(), kafka.Stage{Topic: s.topic, Group: s.group}, record, dead, slog.New(slog.DiscardHandler), labkit.Unwatched{})
+	consumer, err := kafka.NewConsumer(brokers(), kafka.Stage{Topic: s.topic, Group: s.group}, record, dead, slog.New(slog.DiscardHandler), metrics.Discard{})
 	if err != nil {
 		return err
 	}

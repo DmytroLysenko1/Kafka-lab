@@ -76,7 +76,7 @@ type Payment struct {
 // authorised even though Money itself allows it: a zero-amount authorisation reserves
 // nothing and would still emit an event downstream consumers would act on.
 func Authorize(id ID, merchant MerchantID, amount Money, at time.Time) (*Payment, error) {
-	if amount.Minor() <= 0 {
+	if !amount.IsPositive() {
 		return nil, ErrAmountNotPositive
 	}
 

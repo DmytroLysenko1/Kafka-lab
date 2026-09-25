@@ -210,3 +210,83 @@ func headerMap(headers []kgo.RecordHeader) map[string]string {
 	}
 	return byKey
 }
+
+// A chain linked by hand can point a tier at the wrong next topic, or give two tiers the
+// same attempt number; the attempt count in every retried record depends on Tier.
+func TestAChainLinksEachStageToTheNextAndNumbersItsTiers(t *testing.T) {
+	chain := Chain(
+		Stage{Topic: "payments.main", Group: "payments-consumer"},
+		Stage{Topic: "retry.5s", Group: "retry.5s", Delay: 5 * time.Second, Next: "left over"},
+		Stage{Topic: "retry.1m", Group: "retry.1m", Delay: time.Minute, Tier: 7},
+	)
+
+	want := []Stage{
+		{Topic: "payments.main", Group: "payments-consumer", Tier: 0, Next: "retry.5s"},
+		{Topic: "retry.5s", Group: "retry.5s", Tier: 1, Delay: 5 * time.Second, Next: "retry.1m"},
+		{Topic: "retry.1m", Group: "retry.1m", Tier: 2, Delay: time.Minute, Next: ""},
+	}
+	if diff := cmp.Diff(want, chain); diff != "" {
+		t.Errorf("chain (-want +got):\n%s", diff)
+	}
+}
+
+// Resuming a partition early costs a wasted fetch; resuming it late is the bug a review
+// found — a due record left waiting. And a partition resumed must not stay scheduled, or
+// every poll after it would be cut short by a time long past.
+func TestPausedPartitionsAreResumedWhenDueAndOnlyThen(t *testing.T) {
+	schedule := make(pauseSchedule)
+	schedule.hold(0, entered.Add(5*time.Second))
+	schedule.hold(3, entered.Add(time.Second))
+	schedule.hold(1, entered.Add(time.Second))
+
+	next, paused := schedule.next()
+	if !paused || !next.Equal(entered.Add(time.Second)) {
+		t.Fatalf("next = %s, %v; want the earliest, %s", next, paused, entered.Add(time.Second))
+	}
+	if diff := cmp.Diff([]int32(nil), schedule.takeDue(entered)); diff != "" {
+		t.Errorf("resumed before anything was due (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]int32{1, 3}, schedule.takeDue(entered.Add(time.Second))); diff != "" {
+		t.Errorf("resumed at their due time (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]int32(nil), schedule.takeDue(entered.Add(2*time.Second))); diff != "" {
+		t.Errorf("a partition was resumed twice (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]int32{0}, schedule.takeDue(entered.Add(time.Hour))); diff != "" {
+		t.Errorf("resumed long after it was due (-want +got):\n%s", diff)
+	}
+	if _, paused := schedule.next(); paused {
+		t.Error("an empty schedule still reports a next due time")
+	}
+}
+
+// A replay of a class nothing is archived under reads the whole topic and replays nothing,
+// and reports that as if it were the answer.
+func TestOnlyAClassSomethingIsArchivedUnderCanBeReplayed(t *testing.T) {
+	type args struct {
+		name string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    Class
+		wantErr error
+	}{
+		{name: "exhausted", args: args{name: "exhausted"}, want: ClassExhausted},
+		{name: "refused", args: args{name: "refused"}, want: ClassRefused},
+		{name: "undecodable", args: args{name: "undecodable"}, want: ClassUndecodable},
+		{name: "a typo", args: args{name: "exausted"}, wantErr: ErrUnknownClass},
+		{name: "empty", args: args{name: ""}, wantErr: ErrUnknownClass},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseClass(tt.args.name)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("class (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

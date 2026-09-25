@@ -46,4 +46,8 @@ func NewMoney(minor int64, currency Currency) (Money, error) {
 
 func (m Money) Minor() int64 { return m.minor }
 
+// IsPositive is whether this is an amount that moves anything: Money allows zero, because a
+// balance can be zero, but zero authorises nothing.
+func (m Money) IsPositive() bool { return m.minor > 0 }
+
 func (m Money) Currency() Currency { return m.currency }

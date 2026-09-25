@@ -3,10 +3,12 @@ package merchants
 import (
 	"context"
 	"fmt"
+
+	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/merchant"
 )
 
 type totalsReader interface {
-	Total(ctx context.Context, merchantID string) (int64, error)
+	Total(ctx context.Context, id merchant.ID) (int64, error)
 }
 
 type ReadTotal struct {
@@ -21,16 +23,14 @@ func NewReadTotal(totals totalsReader) *ReadTotal {
 // total of zero rather than a missing row: the caller asked what has been authorised, and
 // the answer to that is a number, not an absence.
 func (uc *ReadTotal) Execute(ctx context.Context, merchantID string) (int64, error) {
-	switch {
-	case merchantID == "":
-		return 0, fmt.Errorf("%w: %w", ErrUnprocessable, ErrMerchantRequired)
-	case len(merchantID) > maxIdentifierLength:
-		return 0, fmt.Errorf("%w: %w", ErrUnprocessable, ErrIdentifierTooLong)
+	id, err := merchant.ParseID(merchantID)
+	if err != nil {
+		return 0, err
 	}
 
-	total, err := uc.totals.Total(ctx, merchantID)
+	total, err := uc.totals.Total(ctx, id)
 	if err != nil {
-		return 0, fmt.Errorf("merchants: read the total of %s: %w", merchantID, err)
+		return 0, fmt.Errorf("merchants: read the total of %s: %w", id, err)
 	}
 	return total, nil
 }

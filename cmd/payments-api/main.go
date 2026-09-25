@@ -2,12 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log/slog"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -18,9 +13,9 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 	payhttp "github.com/DmytroLysenko1/Kafka-lab/internal/interfaces/http"
+	"github.com/DmytroLysenko1/Kafka-lab/pkg/env"
+	"github.com/DmytroLysenko1/Kafka-lab/pkg/lifecycle"
 )
-
-var errMissing = errors.New("payments-api: required configuration is missing")
 
 type config struct {
 	databaseURL string
@@ -29,25 +24,7 @@ type config struct {
 	metricsAddr string
 }
 
-func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	// os.Exit skips deferred calls, so it stays out of the function that holds them.
-	if code := start(logger); code != 0 {
-		os.Exit(code)
-	}
-}
-
-func start(logger *slog.Logger) int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if err := run(ctx, logger); err != nil {
-		logger.ErrorContext(ctx, "payments api stopped", "error", err)
-		return 1
-	}
-	logger.InfoContext(ctx, "payments api stopped")
-	return 0
-}
+func main() { lifecycle.Main("payments api", run) }
 
 func run(ctx context.Context, logger *slog.Logger) error {
 	settings, err := load()
@@ -84,27 +61,14 @@ func run(ctx context.Context, logger *slog.Logger) error {
 }
 
 func load() (config, error) {
+	var read env.Reader
 	settings := config{
-		databaseURL: os.Getenv("DATABASE_URL"),
+		databaseURL: read.Required("DATABASE_URL"),
 		// Loopback by default: this service has one shared key and no transport security,
 		// which is enough for a lab and not enough for a network anyone else is on.
-		address:     envOr("PAYMENTS_API_ADDR", "127.0.0.1:8081"),
-		apiKey:      os.Getenv("PAYMENTS_API_KEY"),
-		metricsAddr: envOr("METRICS_ADDR", "127.0.0.1:9103"),
+		address:     env.Or("PAYMENTS_API_ADDR", "127.0.0.1:8081"),
+		apiKey:      read.Required("PAYMENTS_API_KEY"),
+		metricsAddr: env.Or("METRICS_ADDR", "127.0.0.1:9103"),
 	}
-
-	switch {
-	case settings.databaseURL == "":
-		return config{}, fmt.Errorf("%w: DATABASE_URL", errMissing)
-	case settings.apiKey == "":
-		return config{}, fmt.Errorf("%w: PAYMENTS_API_KEY", errMissing)
-	}
-	return settings, nil
-}
-
-func envOr(name, fallback string) string {
-	if value := os.Getenv(name); value != "" {
-		return value
-	}
-	return fallback
+	return settings, read.Err()
 }

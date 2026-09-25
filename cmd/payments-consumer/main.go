@@ -2,13 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log/slog"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -17,9 +11,9 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
+	"github.com/DmytroLysenko1/Kafka-lab/pkg/env"
+	"github.com/DmytroLysenko1/Kafka-lab/pkg/lifecycle"
 )
-
-var errMissing = errors.New("payments-consumer: required configuration is missing")
 
 type config struct {
 	databaseURL string
@@ -30,25 +24,7 @@ type config struct {
 	metricsAddr string
 }
 
-func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	// os.Exit skips deferred calls, so it stays out of the function that holds them.
-	if code := start(logger); code != 0 {
-		os.Exit(code)
-	}
-}
-
-func start(logger *slog.Logger) int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if err := run(ctx, logger); err != nil {
-		logger.ErrorContext(ctx, "payments consumer stopped", "error", err)
-		return 1
-	}
-	logger.InfoContext(ctx, "payments consumer stopped")
-	return 0
-}
+func main() { lifecycle.Main("payments consumer", run) }
 
 func run(ctx context.Context, logger *slog.Logger) error {
 	settings, err := load()
@@ -115,11 +91,10 @@ func stages(settings *config) []kafka.Stage {
 
 	chain := make([]kafka.Stage, 0, 1+len(tiers))
 	chain = append(chain, kafka.Stage{Topic: settings.topic, Group: settings.group})
-	for position, tier := range tiers {
-		chain[len(chain)-1].Next = tier.topic
-		chain = append(chain, kafka.Stage{Topic: tier.topic, Group: tier.topic, Tier: position + 1, Delay: tier.delay})
+	for _, tier := range tiers {
+		chain = append(chain, kafka.Stage{Topic: tier.topic, Group: tier.topic, Delay: tier.delay})
 	}
-	return chain
+	return kafka.Chain(chain...)
 }
 
 // provideConsumers returns every consumer it built, even when a later one failed, so that
@@ -144,31 +119,14 @@ func closeAll(consumers []*kafka.Consumer) {
 }
 
 func load() (config, error) {
+	var read env.Reader
 	settings := config{
-		databaseURL: os.Getenv("DATABASE_URL"),
-		topic:       envOr("CONSUMER_TOPIC", "payments.main"),
-		dlqTopic:    envOr("CONSUMER_DLQ_TOPIC", "payments-consumer.dlq"),
-		group:       envOr("CONSUMER_GROUP", "payments-consumer"),
-		metricsAddr: envOr("METRICS_ADDR", "127.0.0.1:9102"),
+		databaseURL: read.Required("DATABASE_URL"),
+		brokers:     read.List("KAFKA_BROKERS"),
+		topic:       env.Or("CONSUMER_TOPIC", "payments.main"),
+		dlqTopic:    env.Or("CONSUMER_DLQ_TOPIC", "payments-consumer.dlq"),
+		group:       env.Or("CONSUMER_GROUP", "payments-consumer"),
+		metricsAddr: env.Or("METRICS_ADDR", "127.0.0.1:9102"),
 	}
-	for _, broker := range strings.Split(os.Getenv("KAFKA_BROKERS"), ",") {
-		if broker = strings.TrimSpace(broker); broker != "" {
-			settings.brokers = append(settings.brokers, broker)
-		}
-	}
-
-	switch {
-	case settings.databaseURL == "":
-		return config{}, fmt.Errorf("%w: DATABASE_URL", errMissing)
-	case len(settings.brokers) == 0:
-		return config{}, fmt.Errorf("%w: KAFKA_BROKERS", errMissing)
-	}
-	return settings, nil
-}
-
-func envOr(name, fallback string) string {
-	if value := os.Getenv(name); value != "" {
-		return value
-	}
-	return fallback
+	return settings, read.Err()
 }

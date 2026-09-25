@@ -20,6 +20,7 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
 
@@ -267,7 +268,7 @@ func TestAPaymentHeldPastEveryTierIsArchivedAndReplayingItTwiceCountsItOnce(t *t
 	}
 	release()
 
-	detours, err := kafka.NewDetours(brokers(t), dlq, unobserved{})
+	detours, err := kafka.NewDetours(brokers(t), dlq, metrics.Discard{})
 	if err != nil {
 		t.Fatalf("detours: %v", err)
 	}
@@ -378,7 +379,7 @@ func TestAContendedPaymentTheTierCannotStoreKeepsItsOffset(t *testing.T) {
 	publishAll(t, main, payment(t, hotMerchant, hotEventID, hotAmountMinor), payment(t, "m-42", 1, 100))
 
 	record := merchants.NewRecordAuthorized(postgres.NewInboxStore(storage), postgres.NewTotalsStore(storage), storage, time.Now)
-	detours, err := kafka.NewDetours(brokers(t), dlq, unobserved{})
+	detours, err := kafka.NewDetours(brokers(t), dlq, metrics.Discard{})
 	if err != nil {
 		t.Fatalf("detours: %v", err)
 	}
@@ -386,7 +387,7 @@ func TestAContendedPaymentTheTierCannotStoreKeepsItsOffset(t *testing.T) {
 
 	stage := stageOn(main)
 	stage.Next = "payments.itest.never-created-" + uuid.New().String()[:8]
-	consumer, err := kafka.NewConsumer(brokers(t), stage, record, detours, slog.New(slog.DiscardHandler), unobserved{})
+	consumer, err := kafka.NewConsumer(brokers(t), stage, record, detours, slog.New(slog.DiscardHandler), metrics.Discard{})
 	if err != nil {
 		t.Fatalf("consumer: %v", err)
 	}

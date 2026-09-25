@@ -16,6 +16,7 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
 
@@ -84,7 +85,7 @@ func measureCell(ctx context.Context, s *settings) (err error) {
 	// The operator's release is the one the timings rest on; this one covers an early
 	// return, and its failure still reaches the caller.
 	defer func() { err = errors.Join(err, held.release()) }()
-	detours, err := kafka.NewDetours(brokers(), s.topic("dlq"), labkit.Unwatched{})
+	detours, err := kafka.NewDetours(brokers(), s.topic("dlq"), metrics.Discard{})
 	if err != nil {
 		return err
 	}
@@ -141,7 +142,7 @@ func (c *cell) run(ctx context.Context) error {
 // only failure the chain is meant to absorb is contention, and anything else is a finding.
 func (c *cell) runChain(ctx context.Context, work *errgroup.Group, finish context.CancelFunc) {
 	for _, stage := range c.stages() {
-		consumer, err := kafka.NewConsumer(brokers(), stage, c.record, c.detours, slog.New(slog.DiscardHandler), labkit.Unwatched{})
+		consumer, err := kafka.NewConsumer(brokers(), stage, c.record, c.detours, slog.New(slog.DiscardHandler), metrics.Discard{})
 		if err != nil {
 			work.Go(func() error { return err })
 			return
@@ -162,11 +163,10 @@ func (c *cell) stages() []kafka.Stage {
 	chainOf := chainTiers()
 	chain := make([]kafka.Stage, 0, 1+len(chainOf))
 	chain = append(chain, kafka.Stage{Topic: c.s.topic("main"), Group: c.s.group("main")})
-	for position, next := range chainOf {
-		chain[len(chain)-1].Next = c.s.topic(next.suffix)
-		chain = append(chain, kafka.Stage{Topic: c.s.topic(next.suffix), Group: c.s.group(next.suffix), Tier: position + 1, Delay: next.delay})
+	for _, next := range chainOf {
+		chain = append(chain, kafka.Stage{Topic: c.s.topic(next.suffix), Group: c.s.group(next.suffix), Delay: next.delay})
 	}
-	return chain
+	return kafka.Chain(chain...)
 }
 
 // startBlind is cell A's consumer: the same code, told nothing about contention. Every
@@ -174,7 +174,7 @@ func (c *cell) stages() []kafka.Stage {
 // offset and dies — which is what the service did before the chain existed.
 func (c *cell) startBlind() (labkit.Runner, error) {
 	return kafka.NewConsumer(brokers(), kafka.Stage{Topic: c.s.topic("main"), Group: c.s.group("main")},
-		blindToContention{inner: c.record}, c.detours, slog.New(slog.DiscardHandler), labkit.Unwatched{})
+		blindToContention{inner: c.record}, c.detours, slog.New(slog.DiscardHandler), metrics.Discard{})
 }
 
 // operate is the person or the job on the other side of the lock. In cells A and B it lets

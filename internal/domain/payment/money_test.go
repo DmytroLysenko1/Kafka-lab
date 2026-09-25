@@ -2,6 +2,7 @@ package payment_test
 
 import (
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -73,6 +74,39 @@ func TestNewMoneyRefusesWhatCannotBeAnAmount(t *testing.T) {
 			}
 			if diff := cmp.Diff(tt.args.minor, got.Minor()); diff != "" {
 				t.Errorf("minor units mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// Zero is a valid amount of money and not a valid authorisation; the line between the two
+// is one unit.
+func TestOnlyAnAmountAboveZeroIsPositive(t *testing.T) {
+	type args struct {
+		minor int64
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    bool
+		wantErr error
+	}{
+		{name: "zero", args: args{minor: 0}, want: false},
+		{name: "one minor unit", args: args{minor: 1}, want: true},
+		{name: "the largest amount", args: args{minor: math.MaxInt64}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			currency, err := payment.ParseCurrency("EUR")
+			if err != nil {
+				t.Fatalf("currency: %v", err)
+			}
+			amount, err := payment.NewMoney(tt.args.minor, currency)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.want, amount.IsPositive()); diff != "" {
+				t.Errorf("positive (-want +got):\n%s", diff)
 			}
 		})
 	}

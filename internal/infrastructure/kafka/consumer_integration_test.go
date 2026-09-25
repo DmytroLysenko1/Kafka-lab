@@ -19,6 +19,7 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
 
@@ -65,11 +66,11 @@ func runConsumer(t *testing.T, storage *postgres.Storage, stage kafka.Stage, dlq
 		storage,
 		time.Now,
 	)
-	detours, err := kafka.NewDetours(brokers(t), dlqTopic, unobserved{})
+	detours, err := kafka.NewDetours(brokers(t), dlqTopic, metrics.Discard{})
 	if err != nil {
 		t.Fatalf("detours: %v", err)
 	}
-	consumer, err := kafka.NewConsumer(brokers(t), stage, record, detours, slog.New(slog.DiscardHandler), unobserved{})
+	consumer, err := kafka.NewConsumer(brokers(t), stage, record, detours, slog.New(slog.DiscardHandler), metrics.Discard{})
 	if err != nil {
 		t.Fatalf("consumer: %v", err)
 	}
@@ -87,14 +88,6 @@ func runConsumer(t *testing.T, storage *postgres.Storage, stage kafka.Stage, dlq
 		detours.Close()
 	})
 }
-
-// unobserved stands in for the metrics: these tests read the database and the topics.
-type unobserved struct{}
-
-func (unobserved) Handled(bool, time.Duration) {}
-func (unobserved) Retried(string)              {}
-func (unobserved) DeadLettered(string)         {}
-func (unobserved) Failed(string)               {}
 
 // waitCommitted waits until the group has committed past every record the topic held when
 // asked: the only proof that a consumer has handled something it produced no row for.

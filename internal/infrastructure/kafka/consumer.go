@@ -5,28 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
-	"slices"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
-	"github.com/twmb/franz-go/pkg/sr"
-	"google.golang.org/protobuf/proto"
 
-	paymentv1 "github.com/DmytroLysenko1/Kafka-lab/gen/payment/v1"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 )
 
-var (
-	ErrConsume    = errors.New("kafka: consume")
-	ErrDecode     = errors.New("kafka: decode record")
-	ErrDeadLetter = errors.New("kafka: dead letter")
-	ErrRetry      = errors.New("kafka: move to a retry tier")
-)
+var ErrConsume = errors.New("kafka: consume")
 
 const (
 	maxRecordsPerPoll = 100
-	handlingTimeout   = 15 * time.Second
 	// The commit must survive the signal that stopped the consumer — dropping it would
 	// replay work already done — but it must not be able to wait forever on a broker that
 	// has stopped answering, or shutdown never finishes and the orchestrator kills it.
@@ -50,11 +39,6 @@ type handler interface {
 	Execute(ctx context.Context, event merchants.AuthorizedEvent) (bool, error)
 }
 
-type detours interface {
-	Retry(ctx context.Context, record *kgo.Record, topic string, attempt int) error
-	DeadLetter(ctx context.Context, record *kgo.Record, reason error, class Class) error
-}
-
 // observer hears what this stage did with a record it kept: counted it, or failed on it.
 // Where a record went instead is reported by the detours that sent it there. The stage is
 // one of a handful of fixed words, never the error text: an error carries offsets and
@@ -73,8 +57,8 @@ const (
 	stageDeadLetter = "dead_letter"
 )
 
-// Consumer is one stage's poll loop. paused belongs to that loop alone — Run is its only
-// reader and writer — and says, per partition, when the record it was stopped at is due.
+// Consumer is one stage's poll loop: this file is the loop and its commits, routing.go
+// what happens to each record, pauses.go how a tier waits, decode.go the wire format.
 type Consumer struct {
 	client   *kgo.Client
 	stage    Stage
@@ -82,7 +66,7 @@ type Consumer struct {
 	detours  detours
 	logger   *slog.Logger
 	observer observer
-	paused   map[int32]time.Time
+	paused   pauseSchedule
 }
 
 // NewConsumer turns autocommit off: the offset must move only after the database has the
@@ -109,7 +93,7 @@ func NewConsumer(brokers []string, stage Stage, handle handler, routes detours, 
 		detours:  routes,
 		logger:   logger,
 		observer: watch,
-		paused:   make(map[int32]time.Time),
+		paused:   make(pauseSchedule),
 	}, nil
 }
 
@@ -171,41 +155,6 @@ func (c *Consumer) poll(ctx context.Context) error {
 	return nil
 }
 
-// untilNextDue bounds a poll by the earliest paused partition's due time. With nothing
-// paused it is the caller's context unchanged.
-func (c *Consumer) untilNextDue(ctx context.Context) (context.Context, context.CancelFunc) {
-	if len(c.paused) == 0 {
-		return ctx, func() {}
-	}
-	return context.WithDeadline(ctx, slices.MinFunc(slices.Collect(maps.Values(c.paused)), time.Time.Compare))
-}
-
-// pausedPartitionCameDue tells a poll that ended because a paused partition is due from
-// one that ended because the consumer is stopping or the fetch failed. It judges by the
-// error the poll returned, not by the poll's context read afterwards: that context may
-// expire a moment after the poll came back with records and a real error, and those
-// records would be dropped as if nothing had arrived.
-func pausedPartitionCameDue(ctx context.Context, fetches kgo.Fetches, err error) bool {
-	return ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && fetches.NumRecords() == 0
-}
-
-// resumeDue starts fetching again every partition whose record is now due.
-func (c *Consumer) resumeDue(now time.Time) {
-	due := make([]int32, 0, len(c.paused))
-	for partition, at := range c.paused {
-		if !at.After(now) {
-			due = append(due, partition)
-		}
-	}
-	if len(due) == 0 {
-		return
-	}
-	for _, partition := range due {
-		delete(c.paused, partition)
-	}
-	c.client.ResumeFetchPartitions(map[string][]int32{c.stage.Topic: due})
-}
-
 func (c *Consumer) handleBatch(ctx context.Context, fetches kgo.Fetches) batch {
 	outcome := batch{handled: make([]*kgo.Record, 0, maxRecordsPerPoll), waiting: make(map[int32]*kgo.Record)}
 	now := time.Now()
@@ -236,147 +185,20 @@ func (c *Consumer) handlePartition(ctx context.Context, records []*kgo.Record, n
 }
 
 func (c *Consumer) commit(ctx context.Context, handled []*kgo.Record) error {
-	if len(handled) == 0 {
-		return nil
-	}
-	committing, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitTimeout)
-	defer cancel()
-
-	if err := c.client.CommitRecords(committing, handled...); err != nil {
+	if err := commitRecords(ctx, c.client, handled); err != nil {
 		c.observer.Failed(stageCommit)
 		return fmt.Errorf("%w: commit %d records: %w", ErrConsume, len(handled), err)
 	}
 	return nil
 }
 
-// holdUntilDue moves each waiting partition back to its first unhandled record, and stops
-// fetching the ones whose record is not due yet — those alone: a partition that has waited
-// long enough, or one full of records that are due, must not sit behind another's delay.
-// A partition stopped by the batch budget is only rewound; it has nothing to wait for.
-// Both happen before the rebalance is released: franz-go documents SetOffsets as safe only
-// while no revoke can run, and BlockRebalanceOnPoll is what holds revokes off until
-// AllowRebalance. The waiting itself happens outside any batch, holding nothing — the shape
-// exp-16 measured against waiting inside the batch.
-func (c *Consumer) holdUntilDue(waiting map[int32]*kgo.Record) {
-	if len(waiting) == 0 {
-		return
+// commitRecords commits on a context the caller's cancellation cannot reach, bounded by
+// commitTimeout: see the constant for why both halves matter.
+func commitRecords(ctx context.Context, client *kgo.Client, records []*kgo.Record) error {
+	if len(records) == 0 {
+		return nil
 	}
-
-	now := time.Now()
-	rewind := make(map[int32]kgo.EpochOffset, len(waiting))
-	notDue := make([]int32, 0, len(waiting))
-	for partition, record := range waiting {
-		rewind[partition] = kgo.EpochOffset{Epoch: -1, Offset: record.Offset}
-		if wait := c.stage.untilDue(record, now); wait > 0 {
-			c.paused[partition] = now.Add(wait)
-			notDue = append(notDue, partition)
-		}
-	}
-
-	c.client.SetOffsets(map[string]map[int32]kgo.EpochOffset{c.stage.Topic: rewind})
-	if len(notDue) > 0 {
-		c.client.PauseFetchPartitions(map[string][]int32{c.stage.Topic: notDue})
-	}
-}
-
-// handleRecord returns an error only when the record must stay where it is: every other
-// outcome — counted, a duplicate, moved to a retry tier, archived — lets the offset move.
-func (c *Consumer) handleRecord(ctx context.Context, record *kgo.Record) error {
-	event, err := decodeEvent(record)
-	if err != nil {
-		return c.deadLetter(ctx, record, err, ClassUndecodable)
-	}
-
-	handling, cancel := context.WithTimeout(ctx, handlingTimeout)
+	committing, cancel := context.WithTimeout(context.WithoutCancel(ctx), commitTimeout)
 	defer cancel()
-
-	started := time.Now()
-	counted, err := c.handle.Execute(handling, event)
-	switch {
-	case errors.Is(err, merchants.ErrUnprocessable):
-		return c.deadLetter(ctx, record, err, ClassRefused)
-	case errors.Is(err, merchants.ErrContended):
-		return c.moveOn(ctx, record, err)
-	case err != nil:
-		c.observer.Failed(stageHandle)
-		return err
-	}
-	c.observer.Handled(counted, time.Since(started))
-
-	c.logger.DebugContext(ctx, "record handled",
-		"event_id", event.EventID,
-		"topic", record.Topic,
-		"partition", record.Partition,
-		"offset", record.Offset,
-		"counted", counted,
-	)
-	return nil
-}
-
-// moveOn takes a contended record off the partition so the payments behind it are not
-// held for a lock none of them needs. Past the last tier it has had every chance the chain
-// gives, and it is archived for a person to look at.
-func (c *Consumer) moveOn(ctx context.Context, record *kgo.Record, reason error) error {
-	if c.stage.Next == "" {
-		return c.deadLetter(ctx, record, reason, ClassExhausted)
-	}
-	if err := c.detours.Retry(ctx, record, c.stage.Next, c.stage.Tier+1); err != nil {
-		c.observer.Failed(stageRetry)
-		return fmt.Errorf("%w: %w", ErrRetry, err)
-	}
-	c.logger.WarnContext(ctx, "record moved to a retry tier",
-		"topic", record.Topic,
-		"partition", record.Partition,
-		"offset", record.Offset,
-		"next", c.stage.Next,
-		"reason", reason.Error(),
-	)
-	return nil
-}
-
-// deadLetter is the last way a record leaves the partition unhandled. If the dead letter
-// topic itself refuses it, the offset stays put: a record nobody can store is still better
-// stuck than silently gone.
-func (c *Consumer) deadLetter(ctx context.Context, record *kgo.Record, reason error, class Class) error {
-	if err := c.detours.DeadLetter(ctx, record, reason, class); err != nil {
-		c.observer.Failed(stageDeadLetter)
-		return fmt.Errorf("%w: %w", ErrDeadLetter, err)
-	}
-	c.logger.ErrorContext(ctx, "record sent to the dead letter topic",
-		"topic", record.Topic,
-		"partition", record.Partition,
-		"offset", record.Offset,
-		"class", class,
-		"reason", reason.Error(),
-	)
-	return nil
-}
-
-// decodeEvent reads the record the way the wire format says to: the schema id and the
-// message indexes come off the front, and what remains is the protobuf. The event id comes
-// from the header the relay set — the outbox row id, which survives a republished record
-// and is therefore what deduplication has to key on.
-func decodeEvent(record *kgo.Record) (merchants.AuthorizedEvent, error) {
-	header := sr.ConfluentHeader{}
-
-	id, body, err := header.DecodeID(record.Value)
-	if err != nil {
-		return merchants.AuthorizedEvent{}, fmt.Errorf("%w: schema id: %w", ErrDecode, err)
-	}
-	_, body, err = header.DecodeIndex(body, 1)
-	if err != nil {
-		return merchants.AuthorizedEvent{}, fmt.Errorf("%w: schema %d message index: %w", ErrDecode, id, err)
-	}
-
-	var authorized paymentv1.PaymentAuthorized
-	if err := proto.Unmarshal(body, &authorized); err != nil {
-		return merchants.AuthorizedEvent{}, fmt.Errorf("%w: schema %d: %w", ErrDecode, id, err)
-	}
-
-	eventID := headerValue(record.Headers, "event_id")
-	return merchants.AuthorizedEvent{
-		EventID:     eventID,
-		MerchantID:  authorized.GetMerchantId(),
-		AmountMinor: authorized.GetAmountMinor(),
-	}, nil
+	return client.CommitRecords(committing, records...)
 }

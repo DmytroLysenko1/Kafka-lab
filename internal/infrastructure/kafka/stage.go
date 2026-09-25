@@ -1,6 +1,8 @@
 package kafka
 
 import (
+	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,6 +36,18 @@ const (
 	ClassExhausted   Class = "exhausted"
 )
 
+var ErrUnknownClass = errors.New("kafka: unknown dead letter class")
+
+// ParseClass accepts only a class something is archived under: a replay of any other name
+// would read the whole dead letter topic and find nothing, and say so as if that were true.
+func ParseClass(name string) (Class, error) {
+	class := Class(name)
+	if !slices.Contains([]Class{ClassUndecodable, ClassRefused, ClassExhausted}, class) {
+		return "", fmt.Errorf("%w: %q", ErrUnknownClass, name)
+	}
+	return class, nil
+}
+
 const (
 	headerRetryAttempt              = "retry_attempt"
 	headerRetryOriginTopic          = "retry_origin_topic"
@@ -48,6 +62,22 @@ const (
 	headerDeadLetterArchivedAt      = "dlq_archived_at"
 	headerDeadLetterPrefix          = "dlq_"
 )
+
+// Chain links stages in the order given into one retry chain: each stage's Next is the
+// topic of the one after it, the last has none and dead-letters what it cannot handle, and
+// each Tier is its position — the main topic is tier 0. Both are derived here so that no
+// caller can link a tier to the wrong next topic or give two stages the same attempt count.
+func Chain(stages ...Stage) []Stage {
+	linked := slices.Clone(stages)
+	for position := range linked {
+		linked[position].Tier = position
+		linked[position].Next = ""
+		if position+1 < len(linked) {
+			linked[position].Next = linked[position+1].Topic
+		}
+	}
+	return linked
+}
 
 // untilDue is how long a record still has to wait before this stage may handle it. The
 // retry topics stamp records with LogAppendTime, so the timestamp is the moment the record
