@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
@@ -48,9 +49,14 @@ func consumerStorage(t *testing.T) (*postgres.Storage, *pgxpool.Pool) {
 	return storage, pool
 }
 
-// runConsumer starts the consumer and guarantees it is stopped and joined before the test
+// stageOn is a main-topic stage with a group of its own, so no run inherits another's offsets.
+func stageOn(topic string) kafka.Stage {
+	return kafka.Stage{Topic: topic, Group: "itest-" + uuid.New().String()[:8]}
+}
+
+// runConsumer starts one stage and guarantees it is stopped and joined before the test
 // returns: a consumer still polling after its test would take records meant for the next.
-func runConsumer(t *testing.T, storage *postgres.Storage, topic, dlqTopic string) {
+func runConsumer(t *testing.T, storage *postgres.Storage, stage kafka.Stage, dlqTopic string) {
 	t.Helper()
 
 	record := merchants.NewRecordAuthorized(
@@ -59,11 +65,11 @@ func runConsumer(t *testing.T, storage *postgres.Storage, topic, dlqTopic string
 		storage,
 		time.Now,
 	)
-	dead, err := kafka.NewDeadLetters(brokers(t), dlqTopic)
+	detours, err := kafka.NewDetours(brokers(t), dlqTopic, unobserved{})
 	if err != nil {
-		t.Fatalf("dead letters: %v", err)
+		t.Fatalf("detours: %v", err)
 	}
-	consumer, err := kafka.NewConsumer(brokers(t), topic, "itest-"+uuid.New().String()[:8], record, dead, slog.New(slog.DiscardHandler))
+	consumer, err := kafka.NewConsumer(brokers(t), stage, record, detours, slog.New(slog.DiscardHandler), unobserved{})
 	if err != nil {
 		t.Fatalf("consumer: %v", err)
 	}
@@ -75,10 +81,50 @@ func runConsumer(t *testing.T, storage *postgres.Storage, topic, dlqTopic string
 	t.Cleanup(func() {
 		cancel()
 		if err := <-stopped; err != nil {
-			t.Errorf("consumer: %v", err)
+			t.Errorf("consumer on %s: %v", stage.Topic, err)
 		}
 		consumer.Close()
-		dead.Close()
+		detours.Close()
+	})
+}
+
+// unobserved stands in for the metrics: these tests read the database and the topics.
+type unobserved struct{}
+
+func (unobserved) Handled(bool, time.Duration) {}
+func (unobserved) Retried(string)              {}
+func (unobserved) DeadLettered(string)         {}
+func (unobserved) Failed(string)               {}
+
+// waitCommitted waits until the group has committed past every record the topic held when
+// asked: the only proof that a consumer has handled something it produced no row for.
+func waitCommitted(t *testing.T, group, topic string) {
+	t.Helper()
+	client, err := kgo.NewClient(kgo.SeedBrokers(brokers(t)...))
+	if err != nil {
+		t.Fatalf("admin client: %v", err)
+	}
+	defer client.Close()
+	admin := kadm.NewClient(client)
+
+	ends, err := admin.ListEndOffsets(t.Context(), topic)
+	if err == nil {
+		err = ends.Error()
+	}
+	if err != nil {
+		t.Fatalf("end offsets of %s: %v", topic, err)
+	}
+	waitFor(t, "group "+group+" to commit to the end of "+topic, func() bool {
+		committed, err := admin.FetchOffsetsForTopics(t.Context(), group, topic)
+		if err != nil || committed.Error() != nil {
+			return false
+		}
+		reached := true
+		ends.Each(func(end kadm.ListedOffset) {
+			at, ok := committed.Lookup(end.Topic, end.Partition)
+			reached = reached && (end.Offset == 0 || ok && at.At >= end.Offset)
+		})
+		return reached
 	})
 }
 
@@ -125,15 +171,16 @@ func TestTheSameEventDeliveredTwiceMovesTheTotalOnce(t *testing.T) {
 		}
 	}
 
-	runConsumer(t, storage, topic, dlqTopic)
+	stage := stageOn(topic)
+	runConsumer(t, storage, stage, dlqTopic)
 
 	waitFor(t, "the merchant's total to be credited", func() bool {
 		return merchantTotal(t, pool, "m-42") == 1999
 	})
 
-	// The second copy is already in the topic; give the consumer room to handle it and prove
-	// the total stayed where it was rather than doubling.
-	time.Sleep(2 * time.Second)
+	// The second copy is already in the topic; once the group has committed past it, the
+	// total is what it will stay.
+	waitCommitted(t, stage.Group, topic)
 	if diff := cmp.Diff(int64(1999), merchantTotal(t, pool, "m-42")); diff != "" {
 		t.Errorf("total after the redelivery (-want +got):\n%s", diff)
 	}
@@ -181,7 +228,7 @@ func TestARecordNobodyCanDecodeGoesToTheDeadLetterTopicAndTheGroupMovesOn(t *tes
 		t.Fatalf("publish the good record: %v", err)
 	}
 
-	runConsumer(t, storage, topic, dlqTopic)
+	runConsumer(t, storage, stageOn(topic), dlqTopic)
 
 	waitFor(t, "the record behind the poison one to be handled", func() bool {
 		return merchantTotal(t, pool, "m-42") == 500
@@ -244,7 +291,7 @@ func TestAnEventTheConsumerRefusesIsArchivedRatherThanRetriedForever(t *testing.
 		t.Fatalf("publish: %v", err)
 	}
 
-	runConsumer(t, storage, topic, dlqTopic)
+	runConsumer(t, storage, stageOn(topic), dlqTopic)
 
 	archived := readBack(t, dlqTopic, 1)
 	headers := map[string]string{}

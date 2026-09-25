@@ -243,8 +243,8 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Dead letters per second, by reason",
-      "description": "Anything here is a record no retry will fix. Undecodable means bytes nobody can read; refused means the consumer understood it and will not take it.",
+      "title": "Dead letters per second, by class",
+      "description": "Anything here is a record the chain will not fix on its own. Undecodable means bytes nobody can read; refused means the consumer understood it and will not take it; exhausted means it was contended through every retry tier and waits for a replay once whatever held its merchant has let go.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -457,6 +457,56 @@
           "expr": "histogram_quantile(0.95, sum by (le) (rate(payment_event_handling_duration_seconds_bucket[30s])))",
           "legendFormat": "event handling",
           "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 105,
+      "type": "timeseries",
+      "title": "Retry chain — records moved aside per second, by tier",
+      "description": "A record goes here when another transaction held its merchant's total past the lock timeout. The partition it came from kept moving. Traffic on the first tier alone is contention that cleared; traffic reaching the last tier is contention that did not, and the exhausted dead letters follow it.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 61
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (tier) (rate(payment_events_retried_total[30s]))",
+          "legendFormat": "{{tier}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 106,
+      "type": "timeseries",
+      "title": "Retry chain — what each tier still holds",
+      "description": "Lag of each tier's group. A tier is meant to hold records for its delay, so a steady non-zero value is normal; one that only grows means that tier's consumer is gone.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 61
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (consumergroup) (kafka_consumergroup_lag{consumergroup=~\"payments-consumer\\\\.retry\\\\..*\"})",
+          "legendFormat": "{{consumergroup}}",
+          "refId": "A"
         }
       ]
     }

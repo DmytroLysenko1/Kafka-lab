@@ -7,10 +7,11 @@ something to remember when running anything.
 | Group | KR | Experiments |
 |---|---|---|
 | [`kafka_internals/`](kafka_internals/) | KR1 — fundamentals and internals | exp-01 partition keys · exp-02 hot partition · exp-03 segments and retention · exp-04 ISR and leader election (plus exp-04c, the timer varied) · exp-15 partition reassignment |
-| [`transaction_guarantee/`](transaction_guarantee/) | KR2 — delivery guarantees, and KR4 — operating under failure | exp-05…07 delivery semantics (plus exp-05b/06b, the autocommit flavours) · exp-08 acks · exp-09 reordering · exp-10a–d transactions · exp-11 poison pill · exp-12 schema evolution · exp-13 broker outage · exp-14 rebalance strategies · exp-14b static membership · exp-16 lag and backpressure · exp-17 batching sweep · exp-17b saturation |
+| [`transaction_guarantee/`](transaction_guarantee/) | KR2 — delivery guarantees, and KR4 — operating under failure | exp-05…07 delivery semantics (plus exp-05b/06b, the autocommit flavours) · exp-08 acks · exp-09 reordering · exp-10a–d transactions · exp-11 poison pill · exp-12 schema evolution · exp-18 retry chain under a locked merchant · exp-13 broker outage · exp-14 rebalance strategies · exp-14b static membership · exp-16 lag and backpressure · exp-17 batching sweep · exp-17b saturation |
 
 [`labkit/`](labkit/) is the instrument several experiments share: reading a topic to its end
-offsets, and waiting on the in-sync set instead of sleeping. It exists because four
+offsets, waiting on the in-sync set instead of sleeping, and restarting a consumer the way an
+orchestrator does (exp-11 and exp-18). It exists because four
 experiments wrote the same reader separately, and two of those copies once reported a
 short or mid-election read as a finding.
 

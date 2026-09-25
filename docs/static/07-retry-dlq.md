@@ -46,10 +46,10 @@ flowchart LR
     M["payments.main<br/>6 partitions"] --> H{"classify<br/>the failure"}
 
     H -->|"handled"| OK["commit the main offset"]
-    H -->|"transient:<br/>provider timeout"| R5["payments-consumer.retry.5s"]
+    H -->|"contended:<br/>merchant row locked"| R5["payments-consumer.retry.5s"]
     H -->|"poison:<br/>will not deserialize"| D["payments-consumer.dlq"]
 
-    R5 --> RC["retry-consumer<br/>pauses the partition<br/>until ts plus delay"]
+    R5 --> RC["tier stages, a group each<br/>pause only the waiting partition<br/>until ts plus delay"]
     RC -->|"fails again, attempt 2"| R1["payments-consumer.retry.1m"]
     R1 --> RC
     RC -->|"fails again, attempt 3"| R10["payments-consumer.retry.10m"]
@@ -57,7 +57,7 @@ flowchart LR
     RC -->|"attempts exhausted"| D
 
     D --> RP["dlq-replayer"]
-    RP -->|"after the bug is fixed,<br/>attempt reset to 0"| R5
+    RP -->|"after the lock is gone,<br/>as attempt 1 again"| R5
 ```
 
 *Fig. 7b — the same 5 seconds of waiting, moved off the partition that has healthy work
@@ -72,7 +72,7 @@ skip the chain entirely — see below.
 
 ## Why blocking is correct in the retry consumer
 
-Kafka has **no delayed delivery**. The delay is implemented by the retry consumer
+Kafka has **no delayed delivery**. The delay is implemented by the tier's consumer
 reading the record timestamp and pausing the partition until the delay has elapsed.
 That is safe here and forbidden in the main consumer for one specific reason: inside
 `payments-consumer.retry.5s` every record carries the same delay and the broker stamps
@@ -82,6 +82,26 @@ pattern removes.
 
 Pausing is not the same as sleeping in the handler: the client keeps polling and
 heartbeating, so the group does not consider the member dead.
+
+**Pause the partition, not the topic.** The first implementation paused the whole tier and
+slept until its head record was due — correct only while every record in the tier arrived
+after the one being waited for. After an outage that is false: the tier holds a backlog of
+records long due, a poll returns only part of it, and a fresh record fetched from another
+partition in the same poll put the rest of the backlog to sleep for a full tier delay. A
+fresh-context review found it; `make test-integration` now reproduces it (600 due records on
+one partition, one fresh record on another: 11 s with the topic paused, no wait with the
+partition paused). The implementation in
+[`consumer.go`](../../internal/infrastructure/kafka/consumer.go) pauses only the partitions
+whose record is not due, gives each its own resume time, keeps fetching the others, and
+bounds each poll by the earliest resume time instead of sleeping. Each tier is a consumer
+group of its own, so a tier holding records for ten minutes never holds a rebalance of the
+main group.
+
+**A resumed partition waits for the fetch already in flight.** The broker holds a fetch open
+for up to `fetch.max.wait` when it has nothing new, and a partition resumed meanwhile joins
+only the next one. With franz-go's default of 5 s, exp-18 counted replayed payments 5–8 s
+after the replay into a 3 s tier. The tiers fetch with a 500 ms wait; the main topic keeps
+the default, because it never pauses and data arriving ends its fetch at once.
 
 **The delay is counted from the moment a record entered the tier, so the tiers run on
 `LogAppendTime`.** The retry consumer forwards the record it received, and a forwarded
@@ -154,13 +174,27 @@ out of it on replay; only headers are added. A replayer that writes with a null 
 scatters one payment's events across partitions, and one that re-serialises the value
 registers a new schema subject for every tier ([09](09-schema-evolution.md)).
 
-The headers carry what a log line would have: original topic, partition and offset, the
-error class, the attempt count, the original event time, the time of the first failure,
-and the `trace_id`. That is enough to reconstruct what happened without digging through
-consumer logs that have since rotated. The error text is truncated to a kilobyte and never
-includes a stack trace: a dead letter is the original record plus its headers, and one
-that outgrows `max.message.bytes` cannot be written to the DLQ at all — the poison pill
-returns as a stuck partition.
+The headers carry what a log line would have. On the way into the first tier:
+`retry_origin_topic/partition/offset` — where the payment was first read — and
+`retry_first_failed_at`; on every hop, `retry_attempt`. Into the DLQ: `dlq_class`
+(`undecodable`, `refused` or `exhausted`, the filter a replay selects by), `dlq_reason`,
+`dlq_origin_*` (where it was archived from) and `dlq_archived_at`. The event's own time is
+in its payload. There is no `trace_id` yet, because this service does not trace. That is
+enough to reconstruct what happened without digging through consumer logs that have since
+rotated. The error text is truncated to a kilobyte and never includes a stack trace: a dead
+letter is the original record plus its headers, and one that outgrows `max.message.bytes`
+cannot be written to the DLQ at all — the poison pill returns as a stuck partition.
+
+**Every one of these headers is written, never appended, and none of them is trusted on the
+way in.** A producer can put any header on `payments.main`, ours included. The attempt
+count comes from the position of the stage in the chain, not from the header it replaces;
+the origin is overwritten on the first attempt; every `dlq_` header replaces one the record
+may already carry, because a reader takes the first header of a name and would otherwise
+read the producer's. One trust gap is left open deliberately: the inbox deduplicates by the
+`event_id` header, so a producer that can write to the topic can pre-empt a real payment's
+id. On this stand the broker has no authentication, and such a producer could as easily
+publish a payment outright; the fix is producer ACLs on every topic of the chain, not a
+check in the consumer.
 
 A DLQ you cannot replay from is a rubbish bin. `dlq-replayer` exists so that fixing the
 bug and reprocessing is one command, and so that the person doing it at 3 a.m. is not
@@ -234,10 +268,50 @@ removed, no commit rewound and nothing handled twice, where the inline retry had
 removed and a stale commit rewind a partition 1 726–1 732 records. The retry chain stays for what it is good at: one record failing among
 healthy ones.
 
+## What the service moves into the chain, and what it does not
+
+The handler's only dependency is Postgres, so the chain has exactly one failure to carry: a
+merchant row another transaction holds. `TotalsStore.Add` sets `lock_timeout` to 2 s for its
+own transaction, and Postgres's answer when it runs out — SQLSTATE `55P03` — becomes
+`merchants.ErrContended` at the repository boundary. That, and only that, goes into the
+chain. Postgres being unreachable is not a record's failure: the offset is held and the
+consumer stops, as before. A payment that cannot be decoded, or that the domain refuses,
+goes straight to the DLQ.
+
+exp-18 measured what that buys, with one merchant's row held for 30 s under 600 payments:
+without the chain every payment behind a contended one waited out the lock — 30.5 s and
+13 consumer restarts; with it all 594 healthy payments were counted while the row was still
+locked, the last at 17 s, and the six contended ones by 38.5–38.9 s through the 3 s and 6 s
+tiers into the 12 s one. With the row held past every tier, all six were archived as
+`exhausted`, replayed in 50 ms once it was released, and counted 3.0–3.5 s later. Every
+payment was counted once in every cell
+([exp-18](../../experiments/transaction_guarantee/exp-18-retry-chain/)).
+
+**The chain bounds the stall by the lock wait, not by the hold — and the lock wait is not
+one `lock_timeout`.** A contended payment still spends its wait inside the batch before it
+is moved, and Postgres applies `lock_timeout` to each lock acquisition, not to the
+statement: queued behind a tier's transaction that is already waiting on the row, the main
+stage waits up to 2 s for the tuple lock and up to 2 s more for the row. exp-18 saw eight
+waits for six payments, 16 of the 17 s. A batch therefore also has a budget of its own —
+20 s, after which the rest of it is rewound and fetched again — so that a partition full of
+one locked merchant's payments cannot hold the rebalance past its 60 s timeout, the failure
+exp-16 measured.
+
+**A lock on the whole table is not contention on one row.** A migration or a bulk update
+that holds every merchant makes every payment contended, and the chain carries all of them
+to the DLQ eleven minutes in. That is the outage case above; the chain does not detect it.
+
+**Reordering is harmless here, and the condition is written down.** A contended payment is
+overtaken by the payments behind it, and by other payments of the same merchant. That is
+safe in this service because each payment has one event and the merchant total is a sum,
+which does not care about order. The day a second event for the same payment appears — a
+capture, a refund — the section above applies: the later event has to follow the earlier
+one into the chain, not overtake it.
+
 ## To be measured
 
 | Run | What it shows | Status |
 |---|---|---|
 | exp-11 | poison pill: straight to DLQ and the partition keeps flowing, versus infinite retry and a permanently stuck partition | **measured**: with no dead letter route, 10 of 100 payments counted, the offset stuck at 10, 91 records never read, and 124–125 consumer restarts in 30 s. With one, all 100 counted and the record archived, in 207–322 ms ([exp-11](../../experiments/transaction_guarantee/exp-11-poison-pill/)) |
 | exp-16 | a 20 s outage with a member joining mid-way: retry inline, holding the batch, against pause-and-rewind | **measured**: the same lag, 7 940–8 501 records, either way. Inline: the member removed after the 8 s rebalance timeout, one commit refused, its next commit rewinding a partition 1 726–1 732 records, 1 739 handled twice in one run of three. Paused: none of that ([exp-16](../../experiments/transaction_guarantee/exp-16-lag-backpressure/)) |
-| one slow merchant among healthy ones | a single poll loop stalls every partition the member owns, not only the slow one's | not run — argued from the loop |
+| exp-18 | one merchant's row locked among 600 payments: contention held like any failure, against the chain, and the chain outlasted | **measured**: without the chain, the lock was the outage — healthy payments counted at +30.5 s, 13 restarts. With it, all 594 healthy payments counted while the row was locked, by +17 s; the contended ones through the tiers once it was released; held past every tier, archived as `exhausted` and replayed; every payment counted once ([exp-18](../../experiments/transaction_guarantee/exp-18-retry-chain/)) |

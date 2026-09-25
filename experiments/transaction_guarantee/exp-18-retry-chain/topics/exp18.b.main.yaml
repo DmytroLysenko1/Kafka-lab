@@ -1,0 +1,18 @@
+meta:
+  name: exp18.b.main
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-18, cell B, the retry chain, with the merchant locked for a while and then released.
+    Six partitions like payments.main, so the contended payments are spread over the
+    partitions the way a hot merchant's payments are.
+spec:
+  partitions: 6
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

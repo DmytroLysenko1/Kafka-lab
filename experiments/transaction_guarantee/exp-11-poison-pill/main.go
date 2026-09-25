@@ -18,6 +18,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
@@ -33,14 +34,21 @@ var errListing = errors.New("exp-11: the cluster did not answer what the count i
 // deadLetterSink is what the consumer needs and this experiment swaps: a real topic in one
 // cell, a refusal in the other.
 type deadLetterSink interface {
-	Send(ctx context.Context, record *kgo.Record, reason string) error
+	Retry(ctx context.Context, record *kgo.Record, topic string, attempt int) error
+	DeadLetter(ctx context.Context, record *kgo.Record, reason error, class kafka.Class) error
 }
 
 // refusingDeadLetters is the "we never configured one" case, and it is the interesting one:
 // the consumer holds the offset rather than dropping the record, so the partition stops.
+// Nothing in this experiment is contended, so a retry never reaches it; it refuses that too
+// rather than pretend to have stored something.
 type refusingDeadLetters struct{}
 
-func (refusingDeadLetters) Send(context.Context, *kgo.Record, string) error {
+func (refusingDeadLetters) Retry(context.Context, *kgo.Record, string, int) error {
+	return errNoDeadLetterRoute
+}
+
+func (refusingDeadLetters) DeadLetter(context.Context, *kgo.Record, error, kafka.Class) error {
 	return errNoDeadLetterRoute
 }
 
@@ -57,15 +65,6 @@ func (l *lines) printf(format string, args ...any) {
 	}
 	_, l.err = fmt.Fprintf(l.out, format, args...)
 }
-
-// unwatched stands in for the metrics the services publish: this experiment counts what
-// reached the database and the topics, not what a scrape would have shown.
-type unwatched struct{}
-
-func (unwatched) Handled(bool, time.Duration) {}
-
-func (unwatched) DeadLettered(string) {}
-func (unwatched) Failed(string)       {}
 
 type settings struct {
 	phase        string
@@ -211,18 +210,17 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 		storage,
 		time.Now,
 	)
-	// A restart is a new client, not a second call on the old one: franz-go keeps its own
-	// fetch position, so reusing the client would walk past the record that killed it and
-	// measure the harness instead of the service.
-	newConsumer := func() (*kafka.Consumer, error) {
-		return kafka.NewConsumer(brokers(), s.topic, s.group, record, dead, slog.New(slog.DiscardHandler), unwatched{})
+	// A restart is a new client: labkit.Supervise explains why reusing one would measure
+	// the harness instead of the service.
+	newConsumer := func() (labkit.Runner, error) {
+		return kafka.NewConsumer(brokers(), kafka.Stage{Topic: s.topic, Group: s.group}, record, dead, slog.New(slog.DiscardHandler), labkit.Unwatched{})
 	}
 
 	bounded, cancel := context.WithTimeout(ctx, s.budget)
 	defer cancel()
 
 	started := time.Now()
-	restarts, drained, err := supervise(bounded, newConsumer, func() bool { return handled(ctx, storage, s) >= int64(s.records) })
+	restarts, drained, err := labkit.Supervise(bounded, newConsumer, func() bool { return handled(ctx, storage, s) >= int64(s.records) })
 	if err != nil {
 		return err
 	}
@@ -235,73 +233,11 @@ func deadLetters(s *settings) (deadLetterSink, func(), error) {
 	if s.dlqTopic == "" {
 		return refusingDeadLetters{}, func() {}, nil
 	}
-	dead, err := kafka.NewDeadLetters(brokers(), s.dlqTopic)
+	dead, err := kafka.NewDetours(brokers(), s.dlqTopic, labkit.Unwatched{})
 	if err != nil {
 		return nil, func() {}, err
 	}
 	return dead, dead.Close, nil
-}
-
-const restartBackoff = 200 * time.Millisecond
-
-// supervise runs the consumer the way an orchestrator does: when it dies, a new one comes
-// up, reads from the last committed offset, and meets the same record again. Counting those
-// restarts is how a stall shows up as a number instead of as a feeling.
-func supervise(ctx context.Context, newConsumer func() (*kafka.Consumer, error), done func() bool) (restarts int, drained bool, err error) {
-	for ctx.Err() == nil {
-		if done() {
-			return restarts, true, nil
-		}
-
-		consumer, err := newConsumer()
-		if err != nil {
-			return restarts, false, err
-		}
-		crashed := runUntil(ctx, consumer, done)
-		consumer.Close()
-
-		if crashed {
-			restarts++
-			// A sleep that ignores the budget keeps the run going past it, and the overshoot
-			// lands in the number this experiment publishes.
-			select {
-			case <-ctx.Done():
-				return restarts, done(), nil
-			case <-time.After(restartBackoff):
-			}
-		}
-	}
-	return restarts, done(), nil
-}
-
-// runUntil returns when the consumer dies, when the work is done, or when the budget runs
-// out — and in every case it joins the consumer before handing the client back to be closed.
-func runUntil(ctx context.Context, consumer *kafka.Consumer, done func() bool) (crashed bool) {
-	running, stop := context.WithCancel(ctx)
-	defer stop()
-
-	finished := make(chan error, 1)
-	go func() { finished <- consumer.Run(running) }()
-
-	watching := time.NewTicker(100 * time.Millisecond)
-	defer watching.Stop()
-
-	for {
-		select {
-		case err := <-finished:
-			return err != nil
-		case <-watching.C:
-			if done() {
-				stop()
-				<-finished
-				return false
-			}
-		case <-ctx.Done():
-			stop()
-			<-finished
-			return false
-		}
-	}
 }
 
 func handled(ctx context.Context, storage *postgres.Storage, s *settings) int64 {

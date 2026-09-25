@@ -92,6 +92,32 @@ payment_events_failed_total{stage="handle"} 2
 	}
 }
 
+// A tier is a place, not an error: traffic that stops at the first tier is contention that
+// cleared, and traffic reaching the last is contention that did not. Summed into one
+// number, the two look the same until the exhausted dead letters arrive.
+func TestRecordsMovedAsideAreCountedByTheTierTheyWentTo(t *testing.T) {
+	observed := metrics.New()
+
+	observed.Retried("payments-consumer.retry.5s")
+	observed.Retried("payments-consumer.retry.5s")
+	observed.Retried("payments-consumer.retry.1m")
+	observed.DeadLettered("exhausted")
+
+	expected := `
+# HELP payment_events_dead_lettered_total Payment events archived to the dead letter topic, by why.
+# TYPE payment_events_dead_lettered_total counter
+payment_events_dead_lettered_total{reason="exhausted"} 1
+# HELP payment_events_retried_total Payment events moved aside into a retry tier, by the tier they went to.
+# TYPE payment_events_retried_total counter
+payment_events_retried_total{tier="payments-consumer.retry.1m"} 1
+payment_events_retried_total{tier="payments-consumer.retry.5s"} 2
+`
+	if err := testutil.GatherAndCompare(observed.Gatherer(), strings.NewReader(expected),
+		"payment_events_retried_total", "payment_events_dead_lettered_total"); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestRequestsAreCountedByRouteAndStatus(t *testing.T) {
 	observed := metrics.New()
 
