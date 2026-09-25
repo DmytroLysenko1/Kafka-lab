@@ -6,10 +6,16 @@ the producers or the consumers, and who decides?
 KR3 · no interactive twin: the answer is a deploy order and a decision table, and both
 read better sitting still.
 
-The change under test in both figures is the one the registry is happiest to accept:
-**`merchant_ref` is deleted from `PaymentCaptured`**. Under `BACKWARD` that is a legal
-change — a v2 reader can read v1 data, because it simply ignores a field it no longer
-knows about. Nothing in that sentence says anything about a v1 reader.
+The change under test in both figures is **`merchant_ref` deleted from `PaymentCaptured`**.
+Which levels accept it is not what the level names suggest, and this stand measured it
+rather than assuming: on Apicurio 3.0.9 `BACKWARD` **refuses** the deletion (exp-12c) while
+`FULL` **accepts** it (exp-12f). So the figures below run under `FULL` — the strictest
+level the registry offers — because that is where the change actually gets through, and
+because passing the strictest check turns out not to mean the deploy is safe.
+
+That inversion is worth stating plainly: if `FULL` were `BACKWARD` and `FORWARD` together,
+it could not accept what `BACKWARD` refuses. It does, on this version, which makes it a
+defect of Apicurio 3.0.9 rather than a property of compatibility modes in general.
 
 ## Case A — producers deployed first
 
@@ -17,16 +23,16 @@ knows about. Nothing in that sentence says anything about a v1 reader.
 sequenceDiagram
     autonumber
     participant P as payments-api v2
-    participant SR as Schema Registry<br/>compatibility BACKWARD
+    participant SR as Schema Registry<br/>compatibility FULL
     participant T as payments.main
     participant C1 as payments-consumer v1<br/>still running
 
     P->>SR: register PaymentCaptured v2, merchant_ref deleted
-    Note over SR: the only compatibility check that will ever run:<br/>once, here, against v1 — "can a v2 reader read v1 data?"<br/>Nothing is checked again at read time
-    SR-->>P: accepted, schema id 47
+    Note over SR: the only compatibility check that will ever run:<br/>once, here, against the previous version.<br/>Nothing is checked again at read time
+    SR-->>P: accepted, schema id 47 (exp-12f)
 
     rect rgba(229, 57, 53, 0.16)
-        Note over P,C1: v2 bytes now meet v1 readers — the direction<br/>BACKWARD makes no promise about, and never checked
+        Note over P,C1: v2 bytes now meet v1 readers, with the registry's<br/>strictest verdict already given and never revisited
         P->>T: produce: magic 0x00 + id 47 + payload without merchant_ref
         T-->>C1: those bytes
         C1->>SR: GET schema 47, cached after the first call
@@ -34,10 +40,12 @@ sequenceDiagram
     end
 ```
 
-*Fig. 9a — the registry's verdict covers one direction only, so deploying producers first
-under `BACKWARD` opens a window it never examined; the two formats fail it differently, and
-the Protobuf ending is the worse one because nothing anywhere reports a problem (exp-12c,
-exp-12e2).*
+*Fig. 9a — the registry's verdict is given once, at registration, and `FULL` gave it
+(exp-12f); deploying producers first then puts v2 bytes in front of v1 readers with nothing
+checking again. The two formats fail that differently, and the Protobuf ending is the worse
+one because nothing anywhere reports a problem (exp-12e2). Under `BACKWARD` this deploy
+never starts — the registration is refused outright (exp-12c), which is the one place the
+strictest setting is the more dangerous one.*
 
 ## Case B — consumers deployed first
 
@@ -45,7 +53,7 @@ exp-12e2).*
 sequenceDiagram
     autonumber
     participant P as payments-api v1<br/>not yet rolled
-    participant SR as Schema Registry<br/>compatibility BACKWARD
+    participant SR as Schema Registry<br/>compatibility FULL
     participant T as payments.main
     participant C2 as payments-consumer v2
 
@@ -61,9 +69,9 @@ sequenceDiagram
     Note over P,C2: only now do producers roll to v2, and the bytes they<br/>write are read by consumers that were built for them
 ```
 
-*Fig. 9b — same change, same registry setting, no window at all: `BACKWARD` is not a
-property of the schema, it is an instruction about deploy order, and this is what obeying
-it looks like (exp-12).*
+*Fig. 9b — same change, same registry setting, no window at all: a compatibility level is
+not a property of the schema, it is an instruction about deploy order, and this is what
+obeying it looks like (exp-12).*
 
 ## The wire format is not bare Avro or bare Protobuf
 
@@ -131,7 +139,7 @@ column is the one that applies here.
 |---|---|---|
 | add a field **with** a default | backward compatible | n/a — proto3 has no defaults and no `required`: every field is optional on the wire |
 | add a field **without** a default | **rejected** under `BACKWARD` | n/a — the concept does not exist; adding a field is compatible in both directions |
-| delete a field | allowed under `BACKWARD`, rejected under `FORWARD`/`FULL` | allowed by the checker — an old reader treats it as an unknown field |
+| delete a field | allowed under `BACKWARD`, rejected under `FORWARD`/`FULL` | measured on Apicurio 3.0.9, the opposite way round: **refused** under `BACKWARD` (exp-12c), **accepted** under `FULL` (exp-12f). An old reader does not see an unknown field — it still has the field in its descriptor and the bytes simply omit it, so it decodes as the zero value, silently |
 | change a field's type | rejected | rejected (`FIELD_SCALAR_KIND_CHANGED`) |
 | rename a field | rejected unless an alias is declared | wire format is tag-based, so the checker allows it — JSON mapping breaks, the binary payload does not |
 | **reuse a deleted field number** | n/a | the real danger: structurally valid, silently decodes old bytes into the new field. Only `reserved` prevents it, and only if you remember to write it |
@@ -180,8 +188,8 @@ quoting — and on this version one expectation did not survive contact (exp-12c
 | exp-12d2 | the same reuse with a **different** wire type | `BACKWARD` | recorded — expected to be the less dangerous variant, because a wire-type mismatch is visible to the decoder | not run |
 | exp-12e | a v1 consumer reads v2 data after 12a | — | decodes, unknown field ignored | **decoded and counted**, the unknown field skipped |
 | exp-12e2 | a v1 consumer reads v2 data after 12c (Fig. 9a) | — | proto3: decodes with the field empty, no error raised anywhere — the ending this file exists to make visible | **confirmed**: no decoding error anywhere; `amount_minor` arrives as 0, and the only thing that refused the record was the domain rule that an authorised amount is positive. Without it the total would have taken a payment of zero and reported success |
-| exp-12f | delete a field | `FULL` | registry verdict recorded | **accepted** — `FULL` is not `BACKWARD` plus more: it lets through the deletion that `BACKWARD` refuses |
-| exp-12g | any of the three changes on a new subject | default | — | **all accepted**: a new subject starts at `NONE`, so the registry protects nothing until the level is set |
+| exp-12f | delete a field | `FULL` | registry verdict recorded | **accepted** — on Apicurio 3.0.9 `FULL` lets through the deletion that `BACKWARD` refuses. If `FULL` were `BACKWARD` and `FORWARD` together it could not, so this is a defect of this registry version, not a property of compatibility modes — and a reason to measure the registry you actually run rather than reason from the level names |
+| exp-12g | any of the three changes on a new subject | whatever the subject arrives with | — | **all accepted** — so whatever that level is, it enforces nothing. The run now also prints the level the server reports for a fresh subject and for the registry as a whole, before anything sets it, rather than leaving the name to be inferred from the behaviour |
 
 ## Licensing, because it is a real question
 

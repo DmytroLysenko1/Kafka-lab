@@ -125,7 +125,7 @@ partition 0, then a restart, then an explicit preferred election.
 | Phase | Leaders | Smallest ISR | Writes accepted, `acks=all` |
 |---|---|---|---|
 | baseline | `[3 1 2]` | 3 of 3 | 300 of 300 |
-| kafka3 killed | `[1 1 2]` | **2**, with `min.insync.replicas` 2 as the broker reports it | **300 of 300** |
+| kafka3 killed | `[1 1 2]` | **2**, with `min.insync.replicas` 2 as the broker reports it | **300 of 300** — written *after* the controller finished re-electing, so this is a settled two-of-three cluster accepting writes, not a measurement of the kill itself. The run never reads the topic back, so it says nothing about whether anything acknowledged was lost |
 | kafka3 back | `[1 1 2]` | 3 of 3 | — |
 | after preferred election | `[3 1 2]` | 3 of 3 | — |
 

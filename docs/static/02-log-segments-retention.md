@@ -138,7 +138,7 @@ listed rather than quietly dropped:
 | Run | What it shows | Status |
 |---|---|---|
 | exp-03b | **segment geometry from a real log dump** (`kafka-dump-log.sh`): base offsets, segment sizes, what the index files hold | TBD — exp-03 reads the log as a consumer, so it sees records, never segment boundaries |
-| exp-03c | **tombstone removal** after `delete.retention.ms` elapses — the second cleaner pass, not the one that compacts values | TBD — `exp03.compact.yaml` sets `delete.retention.ms: 1000` expecting them to vanish inside the run, and in every run so far all 10 survived |
+| exp-03c | **tombstone removal** after `delete.retention.ms` elapses — the second cleaner pass, not the one that compacts values | `exp03.compact.yaml` sets `delete.retention.ms: 1000` expecting them to vanish inside the run, and in every run so far all 10 survived — which is the expected outcome, not an open question: the clock does not start when the tombstone is written. A tombstone is removed by a *later* cleaner pass than the one that compacts the values, so a single-pass run cannot drop it whatever the setting says. Measuring it needs a second pass forced after the delay, which this run does not do |
 | exp-03d | **data outliving `retention.ms`** because it is trapped in an open segment | TBD — this is the "a topic holds more than its setting says" claim in the section above, and exp-03 showed the opposite: it rolls segments continuously, so aged data always lands in a closed segment and is always dropped |
 
 exp-03d is the one that matters for the retention section: until it runs, "effective

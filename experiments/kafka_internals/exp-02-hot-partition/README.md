@@ -24,9 +24,9 @@ exactly the same data.
 | Consumers | Time to drain | Idle members |
 |---|---|---|
 | 1 | 5.63 s | 0 |
-| 2 | 5.49 s | 0 |
-| 3 | 5.47 s | 0 |
-| 6 | 5.19 s | 0 |
+| 2 | 5.12 s | 0 |
+| 3 | 4.95 s | 0 |
+| 6 | 4.81 s | 0 |
 | 7 | 4.76 s | 1 |
 
 85% of the records landed on one partition — the hot merchant's 80% plus five of the

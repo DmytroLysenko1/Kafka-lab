@@ -23,12 +23,16 @@ ceiling.
 | [exp-10d](exp-10d-hanging-transaction/) | a transaction left open | **unrelated records invisible to `read_committed` for 23.2 s behind a 20 s timeout** |
 | [exp-14](exp-14-rebalance-strategies/) | a second consumer joins: eager, cooperative-sticky and KIP-848 | **eager revoked all six partitions for 39–75 ms; cooperative stopped only the three that moved, for 0.52–0.68 s; KIP-848 for 4.9–6.5 s, around its heartbeat; nothing lost or handled twice** |
 | [exp-14b](exp-14b-membership/) | the same member leaving, with and without `group.instance.id` | **dynamic: back in 0.6 s, and a restart costs a second rebalance; static: a restart costs nothing but a death costs the 12 s session timeout** |
+| [exp-11](exp-11-poison-pill/) | one record the consumer cannot decode, with and without a dead letter route | **without: 10 of 100 payments counted, the offset stuck, 91 records never read, the consumer restarting 124–125 times in 30 s; with: all 100, archived in 207–322 ms** |
+| [exp-12](exp-12-schema-evolution/) | three schema changes against three compatibility levels, then the bytes on the wire | **a subject nobody configured accepts every one of them; `FULL` accepts a deletion `BACKWARD` refuses on Apicurio 3.0.9; a removed or retyped amount reaches the consumer as zero with no decoding error** |
+| [exp-13](exp-13-broker-outage/) | brokers killed under the running service at 10 payments/s | **not one payment refused; one broker down cost 88–91 records of backlog, two cost 469–523 with an 18–24 s catch-up — and the cluster reported 0 under-replicated throughout, having lost the quorum that would update it** |
 | [exp-16](exp-16-lag-backpressure/) | a 20 s dependency outage with a join in the middle: retry inline against pause-and-rewind | **the same lag either way; retrying inline got the member removed, its stale commit rewound the group 1 726–1 732 records in every run and 1 739 were handled twice in one of three; pausing: no removal, no rewind, no duplicates** |
 | [exp-17](exp-17-batching-sweep/) | linger × batch size × codec under fixed load | **linger decides batching, batching decides compression: zstd 2.9× → 5.65× on the same bytes; Java's default is 5 ms, not 0** |
 | [exp-17b](exp-17b-saturation/) | the same producer flat out | **without compression the producer stalled at 45–89 MB/s on the wire; zstd delivered 2.1–4.7× the records for 34–67% more CPU per megabyte** |
 
 exp-08, exp-09 and exp-10a…c read their logs back through [`../labkit/`](../labkit/), which
-refuses a short read and a partition mid-election; exp-10d reads offsets with its own loop,
+refuses a short read, a partition mid-election, and an offset listing that did not answer;
+exp-10d and exp-11 read their offsets through the same guard,
 exp-05…07 and their autocommit siblings count what landed in Postgres, exp-14 and exp-16
 record every record their consumers handle, and exp-17 reads the producer's own per-batch
 metrics. Each is a separate experiment with its own topic, runs and logs, because each is a

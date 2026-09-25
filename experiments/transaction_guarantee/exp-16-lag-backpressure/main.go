@@ -228,6 +228,17 @@ func groupLag(ctx context.Context, admin *kadm.Client, group string) (int64, err
 	if err != nil {
 		return 0, fmt.Errorf("exp-16: committed offsets: %w", err)
 	}
+	// A partition whose listing failed carries offset -1, and max(-1-at, 0) is 0. Left
+	// unchecked, a reading that did not work is indistinguishable from no lag — in the one
+	// experiment whose whole subject is lag. sampleOnce already counts a failed reading
+	// apart from a zero one; it can only do that if this says so.
+	if err := ends.Error(); err != nil {
+		return 0, fmt.Errorf("exp-16: end offsets of %s: %w", topic, err)
+	}
+	if err := committed.Error(); err != nil {
+		return 0, fmt.Errorf("exp-16: committed offsets of %s: %w", group, err)
+	}
+
 	var lag int64
 	ends.Each(func(end kadm.ListedOffset) {
 		at := int64(0)

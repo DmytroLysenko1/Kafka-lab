@@ -59,7 +59,9 @@ which of your mistakes is possible.
 **refused all 2 000 writes**. With `acks=1` and the followers held back, the producer
 reported success for **2 000 records that were then lost**.
 
-**Monday.** `acks=all` does not make writes safe; it makes *unsafe writes fail*. That is a
+**Monday.** `acks=all` does not make writes safe on its own — it is `min.insync.replicas`
+that decides how many copies count, and this run had it at 3. Together they make *unsafe
+writes fail*; `acks=all` at `min.insync.replicas=1` succeeds from a single machine. That is a
 different promise, and it is the one you want — but only if the thing behind the producer
 can hold what the broker refuses. Which is the next section.
 
@@ -111,9 +113,11 @@ own database.
 **What everyone says.** We have a registry, so incompatible schemas cannot be published.
 
 **What the run said.** Three changes, three compatibility levels, a fresh subject each
-time. A new subject starts at **`NONE`** and accepts every breaking change. And the levels
-do not nest the way their names suggest: on Apicurio 3.0.9, **`FULL` accepts a field
-deletion that `BACKWARD` refuses.**
+time. **A subject nobody configured accepts every one of those breaking changes** — the
+registry being installed protects nothing until a level is set on the subject. And the
+levels do not nest the way their names suggest: on Apicurio 3.0.9, **`FULL` accepts a field
+deletion that `BACKWARD` refuses** — which, since `FULL` is supposed to be both directions
+at once, is a defect of that version rather than a lesson about compatibility modes.
 
 Then the same changes as records, read by a consumer built against the old schema. No
 decoding error anywhere — valid schema id, content parser, `amount_minor` arriving as
@@ -168,8 +172,9 @@ committed with almost nothing handled, a healthy cluster with a growing queue, a
 move finishing in two seconds. **The instrument is part of the experiment**, and a run that
 disagrees with itself is telling you about the run.
 
-What this repository does about it: the log of a superseded run is deleted rather than kept
-beside the new one, and the journal says what was wrong with it. A number measured with a
+What this repository does about it: a superseded run is moved into a `results/superseded/`
+folder with a README saying what was wrong with it, so the withdrawn number stays auditable
+without being quotable, and the journal records the correction. A number measured with a
 different instrument does not belong in the same table.
 
 ---
