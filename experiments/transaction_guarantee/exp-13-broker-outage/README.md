@@ -25,7 +25,7 @@ Two runs, 2026-09-25, in [`results/`](results/).
 **The front door never faltered.** Not one payment was refused in either cell, because
 taking a payment is a write to Postgres and nothing else. The events it owes Kafka wait in
 the same transaction that stored it. That is the whole purpose of the outbox, and this is
-what it looks like as a number: 304 payments accepted while the cluster could not take a
+what it looks like as a number: 303 payments accepted while the cluster could not take a
 single record.
 
 **One broker down is a pause, not an outage.** `min.insync.replicas=2` with three replicas
