@@ -1301,3 +1301,66 @@ than argued.
 
 **Carried into:** the measured matrix in [case 09](static/09-schema-evolution.md), which
 until now was a table of expectations.
+
+## exp-13 — the front door held, and the cluster lied about its own health
+
+Date: 2026-09-25 · [run logs](../experiments/transaction_guarantee/exp-13-broker-outage/results/) ·
+`make exp-13` — two runs
+
+**Hypothesis.** With the outbox in place, killing brokers under load should not cost a
+single payment: the API writes to Postgres, the events wait there, and the relay catches up
+afterwards. The backlog should grow while the cluster is unwell and fall when it is back.
+
+**Setup.** Ten payments a second through the real API for ninety seconds, with the real
+relay publishing to a topic of three partitions, RF 3, `min.insync.replicas=2`. At twenty
+seconds the run kills brokers — one in cell A, two in cell B — and brings them back thirty
+seconds later. The kill happens from inside the run so that it lands on the same clock as
+the samples, which are taken twice a second: outbox backlog from Postgres, partition state
+from the cluster's metadata.
+
+**Result.**
+
+| | one broker down | two brokers down |
+|---|---|---|
+| payments accepted during the outage | 302 · 302 | 303 · 303 |
+| payments refused | **0** | **0** |
+| peak backlog | 88 · 91 | 469 · 523 |
+| cluster's own account of itself | 3 under-replicated | **0 under-replicated, 0 leaderless** |
+| back to the pre-outage backlog | already caught up on return | 18.3 s · 24.2 s |
+
+**What was expected and happened.** Not one payment was refused in either cell. One broker
+down is a leader election rather than an outage: about a hundred records pile up while new
+leaders are chosen, and the backlog drains before the broker is even back. Two brokers down
+is the case the outbox is for — nothing publishes for thirty seconds, four to five hundred
+records wait in Postgres, and the relay works them off in fifteen to twenty seconds while
+payments keep arriving.
+
+**What was not expected.** In cell B the cluster reported zero under-replicated partitions
+and zero partitions without a leader, for the entire outage. That is not a measurement
+error — it survived three separate fixes to the instrument. All three nodes here are
+controllers, so killing two leaves no quorum; with no controller there is nothing to update
+the metadata, and the surviving broker goes on serving the picture it had before the kill.
+`kafka-topics.sh --describe` does not even manage that: it times out on
+`listPartitionReassignments`, which needs the controller.
+
+So the panel labelled *under-replicated partitions* is not a health check for a cluster
+that has lost its quorum — it is a report from a cluster that can no longer tell you
+anything. The number that did move, within a second, in both cells, was the outbox backlog,
+read from the service's own database: the one component the outage could not reach.
+
+**Four lies the instrument told first, all the same lie.** Absence of data rendered as
+zero. It counted under-replicated partitions across the whole stand and reported 107 of
+them as this run's. Scoped to the topic, it counted the lines of `kafka-topics.sh` output —
+which is empty, with warnings on stderr, when brokers are missing — and called that a
+healthy cluster. Reading metadata through `kadm` instead, it ranged over a response that
+did not contain the topic and produced zeros a third time. And after all three were fixed,
+the backlog read still came back as `-1` on failure, which the drain check compared with
+`<=`: a database outage would have been reported as a drained queue. That fourth one was
+found by a fresh-context review, after the author had written the rule three times and not
+applied it to the fourth number on the same line — which is the whole argument for reading
+your own diff with someone else's eyes. A reading nobody could take prints as `unknown`
+now, and the zeros in cell B are the ones that survived all four fixes.
+
+**Carried into:** the exp-13 row of [case 06](static/06-transactional-outbox.md), and the
+runbook that comes next — where "watch the backlog, not the cluster's opinion of itself" is
+the first line worth writing.

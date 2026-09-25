@@ -1,0 +1,24 @@
+exp-13 — a broker outage under load: does the front door keep answering, and what piles up
+date: 2026-09-25-030252
+load: 10 payments/s for 90s; brokers killed at 20s for 30s
+
+== cell A: one broker down — still above min.insync.replicas ==
+phase                    seconds        accepted    refused  backlog (max)   under-repl  no leader
+before the kill          0–20                202          0              5            0          0
+brokers 1 down           20–50               302          0             91            3          0
+after they came back     50–90               395          0              1            3          0
+
+peak backlog: 91 records
+backlog back to its pre-outage level (5 records) 100ms after the brokers came back
+outbox drained 500ms after the run stopped taking payments
+
+== cell B: two brokers down — below min.insync.replicas ==
+phase                    seconds        accepted    refused  backlog (max)   under-repl  no leader
+before the kill          0–20                204          0              4            0          0
+brokers 1,2 down         20–51               303          0            303            0          0
+after they came back     51–90               392          0            523            3          0
+
+peak backlog: 523 records
+backlog back to its pre-outage level (4 records) 24.2s after the brokers came back
+outbox drained 500ms after the run stopped taking payments
+
