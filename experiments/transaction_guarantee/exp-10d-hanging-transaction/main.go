@@ -16,6 +16,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+
+	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 )
 
 const (
@@ -163,9 +165,15 @@ func stableAndNewest(ctx context.Context, cfg *settings) (int64, int64, error) {
 	if err != nil {
 		return 0, 0, fmt.Errorf("exp-10d: high watermark: %w", err)
 	}
-	stable, _ := lso.Lookup(topic, 0)
-	newest, _ := hw.Lookup(topic, 0)
-	return stable.Offset, newest.Offset, nil
+	stable, err := labkit.OffsetAt(lso, topic, 0)
+	if err != nil {
+		return 0, 0, fmt.Errorf("exp-10d: %w", err)
+	}
+	newest, err := labkit.OffsetAt(hw, topic, 0)
+	if err != nil {
+		return 0, 0, fmt.Errorf("exp-10d: %w", err)
+	}
+	return stable, newest, nil
 }
 
 // timeToSee reads from the start with the given isolation level and reports how long after
