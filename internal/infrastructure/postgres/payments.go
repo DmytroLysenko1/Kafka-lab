@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
-	"github.com/DmytroLysenko1/Kafka-lab/internal/application/payments"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/payment"
 )
 
@@ -15,7 +15,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (merchant_id, idempotency_key) DO NOTHING`
 
 const selectPaymentByKey = `
-SELECT id, amount_minor, currency FROM payments WHERE merchant_id = $1 AND idempotency_key = $2`
+SELECT id, amount_minor, currency, status, authorized_at
+FROM payments WHERE merchant_id = $1 AND idempotency_key = $2`
 
 const insertOutbox = `
 INSERT INTO outbox (aggregate_id, event_type, payload, occurred_at) VALUES ($1, $2, $3, $4)`
@@ -35,10 +36,11 @@ func NewPaymentStore(storage *Storage) *PaymentStore {
 // the merchant. The unique key on (merchant_id, idempotency_key) is what makes it one row.
 // It refuses to run outside a transaction, because the payment and the event it publishes
 // would then land in two of them, and a crash between the two would tell consumers about a
-// payment the database never kept.
-func (s *PaymentStore) CreateOrGet(ctx context.Context, authorized *payment.Payment, idempotencyKey string) (payment.ID, bool, error) {
+// payment the database never kept. When the key is taken it returns the payment stored
+// under it; whether the replay may stand is for the payment to say, not for the store.
+func (s *PaymentStore) CreateOrGet(ctx context.Context, authorized *payment.Payment, idempotencyKey string) (*payment.Payment, bool, error) {
 	if _, inside := transaction(ctx); !inside {
-		return payment.ID{}, false, fmt.Errorf("postgres.CreateOrGet: %w", ErrOutsideTransaction)
+		return nil, false, fmt.Errorf("postgres.CreateOrGet: %w", ErrOutsideTransaction)
 	}
 
 	inserted, err := s.storage.conn(ctx).Exec(ctx, insertPayment,
@@ -51,52 +53,58 @@ func (s *PaymentStore) CreateOrGet(ctx context.Context, authorized *payment.Paym
 		authorized.AuthorizedAt(),
 	)
 	if err != nil {
-		return payment.ID{}, false, fmt.Errorf("postgres.CreateOrGet %s: %w", authorized.ID(), errors.Join(payment.ErrStorage, err))
+		return nil, false, fmt.Errorf("postgres.CreateOrGet %s: %w", authorized.ID(), errors.Join(payment.ErrStorage, err))
 	}
 	if inserted.RowsAffected() == 0 {
-		return s.storedUnder(ctx, authorized, idempotencyKey)
+		stored, err := s.storedUnder(ctx, authorized.Merchant(), idempotencyKey)
+		return stored, false, err
 	}
 	if err := s.appendEvents(ctx, authorized); err != nil {
-		return payment.ID{}, false, err
+		return nil, false, err
 	}
-	return authorized.ID(), true, nil
+	return authorized, true, nil
 }
 
-// storedUnder reads the payment the key already bought and lets the payment itself say
-// whether the replay asks for the same thing.
-func (s *PaymentStore) storedUnder(ctx context.Context, requested *payment.Payment, idempotencyKey string) (payment.ID, bool, error) {
-	merchant := requested.Merchant()
-
-	var (
-		stored   string
-		minor    int64
-		currency string
-	)
-	row := s.storage.conn(ctx).QueryRow(ctx, selectPaymentByKey, merchant.String(), idempotencyKey)
-	if err := row.Scan(&stored, &minor, &currency); err != nil {
-		return payment.ID{}, false, fmt.Errorf("postgres.CreateOrGet replay %s: %w", merchant, errors.Join(payment.ErrStorage, err))
-	}
-
-	id, err := payment.ParseID(stored)
+// storedUnder rebuilds the payment the key already bought, as it was stored. A row that
+// does not make a valid payment is storage failure: the CHECK constraints should have
+// made it impossible, and comparing a replay against it would compare against nonsense.
+func (s *PaymentStore) storedUnder(ctx context.Context, merchant payment.MerchantID, idempotencyKey string) (*payment.Payment, error) {
+	var row storedPayment
+	err := s.storage.conn(ctx).QueryRow(ctx, selectPaymentByKey, merchant.String(), idempotencyKey).
+		Scan(&row.id, &row.minor, &row.currency, &row.status, &row.authorizedAt)
 	if err != nil {
-		return payment.ID{}, false, fmt.Errorf("postgres.CreateOrGet replay %s: %w", merchant, errors.Join(payment.ErrStorage, err))
+		return nil, fmt.Errorf("postgres.CreateOrGet replay %s: %w", merchant, errors.Join(payment.ErrStorage, err))
 	}
-	amount, err := money(minor, currency)
+	stored, err := row.toDomain(merchant)
 	if err != nil {
-		return payment.ID{}, false, fmt.Errorf("postgres.CreateOrGet replay %s: %w", merchant, errors.Join(payment.ErrStorage, err))
+		return nil, fmt.Errorf("postgres.CreateOrGet replay %s: %w", merchant, errors.Join(payment.ErrStorage, err))
 	}
-	if !requested.IsFor(amount) {
-		return payment.ID{}, false, fmt.Errorf("postgres.CreateOrGet replay %s: %w", merchant, payments.ErrIdempotencyKeyReused)
-	}
-	return id, false, nil
+	return stored, nil
 }
 
-func money(minor int64, currency string) (payment.Money, error) {
-	code, err := payment.ParseCurrency(currency)
+// storedPayment is a payments row as it comes back from the table.
+type storedPayment struct {
+	id           string
+	minor        int64
+	currency     string
+	status       string
+	authorizedAt time.Time
+}
+
+func (r *storedPayment) toDomain(merchant payment.MerchantID) (*payment.Payment, error) {
+	id, err := payment.ParseID(r.id)
 	if err != nil {
-		return payment.Money{}, err
+		return nil, err
 	}
-	return payment.NewMoney(minor, code)
+	amount, err := payment.ParseMoney(r.minor, r.currency)
+	if err != nil {
+		return nil, err
+	}
+	status, err := payment.ParseStatus(r.status)
+	if err != nil {
+		return nil, err
+	}
+	return payment.Reconstitute(id, merchant, amount, status, r.authorizedAt), nil
 }
 
 func (s *PaymentStore) appendEvents(ctx context.Context, aggregate *payment.Payment) error {

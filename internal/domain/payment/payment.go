@@ -13,6 +13,8 @@ var (
 	ErrIDFormat          = errors.New("payment: id is not a uuid")
 	ErrAmountNotPositive = errors.New("payment: an authorised payment is for a positive amount")
 	ErrStorage           = errors.New("payment: storage failure")
+	ErrStatusUnknown     = errors.New("payment: status is not one a payment can be in")
+	ErrNotTheSamePayment = errors.New("payment: a replay asks for a different payment than the one it repeats")
 )
 
 const merchantIDMaxLength = 64
@@ -64,11 +66,22 @@ const (
 	StatusAuthorized
 )
 
+const statusAuthorized = "authorized"
+
 func (s Status) String() string {
 	if s == StatusAuthorized {
-		return "authorized"
+		return statusAuthorized
 	}
 	return "unknown"
+}
+
+// ParseStatus reads a status back from storage. Only a status a payment can actually be in
+// is accepted: an "unknown" row is a corrupted one, not a payment in an unknown state.
+func ParseStatus(value string) (Status, error) {
+	if value != statusAuthorized {
+		return StatusUnknown, ErrStatusUnknown
+	}
+	return StatusAuthorized, nil
 }
 
 type Payment struct {
@@ -104,6 +117,19 @@ func Authorize(id ID, merchant MerchantID, amount Money, at time.Time) (*Payment
 	return authorized, nil
 }
 
+// Reconstitute rebuilds a payment that was authorised earlier and stored. It emits nothing:
+// the payment's events were published when it came into existence, and rebuilding it to
+// compare a replay against must not announce it a second time.
+func Reconstitute(id ID, merchant MerchantID, amount Money, status Status, authorizedAt time.Time) *Payment {
+	return &Payment{
+		id:           id,
+		merchant:     merchant,
+		amount:       amount,
+		status:       status,
+		authorizedAt: authorizedAt.UTC(),
+	}
+}
+
 func (p *Payment) ID() ID {
 	return p.id
 }
@@ -124,11 +150,16 @@ func (p *Payment) AuthorizedAt() time.Time {
 	return p.authorizedAt
 }
 
-// IsFor answers whether two authorisations are the same intent. What "the same" means is
-// the payment's own business: a caller comparing fields from outside would have to be told
-// again on the day an authorisation grows one.
-func (p *Payment) IsFor(amount Money) bool {
-	return p.amount == amount
+// Replays says whether this authorisation may stand as a replay of an earlier one, and
+// refuses with ErrNotTheSamePayment when it asks for something else. What "the same
+// payment" means is the payment's own business — the merchant and the amount, currency
+// included — and a caller comparing fields from outside would have to be told again on
+// the day an authorisation grows one.
+func (p *Payment) Replays(earlier *Payment) error {
+	if p.merchant != earlier.merchant || p.amount != earlier.amount {
+		return ErrNotTheSamePayment
+	}
+	return nil
 }
 
 // PullEvents hands the pending events over and forgets them, so the repository that stores

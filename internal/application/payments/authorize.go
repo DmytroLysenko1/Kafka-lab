@@ -16,12 +16,11 @@ var (
 
 // paymentStore stores the aggregate and the events it is holding in one transaction, and
 // refuses to store the same idempotency key twice: the key belongs to the caller's protocol,
-// not to the payment, so it travels beside the aggregate rather than inside it. A replayed
-// key that asks for a different amount is ErrIdempotencyKeyReused, never the earlier
-// payment: a caller told its 5 000.00 succeeded when 19.99 was authorised is worse off than
-// one told to look again.
+// not to the payment, so it travels beside the aggregate rather than inside it. When the key
+// is taken it returns the payment that key already bought, and reports it as not created;
+// whether the replay may stand is the payment's decision, not the store's.
 type paymentStore interface {
-	CreateOrGet(ctx context.Context, authorized *payment.Payment, idempotencyKey string) (payment.ID, bool, error)
+	CreateOrGet(ctx context.Context, authorized *payment.Payment, idempotencyKey string) (*payment.Payment, bool, error)
 }
 
 type txManager interface {
@@ -70,22 +69,35 @@ func (uc *AuthorizePayment) Execute(ctx context.Context, cmd AuthorizeCommand) (
 		return AuthorizeResult{}, err
 	}
 
-	var stored AuthorizeResult
+	var result AuthorizeResult
 	err = uc.tx.WithinTx(ctx, func(ctx context.Context) error {
-		id, created, err := uc.payments.CreateOrGet(ctx, authorized, cmd.IdempotencyKey)
-		if err != nil {
-			return err
-		}
-		stored = AuthorizeResult{
-			PaymentID: id.String(),
-			Stored:    created,
-		}
-		return nil
+		var err error
+		result, err = uc.storeOnce(ctx, authorized, cmd.IdempotencyKey)
+		return err
 	})
 	if err != nil {
 		return AuthorizeResult{}, fmt.Errorf("payments: authorize for merchant %s: %w", cmd.MerchantID, err)
 	}
-	return stored, nil
+	return result, nil
+}
+
+// storeOnce answers with the payment the key bought. A replayed key that asks for a
+// different payment is ErrIdempotencyKeyReused, never the earlier payment: a caller told its
+// 5 000.00 succeeded when 19.99 was authorised is worse off than one told to look again.
+func (uc *AuthorizePayment) storeOnce(ctx context.Context, authorized *payment.Payment, idempotencyKey string) (AuthorizeResult, error) {
+	stored, created, err := uc.payments.CreateOrGet(ctx, authorized, idempotencyKey)
+	if err != nil {
+		return AuthorizeResult{}, err
+	}
+	if !created {
+		if err := authorized.Replays(stored); err != nil {
+			return AuthorizeResult{}, fmt.Errorf("%w: %w", ErrIdempotencyKeyReused, err)
+		}
+	}
+	return AuthorizeResult{
+		PaymentID: stored.ID().String(),
+		Stored:    created,
+	}, nil
 }
 
 func authorize(cmd AuthorizeCommand, at time.Time, id payment.ID) (*payment.Payment, error) {
@@ -93,11 +105,7 @@ func authorize(cmd AuthorizeCommand, at time.Time, id payment.ID) (*payment.Paym
 	if err != nil {
 		return nil, err
 	}
-	currency, err := payment.ParseCurrency(cmd.Currency)
-	if err != nil {
-		return nil, err
-	}
-	amount, err := payment.NewMoney(cmd.AmountMinor, currency)
+	amount, err := payment.ParseMoney(cmd.AmountMinor, cmd.Currency)
 	if err != nil {
 		return nil, err
 	}

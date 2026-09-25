@@ -111,3 +111,35 @@ func TestOnlyAnAmountAboveZeroIsPositive(t *testing.T) {
 		})
 	}
 }
+
+// ParseMoney is where an amount is built from what arrives on the wire and what comes back
+// from a row; both must be refused the same way.
+func TestParseMoneyRefusesWhatEitherPartRefuses(t *testing.T) {
+	type args struct {
+		minor    int64
+		currency string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    int64
+		wantErr error
+	}{
+		{name: "an amount", args: args{minor: 1999, currency: "EUR"}, want: 1999},
+		{name: "zero is money", args: args{minor: 0, currency: "EUR"}, want: 0},
+		{name: "negative", args: args{minor: -1, currency: "EUR"}, wantErr: payment.ErrAmountNegative},
+		{name: "a lower-case currency", args: args{minor: 1999, currency: "eur"}, wantErr: payment.ErrCurrencyFormat},
+		{name: "no currency", args: args{minor: 1999, currency: ""}, wantErr: payment.ErrCurrencyFormat},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := payment.ParseMoney(tt.args.minor, tt.args.currency)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.want, got.Minor()); diff != "" {
+				t.Errorf("minor (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
