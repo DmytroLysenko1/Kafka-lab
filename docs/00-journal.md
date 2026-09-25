@@ -1364,3 +1364,54 @@ now, and the zeros in cell B are the ones that survived all four fixes.
 **Carried into:** the exp-13 row of [case 06](static/06-transactional-outbox.md), and the
 runbook that comes next — where "watch the backlog, not the cluster's opinion of itself" is
 the first line worth writing.
+
+## exp-15 — the throttle works, and on this stand it bought nothing
+
+Date: 2026-09-25 · [run logs](../experiments/kafka_internals/exp-15-partition-reassignment/results/) ·
+`make exp-15` — two runs
+
+**Hypothesis.** Moving replicas on a live topic costs the producers something, and the
+throttle is how you decide whether to pay it all at once or spread it out.
+
+**Setup.** Three partitions at RF 2 holding 60 MiB, raised to RF 3 while a producer writes
+one 1 KiB record every 10 ms and times every acknowledgement. Twice: unthrottled, and at
+1 MiB/s.
+
+**Result.**
+
+| | no throttle | 1 MiB/s |
+|---|---|---|
+| move | **2.2 s · 2.5 s** | **24.1 s · 24.8 s** |
+| copied | 66.3 · 66.5 MiB | 69.2 · 71.1 MiB |
+| producer median, before → during | 2.6 → 1.7 ms · 2.9 → 2.1 ms | 2.9 → 1.7 ms · 2.8 → 1.6 ms |
+| producer p95, before → during | 6.1 → 5.3 ms · 5.8 → 8.2 ms | 6.8 → 3.4 ms · 6.7 → 3.9 ms |
+
+**What holds.** The throttle does what it claims, and the arithmetic is per broker, not per
+cluster: 22 MiB arriving at each of three brokers at 1 MiB/s is 22 seconds, and the runs
+took 24. That is the number to divide by when someone asks how long a move will take.
+
+**What does not.** The unthrottled move did not make the producers wait. Median and p95
+during the copy were no worse than before it, in both cells and both runs. This stand
+cannot show the thing throttles exist for: three brokers on one laptop share an SSD and a
+loopback network, and 66 MiB at 30 MiB/s saturates neither. The honest statement is that
+the throttle cost ten times the duration and bought nothing measurable *here* — on a
+cluster where replication competes with client traffic for one NIC, the trade is real, and
+this run is not evidence for it either way.
+
+**Two things the run found by accident.** topicctl refuses to change a replication factor
+at all — *"Replication in topic config (2) is not equal to observed max ISR (3); this cannot
+be resolved by topicctl"* — which is why the second cell has to drop and recreate the topic
+rather than re-apply its YAML. And `--verify` is not a status check: it is what removes the
+throttle the `--execute` set. A run that stops before verify leaves every later replication
+on that cluster crawling at a megabyte a second, with nothing in the topic config to say so.
+
+**The run that measured nothing.** The first version preloaded 60 MiB of a repeating byte
+pattern. The brokers held 2.2 MiB each — the batches compressed away — so the throttled
+move had six megabytes to copy and finished in 2.4 s, which reads exactly like a throttle
+that does not work. The log directories settled it: 2.2 MiB where 40 was expected. The
+payload is incompressible now, and the run reports what the brokers actually hold
+(121.2 MiB for 60 MiB produced at RF 2) instead of what it believed it produced.
+
+**Carried into:** the replication-factor line in
+[`deploy/topics/README.md`](../deploy/topics/README.md), which said a reassignment is a
+migration and can now say what one costs.

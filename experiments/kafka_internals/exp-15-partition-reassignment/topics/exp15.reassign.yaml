@@ -1,0 +1,24 @@
+meta:
+  name: exp15.reassign
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-15: a topic that starts at replication factor 2 so that the experiment can raise it
+    to 3 while producers are writing to it. min.insync.replicas is 1 here, not the catalog's
+    2: with two replicas a quorum of two leaves no room for one of them to be busy catching
+    up, and the run would measure a refused write instead of the cost of the move.
+
+    The catalog cannot host this. A reassignment rewrites replica placement, and topicctl
+    declines to change a replication factor at all — this is the experiment that shows why
+    that is a migration rather than a line in a YAML.
+
+spec:
+  partitions: 3
+  replicationFactor: 2
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 1
+    unclean.leader.election.enable: false
