@@ -119,8 +119,15 @@ func TestVerdictRefusesARunThatDidNotExerciseItsMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if diff := cmp.Diff(tt.want, tt.args.mode.Verdict(tt.args.tally)); diff != "" {
+			got, held := tt.args.mode.Verdict(tt.args.tally)
+			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("mismatch (-want +got):\n%s", diff)
+			}
+			// The flag is what the process exits on, so it has to agree with the text: a
+			// refusal that still reported held would print the refusal and exit 0, and
+			// run.sh would carry that green into a committed log.
+			if wantHeld := tt.want == asExpected; held != wantHeld {
+				t.Errorf("held = %v, want %v for verdict %q", held, wantHeld, got)
 			}
 		})
 	}

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -27,6 +28,7 @@ const (
 	maxRate        = 50_000
 	pollRecords    = 200
 	maxWork        = 50 * time.Millisecond
+	flushTimeout   = 30 * time.Second
 	// perSecondPerTick is one record every tick: the rate must be a multiple of it, or the
 	// integer division that spreads it over ticks silently produces less than asked.
 	perSecondPerTick = int(time.Second / tick)
@@ -35,6 +37,7 @@ const (
 var (
 	errStrategy = errors.New("exp-14: -strategy must be eager, cooperative or server")
 	errShape    = errors.New("exp-14: -rate, -work, -join-after, -leave-after or -duration out of range")
+	errUnacked  = errors.New("exp-14: records were not acknowledged, so a gap in a partition is not the consumer's")
 )
 
 type settings struct {
@@ -232,23 +235,51 @@ func produce(ctx context.Context, cfg *settings) error {
 	}
 	defer client.Close()
 
+	// The whole result of this experiment is "the longest stretch nothing of partition p was
+	// handled". A record the producer failed to write leaves exactly that stretch, so without
+	// counting the failures a producer problem is indistinguishable from the consumer stall
+	// being measured — and the comment above would be false.
+	var failed atomic.Int64
+	acked := func(_ *kgo.Record, err error) {
+		if err != nil {
+			failed.Add(1)
+		}
+	}
+
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	perTick := cfg.rate / perSecondPerTick
 	for seq := int64(0); ; {
 		select {
 		case <-ctx.Done():
-			return nil
+			return flushed(ctx, client, &failed)
 		case <-ticker.C:
 			for range perTick {
 				client.Produce(ctx, &kgo.Record{
 					Partition: int32(seq % partitions),
 					Value:     strconv.AppendInt(nil, seq, 10),
-				}, nil)
+				}, acked)
 				seq++
 			}
 		}
 	}
+}
+
+// flushed waits for the records still in flight and refuses a stream with a gap in it. The
+// run's context is already cancelled by the time this runs — that cancellation is what
+// brought us here — so the flush detaches from it while keeping its values, and bounds
+// itself instead of inheriting a deadline that has already passed.
+func flushed(ctx context.Context, client *kgo.Client, failed *atomic.Int64) error {
+	draining, cancel := context.WithTimeout(context.WithoutCancel(ctx), flushTimeout)
+	defer cancel()
+
+	if err := client.Flush(draining); err != nil {
+		return fmt.Errorf("exp-14: flush: %w", err)
+	}
+	if n := failed.Load(); n > 0 {
+		return fmt.Errorf("%w: %d of them", errUnacked, n)
+	}
+	return nil
 }
 
 // consume is one member of the group. It records when each record was handled and every

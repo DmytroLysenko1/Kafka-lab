@@ -55,14 +55,14 @@ func (t Tally) Outcome() Outcome {
 // Verdict says whether a run demonstrated what its mode exists to demonstrate. For the
 // inbox a clean table is not enough: a run in which nothing was redelivered comes out
 // exactly once as well, and proves nothing about deduplication.
-func (m Mode) Verdict(t Tally) string {
+func (m Mode) Verdict(t Tally) (string, bool) {
 	want := m.Expects()
 	switch {
 	case t.Outcome() != want:
-		return fmt.Sprintf("EXPECTED %q — this run did not demonstrate what it exists to demonstrate", want)
+		return fmt.Sprintf("EXPECTED %q — this run did not demonstrate what it exists to demonstrate", want), false
 	case m == Inbox && t.Refused == 0:
-		return "EXPECTED the inbox to refuse redeliveries — none arrived, so a clean table proves nothing"
+		return "EXPECTED the inbox to refuse redeliveries — none arrived, so a clean table proves nothing", false
 	default:
-		return "as expected"
+		return "as expected", true
 	}
 }

@@ -72,7 +72,18 @@ func verify(ctx context.Context, cfg *Settings, out io.Writer) error {
 			return err
 		}
 	}
-	return render(out, report(cfg, got))
+	lines, held := report(cfg, got)
+	if err := render(out, lines); err != nil {
+		return err
+	}
+
+	// The report is rendered in full first — the numbers are the deliverable — and only then
+	// does the process fail. A run that says NOT DEMONSTRATED and exits 0 is indistinguishable
+	// to run.sh, which is `set -euo pipefail`, from one that demonstrated its claim.
+	if !held {
+		return fmt.Errorf("%s: %w", cfg.Name, ErrNotDemonstrated)
+	}
+	return nil
 }
 
 func readView(ctx context.Context, cfg *Settings, isolation kgo.IsolationLevel) (view, error) {
@@ -98,7 +109,7 @@ func readView(ctx context.Context, cfg *Settings, isolation kgo.IsolationLevel) 
 	return v, nil
 }
 
-func report(cfg *Settings, v views) []string {
+func report(cfg *Settings, v views) ([]string, bool) {
 	held, claim := judge(cfg.Claim, v)
 	verdict := "as expected"
 	if !held {
@@ -113,7 +124,7 @@ func report(cfg *Settings, v views) []string {
 	if cfg.WriteDB {
 		lines = append(lines, fmt.Sprintf("postgres\t%d rows, %d distinct, %d duplicated", v.Database.Rows, v.Database.Distinct, v.Database.duplicated()))
 	}
-	return append(lines, fmt.Sprintf("claim\t%s — %s", claim, verdict))
+	return append(lines, fmt.Sprintf("claim\t%s — %s", claim, verdict)), held
 }
 
 func render(out io.Writer, lines []string) error {

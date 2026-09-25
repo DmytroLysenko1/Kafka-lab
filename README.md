@@ -112,9 +112,19 @@ consumer on `:9102`, the API on `:9103` — so a scrape can never take a connect
 needed. What they publish is what an operator reads during an incident:
 `outbox_backlog_records` (grows while the broker is away, falls when the relay drains),
 `outbox_sweeps_total{outcome}`, `payment_events_handled_total{outcome}` where a duplicate
-is counted apart from a fresh event, `payment_events_dead_lettered_total{reason}`, and
-`http_requests_total{route,status}` labelled by route pattern rather than path, because a
-label built from merchant ids grows a new series per customer.
+is counted apart from a fresh event, `payment_events_dead_lettered_total{reason}`, `payment_events_failed_total{stage}` — the
+one that tells a crash-looping consumer from an idle one, since both draw the handled
+counter to zero — and `http_requests_total{route,status}` labelled by route pattern rather
+than path, because a label built from merchant ids grows a new series per customer.
+
+The dashboard opens with a liveness row rather than a graph: `up` per service, `up` for the
+exporter, and `kafka_brokers`. Every zero below it means either nothing happened or nothing
+is left to report it, and that row is what tells the two apart — the distinction exp-13 is
+about, where the cluster read 0 under-replicated through an outage in which nothing could
+be published. A panel named after that run sits at the bottom: it is non-empty exactly when
+the backlog is piling up while the cluster still calls itself healthy. `make verify` checks
+that every panel's query names a metric something actually publishes, so a rename cannot
+silently blank a panel.
 
 The API binds to loopback and requires `X-API-Key`; it refuses to start without
 `PAYMENTS_API_KEY`, because a service that moves money should not have a mode where it

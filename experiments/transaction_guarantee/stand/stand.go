@@ -79,10 +79,11 @@ const (
 var phases = []string{"produce", "consume", "verify"}
 
 var (
-	ErrPhase   = errors.New("stand: -phase must be produce, consume or verify")
-	ErrRunID   = errors.New("stand: -run-id is required, so a rerun cannot read an earlier run's rows")
-	ErrShape   = errors.New("stand: -payments out of range")
-	ErrPartial = errors.New("stand: the cluster did not accept every payment")
+	ErrPhase           = errors.New("stand: -phase must be produce, consume or verify")
+	ErrRunID           = errors.New("stand: -run-id is required, so a rerun cannot read an earlier run's rows")
+	ErrShape           = errors.New("stand: -payments out of range")
+	ErrPartial         = errors.New("stand: the cluster did not accept every payment")
+	ErrNotDemonstrated = errors.New("stand: the run did not demonstrate what it exists to demonstrate")
 )
 
 // Settings is one phase of one run.
