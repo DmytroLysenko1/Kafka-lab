@@ -32,8 +32,8 @@ func newPayloads() *payloads {
 	// opposite of unpredictability — the same seed must give the same bytes, so every codec
 	// compresses the identical input. crypto/rand cannot be seeded.
 	return &payloads{
-		source: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)),
-	} //nolint:gosec // seeded test data, not security
+		source: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)), //nolint:gosec // seeded test data, not security
+	}
 }
 
 func (p *payloads) next() (key, value []byte) {
