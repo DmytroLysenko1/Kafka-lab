@@ -66,6 +66,14 @@ var levels = []string{"NONE", "BACKWARD", "FULL"}
 // that looked authoritative and was not.
 func compatibility(ctx context.Context, registryURL string, out io.Writer) error {
 	written := &lines{out: out}
+
+	// Every cell below sets the level it tests, so none of them can answer the question the
+	// write-up leads with: what a registry nobody configured protects. That has to be read
+	// off the server before anything is set, or it is an assertion rather than a result.
+	if err := reportDefaultLevel(ctx, registryURL, written); err != nil {
+		return err
+	}
+
 	written.printf("%-38s %-10s %s\n", "change", "level", "registry")
 
 	for _, level := range levels {
@@ -79,6 +87,52 @@ func compatibility(ctx context.Context, registryURL string, out io.Writer) error
 		written.printf("\n")
 	}
 	return written.err
+}
+
+// reportDefaultLevel registers one subject and asks, before setting anything, what level it
+// and the registry as a whole report. A subject nobody configured answering "not configured"
+// is itself the finding: until someone sets a level, the checker has nothing to enforce.
+func reportDefaultLevel(ctx context.Context, registryURL string, written *lines) error {
+	subject := fmt.Sprintf("exp12-default-%d-value", time.Now().UnixNano())
+	if err := register(ctx, registryURL, subject, baseline); err != nil {
+		return err
+	}
+
+	forSubject, err := levelAt(ctx, registryURL, "/config/"+subject)
+	if err != nil {
+		return err
+	}
+	registryWide, err := levelAt(ctx, registryURL, "/config")
+	if err != nil {
+		return err
+	}
+	if err := deleteSubject(ctx, registryURL, subject); err != nil {
+		return err
+	}
+
+	written.printf("before any level is set, on a subject just created:\n")
+	written.printf("  the subject reports       %s\n", forSubject)
+	written.printf("  the registry-wide default %s\n\n", registryWide)
+	return written.err
+}
+
+// levelAt reports the compatibility level configured at one config path. A 404 is an answer
+// rather than a failure: it means nothing is configured there.
+func levelAt(ctx context.Context, registryURL, path string) (string, error) {
+	status, answer, err := call(ctx, http.MethodGet, registryURL+path, nil)
+	if err != nil {
+		return "", err
+	}
+	if status == http.StatusNotFound {
+		return "not configured", nil
+	}
+	var configured struct {
+		CompatibilityLevel string `json:"compatibilityLevel"`
+	}
+	if err := json.Unmarshal(answer, &configured); err != nil {
+		return "", fmt.Errorf("%w: reading the level at %s: %w", errRegistry, path, err)
+	}
+	return configured.CompatibilityLevel, nil
 }
 
 // ask puts one change to the registry on a subject of its own, seeded with the baseline
@@ -144,18 +198,12 @@ func setLevel(ctx context.Context, registryURL, subject, level string) error {
 
 	// Read it back rather than trust the write: a level that did not take would turn this
 	// whole matrix into a column of one setting measured three times.
-	_, answer, err := call(ctx, http.MethodGet, registryURL+"/config/"+subject, nil)
+	configured, err := levelAt(ctx, registryURL, "/config/"+subject)
 	if err != nil {
 		return err
 	}
-	var configured struct {
-		CompatibilityLevel string `json:"compatibilityLevel"`
-	}
-	if err := json.Unmarshal(answer, &configured); err != nil {
-		return err
-	}
-	if configured.CompatibilityLevel != level {
-		return fmt.Errorf("%w: asked for %s, the subject reports %s", errRegistry, level, configured.CompatibilityLevel)
+	if configured != level {
+		return fmt.Errorf("%w: asked for %s, the subject reports %s", errRegistry, level, configured)
 	}
 	return nil
 }

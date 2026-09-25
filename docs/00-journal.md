@@ -1332,8 +1332,8 @@ from the cluster's metadata.
 down is a leader election rather than an outage: about a hundred records pile up while new
 leaders are chosen, and the backlog drains before the broker is even back. Two brokers down
 is the case the outbox is for — nothing publishes for thirty seconds, four to five hundred
-records wait in Postgres, and the relay works them off in fifteen to twenty seconds while
-payments keep arriving.
+records wait in Postgres, and the relay works them off in 18.3 s and 24.2 s — the two
+figures in the table above — while payments keep arriving.
 
 **What was not expected.** In cell B the cluster reported zero under-replicated partitions
 and zero partitions without a leader, for the entire outage. That is not a measurement
@@ -1415,3 +1415,60 @@ payload is incompressible now, and the run reports what the brokers actually hol
 **Carried into:** the replication-factor line in
 [`deploy/topics/README.md`](../deploy/topics/README.md), which said a reassignment is a
 migration and can now say what one costs.
+
+## 2026-09-25 — an audit of the whole package, and the same mistake in four new places
+
+**What was checked.** Every experiment against the thesis in its own README, every Kafka
+claim in the prose against a file rather than against memory, every published number
+against a committed log, and the dashboard against the failures this stand has actually
+produced. Nothing was re-measured; this is a reading of what is already here.
+
+**The finding that matters is a repeat.** Four of the runs corrected earlier in this
+journal were wrong in one shape — absence of data rendered as zero. That shape was still
+live in four more places, none of them touched since. `exp-03` and `exp-10d` threw away the
+`ok` from a kadm `Lookup`, so a failed offset read became offset 0 — and offset 0 is
+literally what each of them publishes as its result: a log emptied by retention, and an LSO
+pinned by an open transaction. `exp-11` and `exp-16` summed listings with `Each` without
+checking `Err`, so a partition that failed to answer contributed 0 — a topic nobody
+produced to, and zero lag in the one experiment whose subject is lag. `exp-15` summed log
+dirs the same way, and answered 0 bytes copied if no broker answered at all.
+
+All five now go through one guard. `labkit.OffsetAt` refuses each of the three ways a
+listing declines — partition absent, load error, the `-1` kadm fills in for an unknown
+topic — and `labkit.spansFrom` refuses a topic missing from the response entirely, because
+an empty partition map makes a reader that is finished before it polls once. The guard has
+tests that go red when it is removed, including the control that matters: a log the broker
+*positively* reported as empty is still a valid span, since that is what exp-03 measures.
+
+**The second finding is the other half of the same habit.** Five statements about franz-go
+were written from memory and are wrong. The one that had spread furthest: `ConsumeResetOffset`
+resolving a committed offset that fell below the log start. The docs said it rewinds a
+minute; franz-go's own doc says it resumes at the log start, and the one-minute rewind is
+for mid-stream data loss. The minute was quoted in the cheat sheet's flagship defaults
+table. Separately, `max.poll.records` was called non-existent in four places; it is
+`PollRecords(ctx, n)`, an argument rather than a setting. This is the third time a franz-go
+claim written from memory has had to be withdrawn, after `AtStart` and the forwarded-record
+timestamp. The rule from here: no sentence about the client ships without the
+`config.go`/`consumer.go` line beside it.
+
+**And one figure contradicted its own run.** Fig. 9a drew a field deletion being accepted
+under `BACKWARD` and cited exp-12c as support — while exp-12c is the run that measured it
+*refused*, 409. The figure now runs under `FULL`, which is where the change actually gets
+through on Apicurio 3.0.9, which makes the story stronger: the deploy passes the registry's
+strictest check and the old consumer still gets a zero.
+
+**Withdrawn here.** exp-02's drain table was printing three rows from a superseded run
+beside two from the current one, and the "15% faster with seven consumers" built on it is
+noise — the seventh member handles nothing and its cell is still faster than the sixth. The
+honest result is stronger: adding members bought nothing measurable, because one member
+serves the hot partition. exp-15's table printed two values per cell from one committed run;
+the unbacked halves are gone and a repeat is owed. The end-to-end HTTP walk in the README
+was labelled "measured" and is a hand run — it now says so.
+
+**Still open.** exp-04 never reads its topic back, so "a pause, not data" is not something
+its code can settle, and it writes only after the controller has finished re-electing;
+exp-14's producer passes a nil promise, so a partition it failed to write to looks like a
+partition the consumer stalled on; `stand` and `eos` compute an honest verdict and return
+nil regardless, so a failed run can exit 0. The dashboard has never been in front of four
+of the five failures, and its under-replicated panel is the repo's own documented lie
+rendered in Grafana.

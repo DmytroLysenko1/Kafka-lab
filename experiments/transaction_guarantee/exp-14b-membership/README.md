@@ -35,7 +35,7 @@ files beside them.
 | dynamic | gone for good | **0.57–0.61 s** | 41–62 ms | one: the survivor takes them 0.55–0.58 s after the leave |
 | dynamic | back after 2 s | **0.58–0.59 s** | 36–40 ms | three: they move to the survivor, then back again at 29.6 s |
 | static | gone for good | **12.58–12.61 s** | 36–50 ms | one, and only after the session timeout expires at 37.6 s |
-| static | back after 2 s | **2.05 s** | 40–51 ms | none — the group never learnt it had gone |
+| static | back after 2 s | **2.05 s** | 40–51 ms | none for the surviving member — it was never revoked or reassigned; the returning member re-took its own partitions, which the log records as its own revoke and assign |
 
 Nothing was handled twice and nothing was missed in any cell.
 

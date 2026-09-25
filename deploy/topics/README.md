@@ -117,8 +117,9 @@ the shape the service runs on, and `make check` keeps checking only that.
   as a one-line diff — exp-02 shows the cost.
 - **Replication factor** is a reassignment with throttling (exp-15), which topicctl
   declines to do — it refuses outright once the observed ISR no longer matches the YAML.
-  exp-15 measured the move: 60 MiB onto a third replica took 2.2–2.5 s unthrottled and
-  24.1–24.8 s at 1 MiB/s, which is the per-broker rate rather than the cluster's. Producer
+  exp-15 measured the move: a 60 MiB topic raised from RF 2 to RF 3 put 66 MiB on disk in
+  2.2 s unthrottled and 71 MiB in 24.8 s at 1 MiB/s — a per-broker rate, so the bytes to
+  divide by are the ~24 MiB arriving at each broker, not the 71 across the cluster. Producer
   latency did not move either way on this stand. `--verify` is not optional: it is what
   removes the throttle `--execute` set.
 - **Settings** change in the YAML, then `make topics`. A setting added by hand is reported

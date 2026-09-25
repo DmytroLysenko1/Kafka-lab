@@ -38,9 +38,10 @@ in the ISR and the ceiling for `read_uncommitted`; LSO is the first offset of th
 open transaction and the ceiling for `read_committed` ([10](10-transactions-eos.md) is
 what moves it). The committed offset is **not** part of that chain: it is one group's
 promise, it sits wherever that group left it, and a `read_uncommitted` consumer routinely
-commits above the LSO. **Consumer lag = HW − committed** — because the "latest offset" a
-client gets back from `ListOffsets` is the high watermark, not the LEO, which is exactly
-why the tool prints it in a column labelled LOG-END-OFFSET.
+commits above the LSO. **Consumer lag = HW − committed**, because the "latest offset" a
+client gets back from `ListOffsets` is the high watermark, not the LEO — which is why the
+column the tool labels LOG-END-OFFSET is not the LEO. The label is a misnomer, and the HW
+being what is returned is what makes it a misleading one.
 
 ## The durability chain — [01](01-write-path.md), [04](04-isr-leader-election.md)
 
@@ -72,7 +73,7 @@ the defaults that decide an outcome on their own.
 | `broker.session.timeout.ms` | 9 s, with heartbeats every 2 s | what actually removes a **dead** broker from every ISR: the KRaft controller fences it when its session expires. The two timers get conflated constantly, and they answer different questions. exp-04 measured 10.1 s and 10.6 s for a crash, and exp-04c raised this timer to 20 s and measured 20.3 s while the lag timer stayed at 30 s — the reaction tracks this one |
 | `enable.auto.commit` | `true` — franz-go autocommits every 5 s when group consuming | at-least-once, not at-most-once: both clients commit only what the *previous* poll returned. It loses records only when handling is asynchronous or franz-go's `GreedyAutoCommit` is on. Killed at the same moment, greedy lost the unwritten rest of a batch and the default lost nothing and replayed 12 (exp-05b, exp-06b) |
 | `auto.offset.reset`, part 1: where a **new group** starts | `latest` in Java, **`AtStart` (earliest) in franz-go** (`ConsumeStartOffset`) | the two clients default in opposite directions: a new group either replays all history or silently skips it |
-| `auto.offset.reset`, part 2: what happens to a **committed offset that fell out of retention** | `latest` or `earliest` in Java, **`RewindOffset(1 minute)` in franz-go** (`ConsumeResetOffset`) | franz-go's own docs say it plainly: *Kafka has no equivalent*. The Go consumer resumes a minute back instead of jumping to either end — one Java setting, two franz-go options, and a third behaviour that does not exist in Java at all. The best entry there is for the "Java parameter → franz-go equivalent" column of the tuning checklist |
+| `auto.offset.reset`, part 2: what happens to a **committed offset that fell out of retention** | `latest` or `earliest` in Java, **the log start** in franz-go (`ConsumeResetOffset`) | franz-go splits the one Java setting in two, and the second half splits again by cause. For this row's case — a commit that fell below the log start — it resumes at the log start, i.e. Java's `earliest`: *"every record that still exists is one it never consumed"*. Its `RewindOffset(1m)` default is what it does after **mid-stream data loss** — a broker that lost records, an epoch it cannot place — and *that* is the behaviour Kafka has no equivalent for. Reading the minute onto the retention case is the misread (`kgo/config.go`, doc on `ConsumeResetOffset`) |
 | `compression.type` | `none` in Java, **snappy in franz-go** | the Go producer compresses before you ask it to — 2.05× to 3.28× on payment events depending on how full the batches are (exp-17) |
 | `partition.assignment.strategy` | `[range, cooperative-sticky]` in Java — which negotiates down to eager `range` — **`CooperativeStickyBalancer` in franz-go** | the two clients rebalance differently out of the box, so eager has to be configured explicitly. exp-14: eager revoked all six partitions and stopped them 39–75 ms; cooperative stopped only the three that moved, for 0.52–0.68 s; KIP-848 for 4.9–6.5 s, around its heartbeat interval ([08](08-rebalance.md)) |
 | rebalance timeout | `max.poll.interval.ms` 5 min in Java, **`RebalanceTimeout` 60 s in franz-go** | the budget a slow handler gets before the group gives up on it differs by 5× ([03](03-read-path.md)) |

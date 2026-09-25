@@ -11,13 +11,16 @@ make exp-15
 
 | | cell A — no throttle | cell B — 1 MiB/s |
 |---|---|---|
-| how long the move took | **2.2 s · 2.5 s** | **24.1 s · 24.8 s** |
-| copied onto the new replicas | 66.3 · 66.5 MiB | 69.2 · 71.1 MiB |
-| effective replication rate | ~30 MiB/s | ~2.8 MiB/s across three brokers |
-| producer median, before → during | 2.6 → 1.7 ms · 2.9 → 2.1 ms | 2.9 → 1.7 ms · 2.8 → 1.6 ms |
-| producer p95, before → during | 6.1 → 5.3 ms · 5.8 → 8.2 ms | 6.8 → 3.4 ms · 6.7 → 3.9 ms |
+| how long the move took | **2.2 s** | **24.8 s** |
+| copied onto the new replicas | 66.3 MiB | 71.1 MiB |
+| effective replication rate | ~30 MiB/s | ~2.9 MiB/s across three brokers, ~0.96 MiB/s each |
+| producer median, before → during | 2.6 → 1.7 ms | 2.9 → 1.7 ms |
+| producer p95, before → during | 6.1 → 5.3 ms | 6.8 → 3.4 ms |
 
-Two runs, 2026-09-25, in [`results/`](results/).
+**One run**, 2026-09-25, in [`results/`](results/) — every number above is from it. An
+earlier draft of this table printed a second value in each pair; that run's log was never
+committed, so those figures have been removed rather than left standing without evidence.
+A repeat is owed here: every other measured experiment in this repository has at least two.
 
 ## What it shows
 

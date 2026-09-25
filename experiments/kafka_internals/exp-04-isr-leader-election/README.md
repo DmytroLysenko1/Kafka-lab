@@ -4,6 +4,15 @@
 replica from the ISR takes over, `acks=all` keeps being honoured because two replicas are
 still in sync, and once the broker is back everything returns to how it was.
 
+**What this run can and cannot settle.** It measures how long the cluster takes to notice
+and where leadership lands, and it shows `acks=all` still being honoured afterwards. It
+does **not** settle the "not data" half: the run never reads the topic back, so a leader
+that kept every acknowledged record and one that truncated some would print the same table.
+Nor does it price the pause — the degraded phase waits for the controller to finish
+re-electing before it writes, so its 300 of 300 describes a settled two-of-three cluster,
+not the moment of the kill. Both need a phase this experiment does not yet have: a
+continuous writer across the kill, and a `labkit.ReadAll` of the topic at the end.
+
 ```
 make exp-04
 ```

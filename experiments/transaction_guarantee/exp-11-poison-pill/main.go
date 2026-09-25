@@ -28,6 +28,8 @@ var errUnknownPhase = errors.New("exp-11: phase must be produce or consume")
 
 var errNoDeadLetterRoute = errors.New("exp-11: this consumer has nowhere to put a record it cannot read")
 
+var errListing = errors.New("exp-11: the cluster did not answer what the count is read from")
+
 // deadLetterSink is what the consumer needs and this experiment swaps: a real topic in one
 // cell, a refusal in the other.
 type deadLetterSink interface {
@@ -328,9 +330,19 @@ func measure(ctx context.Context, s *settings) (measured, error) {
 	if err != nil {
 		return measured{}, err
 	}
+	// Each iterates partitions that failed to load as readily as ones that answered, and a
+	// failed one carries offset -1. Summed unchecked, a listing that never worked reports a
+	// topic nobody produced to and a group that read nothing — which is the shape cell A
+	// exists to report, arriving from the instrument instead of from the poison pill.
+	if err := ends.Error(); err != nil {
+		return measured{}, fmt.Errorf("%w: end offsets of %s: %w", errListing, s.topic, err)
+	}
 	committed, err := admin.FetchOffsetsForTopics(ctx, s.group, s.topic)
 	if err != nil {
 		return measured{}, err
+	}
+	if err := committed.Error(); err != nil {
+		return measured{}, fmt.Errorf("%w: committed offsets of %s: %w", errListing, s.group, err)
 	}
 
 	var result measured
@@ -347,6 +359,9 @@ func measure(ctx context.Context, s *settings) (measured, error) {
 	archived, err := admin.ListEndOffsets(ctx, s.dlqTopic)
 	if err != nil {
 		return measured{}, err
+	}
+	if err := archived.Error(); err != nil {
+		return measured{}, fmt.Errorf("%w: end offsets of %s: %w", errListing, s.dlqTopic, err)
 	}
 	archived.Each(func(offset kadm.ListedOffset) { result.archived += offset.Offset })
 	return result, nil

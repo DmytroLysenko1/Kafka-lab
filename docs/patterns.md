@@ -28,7 +28,7 @@ merchant, status — and the consumer needs nobody.
 | Load on the producer | one call per event per consumer | none |
 
 **Compaction is what makes the second one replayable, and it is measured.** A compacted
-topic keeps the last value per key: exp-03 wrote 2 010 records over 40 keys and the cleaner
+topic keeps the last value per key: exp-03 wrote 2 010 records over 50 keys and the cleaner
 left 50 — the 40 live values plus 10 tombstones
 ([run](../experiments/kafka_internals/exp-03-segments-retention/results/run-2026-09-20-200653.log)).
 That is the difference between a topic that is a log of what happened and a topic that is
@@ -64,7 +64,7 @@ measured is the failure mode the lookup shape inherits.
 
 **The Kafka transaction stops at Kafka**, and that is measured rather than asserted: in
 exp-10b a crash mid-transaction left the Kafka output at exactly 1 000 records and the
-Postgres rows at 1 050 — the abort discarded the records and did nothing to the database
+Postgres rows at 1 050 — the abort kept `read_committed` readers from its records and did nothing to the database
 ([run](../experiments/transaction_guarantee/exp-10b-database-boundary/results/run-2026-09-22-022201.log)).
 Anything that must be true of both a row and an event therefore goes through an outbox:
 the event is written to a table in the same transaction as the state, and a relay publishes
@@ -135,7 +135,7 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 | Anti-pattern | What it costs, measured | Run |
 |---|---|---|
 | Assuming a global order across partitions | 6 827 – 8 721 of 10 000 events handled out of their business order, every payment split across partitions; keyed: 0, every run | [exp-01](../experiments/kafka_internals/exp-01-partition-keys/) |
-| A key that concentrates traffic (hot partition) | 85% of records on one partition; seven consumers drained it 15% faster than one, and the seventh handled nothing | [exp-02](../experiments/kafka_internals/exp-02-hot-partition/) |
+| A key that concentrates traffic (hot partition) | 85% of records on one partition; going from one consumer to seven moved the drain from 5.63 s to 4.76 s, within the variance of five single-shot cells, and the seventh handled nothing | [exp-02](../experiments/kafka_internals/exp-02-hot-partition/) |
 | Retention as an afterthought | a 5 s retention left 0 of 2 000 records readable; compaction is the opposite lever and left 50 of 2 010 | [exp-03](../experiments/kafka_internals/exp-03-segments-retention/) |
 | Committing the offset before the work | 49 of 1 000 payments gone with no error anywhere; with `GreedyAutoCommit`, the unwritten rest of a batch — 38 and 41 | [exp-05](../experiments/transaction_guarantee/exp-05-at-most-once/), [exp-05b](../experiments/transaction_guarantee/exp-05b-autocommit-greedy/) |
 | `acks=1` on a topic that carries money | 2 000 records acknowledged, 0 readable after the leader died inside the replication window | [exp-08](../experiments/transaction_guarantee/exp-08-acks/) |
@@ -154,7 +154,7 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 | An event must accompany a database write | outbox in the same transaction, relay afterwards | a Kafka transaction does not reach the database: 1 000 against 1 050 (exp-10b) |
 | A consumer writes anything that must not happen twice | inbox: claim and write in one transaction | 50 redeliveries refused, 1 000 rows (exp-07) |
 | Events of one entity must stay in order | key by the entity id; never rely on order across keys | keyless: up to 8 721 violations per 10 000; keyed: 0 (exp-01) |
-| A single tenant dominates the traffic | split the key or route that tenant to its own topic | adding consumers bought 15% (exp-02) |
+| A single tenant dominates the traffic | split the key or route that tenant to its own topic | adding consumers bought nothing measurable (exp-02) |
 | A payment topic's durability | `acks=all` **and** `min.insync.replicas=2`; idempotence on | `acks=1` lost 2 000 acknowledged records (exp-08); at min.isr 1 `acks=all` means one machine |
 | One record keeps failing | retry topics on `LogAppendTime`, then DLQ | a `CreateTime` retry topic evaluates a forwarded record's delay as zero ([case 07](static/07-retry-dlq.md)) |
 | A dependency is down for everybody | pause fetching, rewind, keep polling — do not wait in the handler | the blocking handler lost its membership and rewound the group (exp-16) |
@@ -169,7 +169,8 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 - **The retry chain itself** — the 5 s / 1 m / 10 m topics — is designed and written up but
   has no run behind it. What has a run is the end of that road: exp-11 measured the dead
   letter route, and without it one unreadable record left 91 payments unread behind it.
-- **Schema evolution** is measured now (exp-12): a new subject starts at `NONE` and accepts
+- **Schema evolution** is measured now (exp-12): a new subject checks nothing until a level
+  is set on it, and accepts
   every breaking change; `FULL` lets through a field deletion that `BACKWARD` refuses; and
   neither a removed field nor a retyped one raises a decoding error — the amount simply
   arrives as zero, and the domain rule that an authorised payment is positive is the only

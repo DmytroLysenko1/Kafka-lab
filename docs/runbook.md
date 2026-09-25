@@ -86,12 +86,15 @@ Read the `dlq_reason` header. Two classes, two different problems:
 ## Planned: changing a schema
 
 1. Set the compatibility level on the subject **before** registering anything. A new
-   subject starts at `NONE` and will accept every breaking change (exp-12).
+   subject accepts every breaking change until a level is set on it — measured, on all three
+   changes (exp-12g). Set the level explicitly; do not assume the registry arrived with one.
 2. Do not choose the level by the strongest-sounding name. On Apicurio 3.0.9, `FULL`
    accepts a field deletion that `BACKWARD` refuses.
 3. Adding a field at a new number is safe, and old consumers skip it — measured, not
    assumed. Removing a field or retyping one at the same number is not: nothing raises an
-   error and the value arrives as zero.
+   error and the value arrives as zero. Note where each is stopped: on Apicurio 3.0.9 a
+   retype is refused at registration under both `BACKWARD` and `FULL`, so it reaches the
+   wire only on a subject left at `NONE` — which is where a new subject starts.
 4. Whatever the registry says, keep the domain rule that refuses a nonsense value. In
    exp-12 it was the only layer that noticed.
 

@@ -43,8 +43,11 @@ service's own database, which is the one component a broker outage cannot reach.
 ### A schema change that raises no error anywhere
 
 exp-12 removed a field from the event and retyped another, and published both. The
-consumer decoded them without complaint: protobuf skips what it cannot match, the schema id
-in the record was valid, the registry was happy. `amount_minor` simply arrived as **zero**.
+consumer decoded them without complaint, by two different routes to the same ending: a
+removed field leaves no tag on the wire, so the reader fills its own zero value; a retyped
+one arrives with a wire type that does not match, so protobuf files it under unknown fields
+and leaves the typed field at zero. Either way the schema id in the record was valid, the
+registry was happy, and `amount_minor` simply arrived as **zero**.
 
 The only thing that noticed was a line in the domain — *an authorised payment is for a
 positive amount* — which turned a silent zero into a refusal and a dead letter. Without it

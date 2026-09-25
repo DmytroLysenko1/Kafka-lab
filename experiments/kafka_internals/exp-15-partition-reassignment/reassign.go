@@ -204,17 +204,33 @@ func onDisk(ctx context.Context, topic string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("%w: log dirs: %w", errReassign, err)
 	}
+	if err := answeredEveryBroker(dirs); err != nil {
+		return 0, err
+	}
+	return storedBytes(dirs, topic), nil
+}
 
+// answeredEveryBroker refuses a description in which any broker failed. Such a broker
+// contributes nothing to the sum, which understates the bytes copied and inflates every
+// rate derived from them — quietly, since the total still looks like a measurement.
+func answeredEveryBroker(dirs kadm.DescribedAllLogDirs) error {
+	if len(dirs) == 0 {
+		return fmt.Errorf("%w: no broker described its log dirs", errReassign)
+	}
+	for broker, described := range dirs {
+		if err := described.Error(); err != nil {
+			return fmt.Errorf("%w: log dirs of broker %d: %w", errReassign, broker, err)
+		}
+	}
+	return nil
+}
+
+func storedBytes(dirs kadm.DescribedAllLogDirs, topic string) int64 {
 	var stored int64
 	dirs.Each(func(dir kadm.DescribedLogDir) {
-		for name, partitions := range dir.Topics {
-			if name != topic {
-				continue
-			}
-			for _, partition := range partitions {
-				stored += partition.Size
-			}
+		for _, partition := range dir.Topics[topic] {
+			stored += partition.Size
 		}
 	})
-	return stored, nil
+	return stored
 }

@@ -70,7 +70,7 @@ matter and `autonumber` counts only arrows.
 | 11–13 | `PREPARE_COMMIT` is the point of no return, and it is durable before the caller is told anything. The markers after it are cleanup that will happen eventually, even if the coordinator dies. | Treating a commit timeout as an abort. Same rule as [01](01-write-path.md) step 13: after the request is sent, the outcome is unknown, not failed. |
 | 14–15 | A marker is a control batch, appended to each participating partition, never handed to application code. | Counting records with a raw log dump and finding more than you produced. |
 | 16 | The LSO advances past the marker, and everything in the transaction becomes visible at once. | This is the lag people report as "messages are missing": a `read_committed` consumer is not behind, it is waiting for a marker that has not been written yet ([02](02-log-segments-retention.md), [03](03-read-path.md)). |
-| 17–18 | The step that is drawn outside the frame on purpose. A row in Postgres is not a Kafka partition, so it cannot be a member of the set in step 5: no `AddPartitionsToTxn` can name it, no marker is written to it, and `EndTxn abort` leaves it untouched. | The single most expensive misreading of this feature. An aborted transaction discards the records and commits no offsets, and keeps the row — so the input is reprocessed, the row is written a second time, and the system is at-least-once exactly where it was assumed to be exactly-once (exp-10b). |
+| 17–18 | The step that is drawn outside the frame on purpose. A row in Postgres is not a Kafka partition, so it cannot be a member of the set in step 5: no `AddPartitionsToTxn` can name it, no marker is written to it, and `EndTxn abort` leaves it untouched. | The single most expensive misreading of this feature. An aborted transaction marks its records aborted so `read_committed` is never given them, commits no offsets, and keeps the row — so the input is reprocessed, the row is written a second time, and the system is at-least-once exactly where it was assumed to be exactly-once (exp-10b). |
 
 ## The consumer is half of the guarantee
 
@@ -100,7 +100,7 @@ explosion, and a rebalance that fences the wrong things.
 |---|---|
 | latency | records are invisible until the markers land, so the pipeline's end-to-end latency has the transaction length added to it |
 | a stalled LSO | one hung transaction pins the LSO of its partitions until `transaction.timeout.ms` expires, plus up to the coordinator's 10 s cleanup interval — exp-10d held an unrelated producer's records back for 23.2 s behind a 20 s timeout — franz-go's `TransactionTimeout` defaults to 40 s, Java's to 1 min, and the broker caps both at `transaction.max.timeout.ms`, 15 min. Symptom: `read_committed` consumers show lag while `read_uncommitted` consumers are fine |
-| cluster state | `__transaction_state` needs `transaction.state.log.replication.factor=3` and `transaction.state.log.min.isr=2`, or transactions will not start on a three-broker lab and the error will not say so |
+| cluster state | `__transaction_state` is replicated by `transaction.state.log.replication.factor`, with `transaction.state.log.min.isr` under it; this stand pins them to 3 and 2 (`deploy/docker-compose.yml:32-33`), which three brokers satisfy. The trap is the *smaller* cluster: on one or two brokers an RF of 3 cannot be met, the coordinator never gets its log, transactions do not start — and the error names neither setting |
 | the wrong reach | none of it extends past Kafka |
 
 ## Where it stops, and what replaces it
