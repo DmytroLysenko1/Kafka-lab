@@ -8,14 +8,12 @@ principle. Every "why" here points at a measurement in the
 
 Look at these three, in this order:
 
-1. **The outbox backlog** — records the service owes Kafka, in the service's own Postgres,
-   the one component a broker outage cannot reach. Read it there
-   (`SELECT count(*) FROM outbox WHERE published_at IS NULL`), not from the
-   `outbox_backlog_records` panel: the relay sets that gauge when a sweep finishes, and in a
-   full broker outage no sweep finishes — exp-13 watched it sit at 1 while 308 records
-   waited. Until the relay measures it on its own clock, a flat backlog panel next to
-   `outbox_records_published_total` at zero means the gauge is stale, not that nothing is
-   waiting.
+1. **`outbox_backlog_records`** — records the service owes Kafka, counted in the service's
+   own Postgres, the one component a broker outage cannot reach. The relay counts it on a
+   tick of its own, so it keeps climbing while every sweep is stuck on a dead cluster; it
+   trails the database by about 15 s. (Before that was fixed, exp-13 watched it sit at 1
+   while 308 records waited — if the panel is ever flat while `published/s` is zero, check
+   `SELECT count(*) FROM outbox WHERE published_at IS NULL` directly.)
 2. **`kafka_consumergroup_lag`** — read from the cluster by the exporter, not by the
    consumer: a consumer that has stopped cannot report its own lag.
 3. **`payment_events_dead_lettered_total`** — anything here is a record no retry will fix.

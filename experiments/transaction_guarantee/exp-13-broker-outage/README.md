@@ -18,10 +18,13 @@ make exp-13
 | outbox backlog, highest overall | the same | 469 · 523 · 468 records — reached *after* the brokers returned |
 | what the cluster said about itself | 3 partitions under-replicated | **0 under-replicated, 0 without a leader** |
 | back to the pre-outage backlog | already caught up when it returned | **18.3 s · 24.2 s · 18.3 s** after they returned |
-| what the dashboard's backlog panel showed | 0, and 84 on one scrape | **1, flat, through the whole outage** |
+| what the dashboard's backlog panel showed | 0, and 84 on one scrape | **1, flat, through the whole outage** — and, with the relay fixed, 5 → 460 |
 
 Three runs: two on 2026-09-25 and [one on 2026-09-26](results/run-2026-09-26-162208.log), the
-last also dumping the dashboard's panels from Prometheus for each cell's window.
+last also dumping the dashboard's panels from Prometheus for each cell's window; and a
+fourth, [after the relay fix](results/run-2026-09-26-171149.log), which reproduced the
+cells (303 accepted, 0 refused, 308 during the outage, 458 at the peak, 17.3 s to catch up)
+and is the one where the backlog panel moved.
 
 ## What it shows
 
@@ -60,17 +63,18 @@ timeout. So in the one failure this panel was built for, every panel an operator
 look at said *healthy* — backlog 1, brokers 3, under-replicated 0 — and only
 `published/s` falling to zero said otherwise. The number that moved, in both cells and
 within a second, was the backlog as this experiment read it: straight from Postgres. The
-relay has to measure it on a clock of its own, not at the end of a sweep; that fix is
-owed, and until it lands the runbook points at `published/s` and the database, not at this
-panel. The dashboard also trails the cluster by 15–20 s in cell A (brokers 2 from +40 s to
+relay now counts it on a clock of its own, in a goroutine beside the sweeps, and the rerun
+shows the panel doing its job: 5 before the kill, then 10, 60, 110 … 460 every five
+seconds through the outage, back to 5 once the relay caught up. It trails the database by
+about 15 s — scrape interval plus the relay's tick — which is a lag, not a lie. The dashboard also trails the cluster by 15–20 s in cell A (brokers 2 from +40 s to
 +65 s for a kill at +20 s and a restart at +50 s): scrape interval, exporter polling and
 rate windows, stacked.
 
 That is the part worth carrying into a runbook. The dashboard panel labelled
 "under-replicated partitions" is not a health check for a cluster that has lost its quorum;
 it is a report from a cluster that can no longer tell you anything. The backlog measured in
-the service's own database is the one number the outage could not reach — as long as it is
-read from there, and not from a gauge that only moves when a sweep succeeds.
+the service's own database is the one number the outage could not reach — as long as the
+gauge is counted on its own clock, and not only when a sweep succeeds.
 
 ## Four ways this run lied before it told the truth
 

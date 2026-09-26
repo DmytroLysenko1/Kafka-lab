@@ -14,7 +14,7 @@ The shapes transfer. The magnitudes are the stand's.
 |---|---|---|---|
 | One unreadable record in a partition | Consumer restarting, committed offset stuck, nothing in the logs but the same offset | 10 payments of 100 counted, **91 records never read** — 90 payments and the poison record, 124–125 restarts in 30 s | [exp-11](../experiments/transaction_guarantee/exp-11-poison-pill/) |
 | A broker killed under load | API unaffected, outbox backlog rising | **0 payments refused**, 88–133 records queued, drained before the broker was back | [exp-13](../experiments/transaction_guarantee/exp-13-broker-outage/) |
-| Two brokers killed under load | Same, larger — and the cluster reporting itself healthy | 0 refused, 303–309 queued during the outage and 468–523 at the peak just after it, 18–24 s to catch up; the dashboard's backlog panel read 1 throughout | [exp-13](../experiments/transaction_guarantee/exp-13-broker-outage/) |
+| Two brokers killed under load | Same, larger — and the cluster reporting itself healthy | 0 refused, 303–309 queued during the outage and 468–523 at the peak just after it, 18–24 s to catch up; the dashboard's backlog panel read 1 throughout, until the relay was fixed to count it on its own clock | [exp-13](../experiments/transaction_guarantee/exp-13-broker-outage/) |
 | One merchant's row locked by another transaction, no retry chain | Consumer restarting; the database otherwise healthy | Every payment behind a contended one waited out the **30 s lock, through 13 restarts**; with the chain all 594 went through while it was held, at the price of 280–316 counted out of partition order | [exp-18](../experiments/transaction_guarantee/exp-18-retry-chain/) |
 | A field removed from the event schema | Nothing. No error anywhere | Amount arrives as **zero**; only a domain rule caught it | [exp-12](../experiments/transaction_guarantee/exp-12-schema-evolution/) |
 | The commit placed before the work | Consumer looked healthy | **49 payments lost** out of 1000 | [exp-05](../experiments/transaction_guarantee/exp-05-at-most-once/) |
@@ -42,7 +42,8 @@ moved within a second, in every cell of exp-13, was the outbox backlog — read 
 service's own database, which is the one component a broker outage cannot reach. Read
 there, not from the relay's gauge: the relay sets that at the end of a sweep, no sweep ended
 during the outage, and the dashboard showed a backlog of 1 while 308 records waited. The
-fix is owed to the relay, not to the dashboard.
+relay now counts it on a tick of its own, beside the sweeps, and the rerun shows the panel
+climbing to 460 through the same outage.
 
 ### A schema change that raises no error anywhere
 

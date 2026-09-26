@@ -49,7 +49,7 @@ func New() *Registry {
 		}),
 		outboxBacklog: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "outbox_backlog_records",
-			Help: "Outbox records waiting to be published, as of the last sweep.",
+			Help: "Outbox records waiting to be published, counted by the relay on a tick of its own.",
 		}),
 		eventsHandled: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "payment_events_handled_total",

@@ -1587,8 +1587,10 @@ would look at said *healthy*: under-replicated 0 and `kafka_brokers` 3 — the f
 metadata, as documented — and the outbox backlog **1**, flat, while Postgres held 308. The
 relay sets that gauge when a sweep ends, and during a full outage no sweep ends. The
 backlog was the one number this repo told operators to trust because the outage cannot
-reach it; the database cannot be reached, but the gauge could. Until the relay measures it
-on its own clock, the runbook reads it from Postgres.
+reach it; the database cannot be reached, but the gauge could. The relay now counts it in
+a goroutine of its own beside the sweeps — a test holds a sweep on a publisher that never
+answers and requires the backlog to keep climbing, and fails on the old code — and the
+exp-13 rerun shows the panel going 5, 10, 60 … 460 through the same outage.
 
 **Checked and held.** exp-03, 10d, 11, 12, 15 and 16 reproduced on rerun; exp-08's
 `acks=1` loss reproduced exactly, and its new control cell answered the hypothesis the
