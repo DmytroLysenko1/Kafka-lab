@@ -34,7 +34,8 @@ committed offset, exactly as a restarted pod does.
 | consumer restarts | **124–125** in 30 s | 0 |
 | outcome | never drained in 30 s | drained in **207–322 ms** |
 
-Two runs, 2026-09-25, in [`results/`](results/).
+Three runs, 2026-09-25 and 2026-09-26, in [`results/`](results/); the third was made after
+the offset-read guard went in and lands inside both ranges (124 restarts, 312 ms).
 
 An earlier pair of runs is not in there. A fresh-context review pointed out that the
 backoff between restarts ignored the budget, and the log proved it: the run gave up after
@@ -44,11 +45,12 @@ it rather than being kept alongside numbers measured by a different tool.
 
 ## What it shows
 
-The cost of a poison pill is not the record. It is everything queued behind it: ninety-one
+The cost of a poison pill is not the record. It is everything queued behind it: ninety
 payments that were produced, acknowledged, and never read, on a partition that looks healthy
 from the broker's side — the records are there, the ISR is complete, nothing is lost. What
 is broken is the consumer, and it is broken in the way that hides best: it comes back, it
-reads, it dies, and the lag graph is a flat line rather than a spike.
+reads, it dies, and its committed offset never moves. (Lag was not sampled here; the offset
+and the restart count are what the run measured.)
 
 Cell B is the same failure with somewhere to put it. The record leaves with its bytes
 unchanged and the reason attached, the offset moves, and the ninety records behind it are

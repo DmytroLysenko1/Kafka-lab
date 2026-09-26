@@ -31,7 +31,7 @@ func count(ctx context.Context, cfg *settings, out io.Writer) error {
 	}
 	return render(out, []string{
 		fmt.Sprintf("readable now\t%d records, %d distinct", len(records), len(distinct)),
-		fmt.Sprintf("lost\t%d of the %d that were acknowledged", max(cfg.records-len(distinct), 0), cfg.records),
+		lost(cfg, len(distinct)),
 	})
 }
 
@@ -95,4 +95,15 @@ func render(out io.Writer, lines []string) error {
 		}
 	}
 	return table.Flush()
+}
+
+// lost is the acknowledged records the topic no longer holds. Only whole-or-nothing
+// acknowledgement makes that exact from a count: with some records acknowledged and some
+// not, a readable record may be an unacknowledged one, so the shortfall is a floor.
+func lost(cfg *settings, readable int) string {
+	shortfall := max(cfg.acknowledged-readable, 0)
+	if cfg.acknowledged > 0 && cfg.acknowledged < cfg.records {
+		return fmt.Sprintf("lost\tat least %d of the %d that were acknowledged", shortfall, cfg.acknowledged)
+	}
+	return fmt.Sprintf("lost\t%d of the %d that were acknowledged", shortfall, cfg.acknowledged)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -11,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kadm"
 )
+
+var errNotOnTopic = errors.New("exp-18: a counted payment is not on the main topic")
 
 // lines writes the report and keeps the first error rather than checking each line: a
 // report that failed halfway is one failure, not twenty.
@@ -39,31 +42,16 @@ type counts struct {
 }
 
 func measure(ctx context.Context, pool *pgxpool.Pool, s *settings, produced payments, line *timeline) (counts, error) {
-	rows, err := pool.Query(ctx, "SELECT event_id, consumed_at FROM inbox WHERE event_id = ANY($1)", produced.all)
+	partitions, err := partitionsOf(ctx, s.topic("main"))
 	if err != nil {
-		return counts{}, fmt.Errorf("read the inbox: %w", err)
+		return counts{}, err
 	}
-	defer rows.Close()
-
 	result := counts{
 		hotTotal:     len(produced.hot),
 		healthyTotal: len(produced.all) - len(produced.hot),
 	}
-	for rows.Next() {
-		var eventID string
-		var consumedAt time.Time
-		if err := rows.Scan(&eventID, &consumedAt); err != nil {
-			return counts{}, fmt.Errorf("scan the inbox: %w", err)
-		}
-		result.add(produced.hot[eventID], consumedAt, line)
-		id, err := strconv.ParseInt(eventID, 10, 64)
-		if err != nil {
-			return counts{}, fmt.Errorf("event id %q in the inbox: %w", eventID, err)
-		}
-		result.rows = append(result.rows, counted{eventID: id, hot: produced.hot[eventID], at: consumedAt})
-	}
-	if err := rows.Err(); err != nil {
-		return counts{}, fmt.Errorf("read the inbox: %w", err)
+	if err := result.readInbox(ctx, pool, produced, partitions, line); err != nil {
+		return counts{}, err
 	}
 
 	// Every payment is one minor unit, so the merchants' totals and the inbox must agree to
@@ -76,6 +64,36 @@ func measure(ctx context.Context, pool *pgxpool.Pool, s *settings, produced paym
 	}
 	result.inbox = int64(result.healthy + result.hot)
 	return result, nil
+}
+
+func (c *counts) readInbox(ctx context.Context, pool *pgxpool.Pool, produced payments, partitions map[int64]int32, line *timeline) error {
+	rows, err := pool.Query(ctx, "SELECT event_id, consumed_at FROM inbox WHERE event_id = ANY($1)", produced.all)
+	if err != nil {
+		return fmt.Errorf("read the inbox: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var eventID string
+		var consumedAt time.Time
+		if err := rows.Scan(&eventID, &consumedAt); err != nil {
+			return fmt.Errorf("scan the inbox: %w", err)
+		}
+		c.add(produced.hot[eventID], consumedAt, line)
+		id, err := strconv.ParseInt(eventID, 10, 64)
+		if err != nil {
+			return fmt.Errorf("event id %q in the inbox: %w", eventID, err)
+		}
+		partition, ok := partitions[id]
+		if !ok {
+			return fmt.Errorf("%w: event %d", errNotOnTopic, id)
+		}
+		c.rows = append(c.rows, counted{eventID: id, partition: partition, hot: produced.hot[eventID], at: consumedAt})
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read the inbox: %w", err)
+	}
+	return nil
 }
 
 func (c *counts) add(hot bool, consumedAt time.Time, line *timeline) {
@@ -142,8 +160,8 @@ func writeChain(ctx context.Context, written *lines, admin *kadm.Client, s *sett
 // waits the healthy payments sat through — both read from the inbox, not inferred.
 func writeOrder(written *lines, rows []counted) {
 	order := reorderingOf(rows)
-	written.printf("payments counted ahead of an earlier contended payment: %d\n", order.overtakes)
-	written.printf("contended payments counted out of the order they were produced in: %d of %d pairs\n", order.hotInversions, order.hotPairs)
+	written.printf("payments counted ahead of an earlier contended payment on their partition: %d\n", order.overtakes)
+	written.printf("contended payments on one partition counted out of the order they were produced in: %d of %d pairs\n", order.hotInversions, order.hotPairs)
 	gaps := stalls(rows)
 	parts := make([]string, 0, len(gaps))
 	var total time.Duration

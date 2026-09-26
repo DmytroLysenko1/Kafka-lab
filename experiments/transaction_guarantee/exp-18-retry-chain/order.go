@@ -9,25 +9,34 @@ import (
 // consumer counts a payment in a few milliseconds, and a lock wait is two seconds.
 const stallThreshold = 300 * time.Millisecond
 
-// counted is one inbox row: which payment, whether it was the locked merchant's, and when
-// the consumer counted it. The event id is the order the payments were produced in.
+// counted is one inbox row: which payment, the partition it was produced to, whether it was
+// the locked merchant's, and when the consumer counted it. The event id is the order the
+// payments were produced in.
 type counted struct {
-	eventID int64
-	hot     bool
-	at      time.Time
+	eventID   int64
+	partition int32
+	hot       bool
+	at        time.Time
 }
 
-// reordering is what the chain does to the order payments were produced in. It reorders
-// on purpose — a contended payment steps aside and the ones behind it go first — and this
-// is how much.
+// reordering is what the chain does to the order payments were produced in, within a
+// partition — the only order Kafka keeps. It reorders on purpose — a contended payment steps
+// aside and the ones behind it go first — and this is how much.
 type reordering struct {
-	// overtakes is the number of (earlier contended payment, later payment) pairs where the
-	// later one was counted first.
+	// overtakes is the number of (earlier contended payment, later payment on the same
+	// partition) pairs where the later one was counted first.
 	overtakes int
-	// hotInversions is the number of pairs of contended payments counted in the opposite
-	// order to the one they were produced in: whether the chain kept their own order.
+	// hotInversions is the number of same-partition pairs of contended payments counted in
+	// the opposite order to the one they were produced in: whether the chain kept their own
+	// order.
 	hotInversions int
 	hotPairs      int
+}
+
+// follows reports whether this payment was produced after earlier into the same partition:
+// the only pairs Kafka promises an order for.
+func (c counted) follows(earlier counted) bool {
+	return c.partition == earlier.partition && c.eventID > earlier.eventID
 }
 
 func reorderingOf(rows []counted) reordering {
@@ -40,11 +49,12 @@ func reorderingOf(rows []counted) reordering {
 	return result
 }
 
-// against counts, for one contended payment, every payment produced after it that was
-// counted before it, and every later contended one that kept or broke their order.
+// against counts, for one contended payment, every payment produced after it to the same
+// partition that was counted before it, and every such contended one that kept or broke
+// their order.
 func (r *reordering) against(earlier counted, rows []counted) {
 	for _, later := range rows {
-		if later.eventID <= earlier.eventID {
+		if !later.follows(earlier) {
 			continue
 		}
 		overtook := later.at.Before(earlier.at)

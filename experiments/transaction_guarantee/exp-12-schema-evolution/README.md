@@ -20,8 +20,9 @@ would compare the next change against that instead of against the baseline.
 | remove a field | accepted | **refused** | accepted |
 | retype a field, keeping its number | accepted | **refused** | **refused** |
 
-Two things worth stopping at. **`NONE` is the default** — a new subject accepts every one
-of these changes, so "we have a schema registry" on its own buys nothing; the setting is
+Two things worth stopping at. **`NONE` is the default** — the third run asks before setting
+anything, and a subject just created reports `NONE`, as does the registry-wide default;
+under `NONE` it accepted every one of these changes, so "we have a schema registry" on its own buys nothing; the setting is
 the protection, not the server. And **`FULL` is not `BACKWARD` plus more**: Apicurio 3.0.9
 lets a field removal through under `FULL` while refusing it under `BACKWARD`. Whoever picks
 the level by the strongest-sounding name gets the weaker rule for that change.
@@ -39,12 +40,16 @@ The same three changes written as records, read by a consumer built against the 
 
 Note what did **not** happen: neither destructive change produced a decoding error.
 Protobuf skipped what it could not match and handed the consumer a message whose
-`amount_minor` was zero. The reason both records ended up in the dead letter topic is not
+`amount_minor` was zero — read off the refusal, which is the domain rule for a
+non-positive amount; the run does not print the decoded value itself. The reason both records ended up in the dead letter topic is not
 the parser — it is the domain rule that an authorised payment is for a positive amount.
 Without that rule the merchant's total would have taken two payments of zero, and every
 part of the system would have reported success.
 
-Two runs, 2026-09-25, in [`results/`](results/).
+Three runs, 2026-09-25 and 2026-09-26, in [`results/`](results/). The first two set `NONE`
+explicitly and did not record what an unconfigured subject reports; the third
+([log](results/run-2026-09-26-025512.log)) asks first, and that is what the default is
+quoted from.
 
 ## What it shows
 

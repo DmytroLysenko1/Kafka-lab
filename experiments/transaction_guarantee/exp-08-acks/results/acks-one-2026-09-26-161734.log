@@ -1,0 +1,22 @@
+exp-08a — what acks=1 acknowledges, and whether it survives
+date: 2026-09-26-161734
+client: franz-go v1.22.0
+records: 2000 of 4096 bytes, uncompressed
+
+LEADER_P0         1
+in-sync replicas  [1 2 3] of [1 2 3]
+
+pausing the followers: 2 3
+acks          1, the leader answers on its own append
+acknowledged  2000 of 2000
+
+killing kafka1, the leader that acknowledged them, then thawing the followers
+followers paused for 1s, against a broker.session.timeout.ms of 9000ms
+in-sync set shrank after  10.3s
+in-sync replicas          [2 3] of [1 2 3]
+
+LEADER_P0         2
+in-sync replicas  [2 3] of [1 2 3]
+
+readable now  0 records, 0 distinct
+lost          2000 of the 2000 that were acknowledged

@@ -8,8 +8,14 @@ principle. Every "why" here points at a measurement in the
 
 Look at these three, in this order:
 
-1. **`outbox_backlog_records`** — records the service owes Kafka. Read from the service's
-   own Postgres, which is the one component a broker outage cannot reach.
+1. **The outbox backlog** — records the service owes Kafka, in the service's own Postgres,
+   the one component a broker outage cannot reach. Read it there
+   (`SELECT count(*) FROM outbox WHERE published_at IS NULL`), not from the
+   `outbox_backlog_records` panel: the relay sets that gauge when a sweep finishes, and in a
+   full broker outage no sweep finishes — exp-13 watched it sit at 1 while 308 records
+   waited. Until the relay measures it on its own clock, a flat backlog panel next to
+   `outbox_records_published_total` at zero means the gauge is stale, not that nothing is
+   waiting.
 2. **`kafka_consumergroup_lag`** — read from the cluster by the exporter, not by the
    consumer: a consumer that has stopped cannot report its own lag.
 3. **`payment_events_dead_lettered_total`** — anything here is a record no retry will fix.
@@ -17,8 +23,10 @@ Look at these three, in this order:
 And know which number lies. **Under-replicated partitions is not a health check.** If the
 cluster has lost its controller quorum, nothing can update the metadata and the survivors
 keep serving the last healthy picture — exp-13 read zero under-replicated and zero
-leaderless partitions through an outage in which nothing could be published. A green
-replication panel plus a growing outbox backlog means the cluster, not the service.
+leaderless partitions through an outage in which nothing could be published, and
+`kafka_brokers` read 3 with two of them dead — the exporter asks the same frozen metadata.
+A green replication panel plus a growing outbox backlog, or plus a publish rate at zero,
+means the cluster, not the service.
 
 ## The backlog is growing
 
@@ -35,7 +43,7 @@ of three brokers were dead.
    `docker compose ps`. Below `min.insync.replicas` nothing publishes at all.
 
 **What to expect once the cluster is back:** the relay drains on its own, at roughly its
-batch size per sweep interval. exp-13 worked off 469–523 records in 18–24 s while payments
+batch size per sweep interval. exp-13 worked off 468–523 records in 18–24 s while payments
 kept arriving at 10/s.
 
 **Do not** restart the relay to "unstick" it. A restart re-reads from the last committed
@@ -106,7 +114,7 @@ will be archived again, with a new reason and the same bytes. Letters archived b
 
 1. `make check` — non-zero means drift or an unhealthy cluster.
 2. One broker with RF 3 and `min.insync.replicas=2` is survivable: writes continue, the
-   partitions it led need a new leader first. exp-13 saw 88–91 records queue during that
+   partitions it led need a new leader first. exp-13 saw 88–133 records queue during that
    election and drain before the broker was back.
 3. When it returns, leadership does **not** come back on its own: this stand has auto
    leader rebalance switched off. Run `make elect-preferred`, then `make check`.
@@ -140,15 +148,15 @@ will be archived again, with a new reason and the same bytes. Letters archived b
 - **`--verify` is not a status check.** It is what removes the throttle `--execute` set.
   Stop before it and every later replication on that cluster crawls at the throttled rate
   with nothing in the topic's config to explain why.
-- **Size the move by the per-broker rate, not the cluster's.** exp-15: 66 MiB onto three
-  brokers at 1 MiB/s took 24 s, matching 22 MiB per broker — not 66.
+- **Size the move by the per-broker rate, not the cluster's.** exp-15: 71–73 MiB onto three
+  brokers at 1 MiB/s took 24.8–25.9 s over three runs, matching ~24 MiB per broker — not 72.
 
 ## Planned: restarting a consumer
 
 With `group.instance.id` set, a restart inside the session timeout costs one rebalance of
 nothing: exp-14b measured 2.05 s of idle partitions and no reassignment. Without it, the
-same restart costs a full rebalance — and its cost depends on the protocol: 39–75 ms eager,
-0.52–0.68 s cooperative, 4.9–6.5 s under KIP-848 (exp-14).
+same restart costs a full rebalance — and its cost depends on the protocol: nothing measurable eager (gaps within the baseline poll cycle),
+0.51–0.68 s cooperative, 4.9–6.5 s under KIP-848 (exp-14).
 
 The trade is the other side of that coin: with a static id, a member that dies for good is
 only noticed when the session expires — 12.6 s of partitions nobody reads.

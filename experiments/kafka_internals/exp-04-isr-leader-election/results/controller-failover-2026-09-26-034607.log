@@ -1,0 +1,23 @@
+exp-04 run 2026-09-26-034607: the killed broker, kafka3, was the active KRaft controller.
+Excerpts from the surviving brokers' logs (UTC; the run's clock is UTC+3).
+
+## kafka1
+[2026-09-26 00:46:01,647] INFO Recorded new KRaft controller, from now on will use node kafka3:9093 (id: 3 rack: null isFenced: false) (org.apache.kafka.server.NodeToControllerRequestThread)
+[2026-09-26 00:46:15,528] INFO [RaftManager id=1] Completed transition to ProspectiveState(epoch=304, leaderId=OptionalInt[3], votedKey=Optional[ReplicaKey(id=3, directoryId=g5okPGfwQGLYyrkIdOEGKA)], 
+[2026-09-26 00:46:15,541] INFO [RaftManager id=1] Completed transition to CandidateState(localId=1, localDirectoryId=V-L0K1wSJ0l5N1ZXQu2dng, epoch=305, 
+[2026-09-26 00:46:16,760] INFO [RaftManager id=1] Completed transition to UnattachedState(epoch=306, leaderId=OptionalInt.empty, votedKey=Optional.empty, voters=[1, 2, 3], electionTimeoutMs=769, highWatermark=Optional[LogOffsetMetadata(offset=590632, metadata=Optional.empty)]) from CandidateState(localId=1, localDirectoryId=V-L0K1wSJ0l5N1ZXQu2dng, epoch=305, 
+[2026-09-26 00:46:16,761] INFO [RaftManager id=1] Completed transition to UnattachedState(epoch=306, leaderId=OptionalInt.empty, votedKey=Optional[ReplicaKey(id=2, directoryId=8a4rp2W2g9eoQDLUZME_DA)], voters=[1, 2, 3], electionTimeoutMs=1096, highWatermark=Optional[LogOffsetMetadata(offset=590632, metadata=Optional.empty)]) from UnattachedState(epoch=306, leaderId=OptionalInt.empty, votedKey=Optional.empty, voters=[1, 2, 3], electionTimeoutMs=769, highWatermark=Optional[LogOffsetMetadata(offset=590632, metadata=Optional.empty)]) (org.apache.kafka.raft.QuorumState)
+[2026-09-26 00:46:16,772] INFO [RaftManager id=1] Completed transition to FollowerState(fetchTimeoutMs=2000, epoch=306, leader=2, leaderEndpoints=Endpoints(endpoints={ListenerName(CONTROLLER)=kafka2/<unresolved>:9093}), votedKey=Optional[ReplicaKey(id=2, directoryId=8a4rp2W2g9eoQDLUZME_DA)], voters=[1, 2, 3], highWatermark=Optional[LogOffsetMetadata(offset=590632, metadata=Optional.empty)], fetchingSnapshot=Optional.empty) from UnattachedState(epoch=306, leaderId=OptionalInt.empty, votedKey=Optional[ReplicaKey(id=2, directoryId=8a4rp2W2g9eoQDLUZME_DA)], voters=[1, 2, 3], electionTimeoutMs=1096, highWatermark=Optional[LogOffsetMetadata(offset=590632, metadata=Optional.empty)]) (org.apache.kafka.raft.QuorumState)
+[2026-09-26 00:46:16,993] INFO Recorded new KRaft controller, from now on will use node kafka2:9093 (id: 2 rack: null isFenced: false) (org.apache.kafka.server.NodeToControllerRequestThread)
+[2026-09-26 00:46:34,343] INFO Recorded new KRaft controller, from now on will use node kafka2:9093 (id: 2 rack: null isFenced: false) (org.apache.kafka.server.NodeToControllerRequestThread)
+[2026-09-26 00:46:35,682] INFO Recorded new KRaft controller, from now on will use node kafka2:9093 (id: 2 rack: null isFenced: false) (org.apache.kafka.server.NodeToControllerRequestThread)
+
+## kafka2
+[2026-09-26 00:46:01,146] INFO [BrokerServer id=2] Waiting for the broker to be unfenced (kafka.server.BrokerServer)
+[2026-09-26 00:46:01,177] INFO [BrokerLifecycleManager id=2] The broker has been unfenced. Transitioning from RECOVERY to RUNNING. (org.apache.kafka.server.BrokerLifecycleManager)
+[2026-09-26 00:46:01,177] INFO [BrokerServer id=2] Finished waiting for the broker to be unfenced (kafka.server.BrokerServer)
+[2026-09-26 00:46:15,542] INFO [RaftManager id=2] Completed transition to CandidateState(localId=2, localDirectoryId=8a4rp2W2g9eoQDLUZME_DA, epoch=305, 
+[2026-09-26 00:46:16,757] INFO [RaftManager id=2] Completed transition to CandidateState(localId=2, localDirectoryId=8a4rp2W2g9eoQDLUZME_DA, epoch=306, 
+[2026-09-26 00:46:17,198] INFO Recorded new KRaft controller, from now on will use node kafka2:9093 (id: 2 rack: null isFenced: false) (org.apache.kafka.server.NodeToControllerRequestThread)
+[2026-09-26 00:46:34,350] INFO Recorded new KRaft controller, from now on will use node kafka2:9093 (id: 2 rack: null isFenced: false) (org.apache.kafka.server.NodeToControllerRequestThread)
+[2026-09-26 00:46:39,235] INFO Recorded new KRaft controller, from now on will use node kafka2:9093 (id: 2 rack: null isFenced: false) (org.apache.kafka.server.NodeToControllerRequestThread)

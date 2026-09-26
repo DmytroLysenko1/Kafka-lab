@@ -1,0 +1,56 @@
+exp-18 — contention on one merchant, with and without the retry chain
+date: 2026-09-26-161858
+client: franz-go v1.22.0
+lock wait before a payment counts as contended: 2s (postgres.lockWait); tiers 3s / 6s / 12s
+hold in cells A and B: 30s; budget per cell: 3m
+
+== cell A: no chain ==
+payments: 600, of them 6 for the locked merchant
+first payment counted at: +40ms (the group joining and fetching, before any payment is handled)
+healthy payments counted: 594 of 594, the last at +30.55s
+healthy payments counted while the merchant was still locked: 280 of 594
+contended payments counted: 6 of 6, the last at +30.38s
+lock released at: +30s
+payments counted ahead of an earlier contended payment on their partition: 0
+contended payments on one partition counted out of the order they were produced in: 0 of 1 pairs
+waits between healthy payments of 300ms or more: 4, together 29.5s [2.26s 15.88s 4.54s 6.81s]
+consumer restarts: 13
+inbox rows: 600, merchants' totals: 600 — every counted payment counted once
+drained
+
+== cell B: the chain, lock released after 30s ==
+payments: 600, of them 6 for the locked merchant
+first payment counted at: +30ms (the group joining and fetching, before any payment is handled)
+healthy payments counted: 594 of 594, the last at +16.99s
+healthy payments counted while the merchant was still locked: 594 of 594
+contended payments counted: 6 of 6, the last at +38.99s
+lock released at: +30s
+payments counted ahead of an earlier contended payment on their partition: 280
+contended payments on one partition counted out of the order they were produced in: 0 of 2 pairs
+waits between healthy payments of 300ms or more: 6, together 15.75s [2.03s 2.01s 2.02s 3.7s 3.98s 2.01s]
+consumer restarts: 0
+copies into exp18.b.retry.3s: 6
+copies into exp18.b.retry.6s: 6
+copies into exp18.b.retry.12s: 3
+copies into exp18.b.dlq: 0
+inbox rows: 600, merchants' totals: 600 — every counted payment counted once
+drained
+
+== cell C: the chain, lock held until every contended payment is archived, then replayed ==
+payments: 600, of them 6 for the locked merchant
+first payment counted at: +30ms (the group joining and fetching, before any payment is handled)
+healthy payments counted: 594 of 594, the last at +17.02s
+healthy payments counted while the merchant was still locked: 594 of 594
+contended payments counted: 6 of 6, the last at +56.55s
+lock released at: +53.01s
+payments counted ahead of an earlier contended payment on their partition: 316
+contended payments on one partition counted out of the order they were produced in: 0 of 4 pairs
+waits between healthy payments of 300ms or more: 6, together 15.78s [2.03s 2.01s 2.01s 3.76s 3.96s 2.01s]
+consumer restarts: 0
+copies into exp18.c.retry.3s: 12
+copies into exp18.c.retry.6s: 6
+copies into exp18.c.retry.12s: 6
+copies into exp18.c.dlq: 6
+replayed: 6 dead letters (0 of other classes skipped), finished at +53.07s
+inbox rows: 600, merchants' totals: 600 — every counted payment counted once
+drained

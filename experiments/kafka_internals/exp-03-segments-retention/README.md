@@ -21,9 +21,11 @@ rolls the segment and waits for the log to change rather than sleeping for a gue
 Segments roll on `segment.ms`, not `segment.bytes`: **Kafka 4.x refuses a `segment.bytes`
 below 1 MiB**, so the advice to shrink it to kilobytes no longer works.
 
-## Result — 2026-09-20
+## Result — 2026-09-20, repeated 2026-09-26
 
-[run log](results/run-2026-09-20-200653.log). Two earlier runs under
+[run log](results/run-2026-09-20-200653.log) · [repeat](results/run-2026-09-26-025322.log),
+made after the offset-read guard went in (`labkit.OffsetAt`): every number below came out
+identical. Two earlier runs under
 [`results/superseded/`](results/superseded/) were produced by a broken instrument and back
 no number here.
 

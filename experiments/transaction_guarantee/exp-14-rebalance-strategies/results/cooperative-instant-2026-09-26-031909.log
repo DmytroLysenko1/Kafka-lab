@@ -1,0 +1,35 @@
+exp-14 — a second consumer joins, strategy: cooperative, handler: instant
+date: 2026-09-26-031909
+client: franz-go v1.22.0
+
+strategy                   cooperative: CooperativeStickyBalancer, classic protocol, only moving partitions revoked
+group                      exp14-cooperative-1790381998079330000
+load                       1200 records/s over 6 partitions
+handler                    0s a record, franz-go's default: rebalances run beside the handler
+membership                 dynamic, session timeout 12s
+second consumer joined at  15s
+
+assignment changes after the first
+  15.53s  A revoked []
+  15.53s  B assigned []
+  15.53s  A revoked [3 4 5]
+  15.53s  A assigned []
+  15.53s  A revoked []
+  16.04s  B revoked []
+  16.04s  A assigned []
+  16.04s  B assigned [3 4 5]
+  35.02s  A revoked [0 1 2]
+  35.02s  B revoked [3 4 5]
+
+partition  longest gap, 10s before the join  longest gap, from 2s before to 15s after
+  0        49ms                              51ms
+  1        42ms                              45ms
+  2        42ms                              42ms
+  3        42ms                              528ms
+  4        42ms                              537ms
+  5        48ms                              533ms
+
+partitions stopped for more than 1s                0 of 6
+longest time the whole group handled nothing       42ms
+records handled twice                              0
+records missed between the first and last handled  0

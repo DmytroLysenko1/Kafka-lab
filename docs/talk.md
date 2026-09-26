@@ -57,7 +57,10 @@ which of your mistakes is possible.
 
 **What the run said.** With `min.insync.replicas=3` and one broker killed, `acks=all`
 **refused all 2 000 writes**. With `acks=1` and the followers held back, the producer
-reported success for **2 000 records that were then lost**.
+reported success for **2 000 records that were then lost**. And under that same failure,
+step for step, `acks=all` at `min.insync.replicas=2` acknowledged **none of them** — the
+records were gone just the same, but the producer had been told so within 3 s, and nothing
+it believed written was lost.
 
 **Monday.** `acks=all` does not make writes safe on its own — it is `min.insync.replicas`
 that decides how many copies count, and this run had it at 3. Together they make *unsafe
@@ -76,7 +79,7 @@ can hold what the broker refuses. Which is the next section.
 and the event in one transaction.
 
 **What the run said.** Ten payments a second through the real API while two of three
-brokers were killed for thirty seconds: **303 payments accepted, none refused**, 469–523
+brokers were killed for thirty seconds: **303 payments accepted, none refused**, 468–523
 records queued in Postgres, and the relay worked them off in 18–24 seconds once the cluster
 was whole.
 
@@ -102,7 +105,10 @@ an operation that needs the controller.
 **Monday.** A green replication panel is not a health check for a cluster that may have
 lost its quorum — it is a report from a component that can no longer tell you anything, and
 it reads as good news. Watch a number the outage cannot reach: the outbox backlog, in your
-own database.
+own database — counted there, not by a process that only reports it after a publish
+succeeds. This stand's own dashboard got that wrong: its backlog panel read 1 through the
+whole outage while 308 records waited, because the relay set it at the end of a sweep and
+no sweep ended.
 
 > exp-13 again. This is the line the [runbook](runbook.md) opens with.
 
@@ -137,12 +143,13 @@ nonsense; on this evidence it is the last one standing.
 **What everyone says.** A poison record is an annoyance; you deal with it eventually.
 
 **What the run said.** One undecodable record after the tenth of a hundred, with no dead
-letter route: **10 payments counted, 91 produced-and-never-read, and 124–125 process
-restarts in thirty seconds.** With the route: the same content drained in **207–322 ms**
+letter route: **10 payments counted, the other 90 produced and never read, and 124–125
+process restarts in thirty seconds.** With the route: the same content drained in **207–322 ms**
 and the record left with its bytes and a reason attached.
 
-It hides better than an outage. The pod restarts, the lag graph is a flat line rather than
-a spike, and the logs repeat one offset.
+It hides better than an outage. The pod restarts, the committed offset never moves, and the
+logs repeat one offset — the run did not sample lag, so what the lag graph would have drawn
+is not something it can say.
 
 **Monday.** The cost of a poison pill is not the record, it is the queue behind it. And the
 classification is the whole trick: only "this will never work" may leave the partition. A
@@ -191,8 +198,10 @@ go build -o /tmp/consumer ./cmd/payments-consumer   # program it built, and the 
 ```
 
 Open Grafana on `localhost:3000`, take a payment with `curl`, watch it go through. Then
-`docker kill kafka-lab-kafka1 kafka-lab-kafka2` and watch two things at once: the outbox
-backlog climbing, and the replication panel insisting everything is fine.
+`docker kill kafka-lab-kafka1 kafka-lab-kafka2` and watch the replication and broker panels
+insist everything is fine while `published/s` drops to zero — and the backlog panel stay
+flat, which is the stand's own bug from exp-13, until the relay measures it on its own
+clock.
 
 The interactive walkthroughs in [`dynamic/`](dynamic/) tell the same stories step by step —
 write path, read path, the lost message, the outbox, the rebalance, the retry chain — and

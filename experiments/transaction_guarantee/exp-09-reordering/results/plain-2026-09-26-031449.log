@@ -14,3 +14,30 @@ in-sync set whole again after  5s
 in-sync replicas               [1 2 3] of [3 1 2]
 
 flap 2: freezing kafka1
+in-sync set shrank after  25.3s
+in-sync replicas          [2 3] of [3 1 2]
+in-sync set whole again after  0s
+in-sync replicas               [1 2 3] of [3 1 2]
+
+flap 3: freezing kafka1
+in-sync set shrank after  20.3s
+in-sync replicas          [2 3] of [3 1 2]
+in-sync set whole again after  5s
+in-sync replicas               [1 2 3] of [3 1 2]
+
+producer                          idempotence off, 5 requests in flight, acks=all
+events produced                   176660
+acknowledged                      176660
+failed                            0
+PRODUCED                          176660
+written, success ignored, resent  0 records — rewound behind a failed batch
+retried, NOT_ENOUGH_REPLICAS      17 batches, 2118 records — refused before the append
+retried, REQUEST_TIMED_OUT        2 batches, 191 records — appended before the refusal: the retry duplicates it unless the producer is idempotent
+
+producer                 idempotence off, 5 requests in flight, acks=all
+produced                 176660, read back 176851, distinct 176660
+  out of order           0
+  refund before capture  0 payments
+  duplicated             191
+  missing                0
+  verdict                reported as found — the plain producer promises nothing to check it against

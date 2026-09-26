@@ -19,15 +19,20 @@ handed those 100.
 | `TRANSACTION_TIMEOUT` | 20 s | short enough to run, long enough to be unmistakable next to fetch latency |
 | `RECORDS` | 100 | the unrelated producer's writes |
 
-## Result — 2026-09-21
+## Result — 2026-09-21, and 2026-09-26
 
-[run log](results/run-2026-09-21-190032.log) · [broker transaction timers](results/broker-transaction-timers.log)
+[run 1](results/run-2026-09-21-190032.log) · [run 2](results/run-2026-09-26-025347.log) ·
+[broker transaction timers](results/broker-transaction-timers.log)
 
-| | |
-|---|---|
-| high watermark / last stable offset | **101 / 0** — 101 records of lag, none deliverable |
-| `read_uncommitted` saw the 100 after | **0 s** |
-| `read_committed` saw them after | **23.2 s** |
+| | run 1 | run 2 |
+|---|---|---|
+| high watermark / last stable offset | **101 / 0** | **101 / 0** — 101 records of lag, none deliverable |
+| `read_uncommitted` saw the 100 after | **0 s** | **0 s** |
+| `read_committed` saw them after | **23.2 s** | **27.3 s** |
+
+Run 2 was made after the offset-read guard went in (`labkit.OffsetAt`): run 1's "last stable
+offset 0" was read by the instrument that could turn a failed lookup into 0, and run 2 reads
+the same 0 through one that refuses to.
 
 An unrelated producer with no transaction was held back for the whole life of someone
 else's. Every dashboard would show 101 records of lag while nothing could be read — "lag
@@ -35,7 +40,7 @@ without messages", made on purpose.
 
 **The stall is longer than the timeout.** The coordinator scans for expired transactions
 every `transaction.abort.timed.out.transaction.cleanup.interval.ms`, 10 s by default, so a
-20 s timeout releases readers between 20 and 30 s. franz-go defaults the timeout to 40 s
+20 s timeout releases readers between 20 and 30 s — 23.2 s and 27.3 s in the two runs. franz-go defaults the timeout to 40 s
 (Java 60 s), and `transaction.max.timeout.ms` lets a producer ask for up to 15 minutes. The
 clock starts at the transaction's first record, not at `Begin`.
 

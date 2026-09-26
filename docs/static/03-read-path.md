@@ -75,13 +75,15 @@ more data at once than a handler expects, and that is where "the consumer sudden
 This file describes the **classic** group protocol: `JoinGroup`, `SyncGroup`,
 generations, assignment computed by a member. KIP-848 is GA in Kafka 4.0 and replaces it
 with incremental, broker-side assignment carried over `ConsumerGroupHeartbeat`, removing
-the round trip drawn above. Before quoting either version, confirm which protocol the
-pinned franz-go build negotiates against the pinned broker image — the answer belongs in
-the write-up, not in an assumption.
+the round trip drawn above. The service speaks the classic protocol: franz-go v1.22.0, the
+version `go.mod` pins, joins a KIP-848 group only when `ServerSideBalancer()` is set, and
+`internal/infrastructure/kafka/consumer.go` does not set it, so its groups rebalance
+cooperatively with the client's default `CooperativeStickyBalancer`. exp-14 measured both
+protocols against the stand's broker ([08](08-rebalance.md)).
 
 ## To be measured
 
 | Run | What it shows | Status |
 |---|---|---|
-| exp-02 | one merchant sending four events in five, then more consumers | **85% of the topic landed on one partition, and adding members bought nothing measurable: 5.63 s with one, then 5.12, 4.95, 4.81 and 4.76 s at two, three, six and seven. The seventh member handled nothing at all, yet its cell is 0.05 s faster than the sixth — so the spread across five single-shot cells is run-to-run variance, not parallelism. The hot partition is served by exactly one member throughout, which is the ceiling.** [run](../../experiments/kafka_internals/exp-02-hot-partition/results/run-2026-09-20-200615.log) |
+| exp-02 | one merchant sending four events in five, then more consumers | **85% of the topic landed on one partition, which caps any group at 1.17× one consumer — and six members reached 1.12–1.16× over three runs, so they bought exactly what the ceiling allowed. The control cell, the same events over a thousand merchants, shows the stand is not the limit: six members drained it 5.2–5.8× faster than one. The seventh member handled nothing in either cell.** [run](../../experiments/kafka_internals/exp-02-hot-partition/results/run-2026-09-26-032720.log) |
 | exp-16 | a dependency outage and a lag spike, with a handler that retries inline against one that pauses fetching ([07](07-retry-dlq.md)) | **the same lag either way, 7 940–8 501 records drained in 10–13 s; inline: member removed, a commit refused, a stale commit rewinding a partition 1 726–1 732 records; paused: none of it** ([exp-16](../../experiments/transaction_guarantee/exp-16-lag-backpressure/)) |

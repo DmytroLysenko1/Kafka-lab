@@ -62,3 +62,33 @@ func TestRefusalClaimsOnlyTheFailureThisHalfExistsToShow(t *testing.T) {
 		})
 	}
 }
+
+// The third cell's first run printed "lost 2000 of the 2000 that were acknowledged" for a
+// producer that was acknowledged nothing: loss was measured against what was sent.
+func TestLostCountsOnlyWhatTheProducerWasToldYesTo(t *testing.T) {
+	tests := []struct {
+		name         string
+		acknowledged int
+		readable     int
+		want         string
+	}{
+		{name: "nothing acknowledged, nothing readable: nothing lost", acknowledged: 0, readable: 0, want: "lost\t0 of the 0 that were acknowledged"},
+		{name: "all acknowledged, none readable: all lost", acknowledged: 2000, readable: 0, want: "lost\t2000 of the 2000 that were acknowledged"},
+		{name: "all acknowledged, all readable", acknowledged: 2000, readable: 2000, want: "lost\t0 of the 2000 that were acknowledged"},
+		{
+			// A readable record may be one of the unacknowledged ones, so the count
+			// can only bound the loss from below.
+			name: "some acknowledged: the shortfall is a floor", acknowledged: 1500, readable: 1200,
+			want: "lost\tat least 300 of the 1500 that were acknowledged",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &settings{records: 2000, acknowledged: tt.acknowledged}
+			if got := lost(cfg, tt.readable); got != tt.want {
+				t.Errorf("lost(%d acknowledged, %d readable) = %q, want %q", tt.acknowledged, tt.readable, got, tt.want)
+			}
+		})
+	}
+}

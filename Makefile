@@ -134,8 +134,8 @@ test-race:
 test-integration:
 	go test -race -count=1 -tags=integration ./internal/...
 
-# The module has no packages until the service stage; go vet and golangci-lint fail on an
-# empty module, so verify says so instead of reporting a red build for code that is absent.
+# go vet and golangci-lint fail on a module with no packages, so verify says so instead of
+# reporting a red build for code that is absent.
 verify:
 	@packages="$$(go list ./... 2>/dev/null)"; status=$$?; \
 	if [ $$status -ne 0 ]; then go list ./...; exit $$status; \

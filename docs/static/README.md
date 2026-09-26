@@ -29,7 +29,9 @@ tech talk; a reviewer reads this package, an audience watches that one.
    volume ([01](01-write-path.md), exp-01).
 2. **One partition is served by one member of a group.** The partition count is a hard
    ceiling on consumers; extras idle ([03](03-read-path.md), exp-02). Adding partitions
-   later breaks the existing key→partition mapping.
+   later breaks the existing key→partition mapping: on franz-go's default partitioner, going
+   from 6 partitions to 7 moves about six keys in seven, and doubling to 12 moves half
+   (`experiments/kafka_internals/exp-01-partition-keys/partitions_test.go`).
 
 ## The four "current offsets" — [02](02-log-segments-retention.md)
 
@@ -75,7 +77,7 @@ the defaults that decide an outcome on their own.
 | `auto.offset.reset`, part 1: where a **new group** starts | `latest` in Java, **`AtStart` (earliest) in franz-go** (`ConsumeStartOffset`) | the two clients default in opposite directions: a new group either replays all history or silently skips it |
 | `auto.offset.reset`, part 2: what happens to a **committed offset that fell out of retention** | `latest` or `earliest` in Java, **the log start** in franz-go (`ConsumeResetOffset`) | franz-go splits the one Java setting in two, and the second half splits again by cause. For this row's case — a commit that fell below the log start — it resumes at the log start, i.e. Java's `earliest`: *"every record that still exists is one it never consumed"*. Its `RewindOffset(1m)` default is what it does after **mid-stream data loss** — a broker that lost records, an epoch it cannot place — and *that* is the behaviour Kafka has no equivalent for. Reading the minute onto the retention case is the misread (`kgo/config.go`, doc on `ConsumeResetOffset`) |
 | `compression.type` | `none` in Java, **snappy in franz-go** | the Go producer compresses before you ask it to — 2.05× to 3.28× on payment events depending on how full the batches are (exp-17) |
-| `partition.assignment.strategy` | `[range, cooperative-sticky]` in Java — which negotiates down to eager `range` — **`CooperativeStickyBalancer` in franz-go** | the two clients rebalance differently out of the box, so eager has to be configured explicitly. exp-14: eager revoked all six partitions and stopped them 39–75 ms; cooperative stopped only the three that moved, for 0.52–0.68 s; KIP-848 for 4.9–6.5 s, around its heartbeat interval ([08](08-rebalance.md)) |
+| `partition.assignment.strategy` | `[range, cooperative-sticky]` in Java — which negotiates down to eager `range` — **`CooperativeStickyBalancer` in franz-go** | the two clients rebalance differently out of the box, so eager has to be configured explicitly. exp-14: eager revoked all six partitions, and no gap outgrew the baseline poll cycle; cooperative stopped only the three that moved, for 0.51–0.68 s; KIP-848 for 4.9–6.5 s, around its heartbeat interval ([08](08-rebalance.md)) |
 | rebalance timeout | `max.poll.interval.ms` 5 min in Java, **`RebalanceTimeout` 60 s in franz-go** | the budget a slow handler gets before the group gives up on it differs by 5× ([03](03-read-path.md)) |
 | `linger.ms` / `batch.size` | 5 ms (0 before Kafka 4.0) / 16 KB in Java, **10 ms / ≈1 MB in franz-go** | franz-go has already traded latency for batching before any tuning happens: 34–37 records per batch and 8.5–10.2 ms median at 20 000 records/s, against 21–24 and 6.5–7.3 ms with franz-go set to Java's 5 ms (exp-17; no Java client was run) |
 | `segment.bytes` / `segment.ms` | 1 GB / 7 days | the active segment is never compacted or deleted |
@@ -83,10 +85,12 @@ the defaults that decide an outcome on their own.
 | `delete.retention.ms` | 24 h | how long tombstones stay visible |
 | `unclean.leader.election.enable` | `false` | availability traded for not deleting acknowledged writes |
 
-The franz-go column is read out of `pkg/kgo/config.go` on master, not out of memory: these
-defaults have moved between releases, and the partitioner in [01](01-write-path.md) is the
-clearest example of a fact that used to be true. Re-check every one of them against the
-revision pinned in `go.mod` once the service exists.
+The franz-go column is read out of `pkg/kgo/config.go`, not out of memory, at v1.22.0 — the
+revision `go.mod` pins: `defaultCfg()` there sets `AllISRAcks`, snappy, a 10 ms linger, a
+1 000 012-byte batch, a start `AtStart`, a 5 s autocommit, `CooperativeStickyBalancer` and a
+60 s rebalance timeout. These defaults have moved between releases, and the partitioner in
+[01](01-write-path.md) is the clearest example of a fact that used to be true; re-read them
+when `go.mod` moves.
 
 ## The cases
 

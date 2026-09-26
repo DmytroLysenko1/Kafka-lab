@@ -1,0 +1,226 @@
+exp-02 — hot partition: skewed keys against a consumer group, and the same drain with even keys
+date: 2026-09-26-032720
+client: franz-go v1.22.0
+runs per cell: 3
+time="2026-09-26 03:27:25" level=info msg="Processing topic exp02.hotkey in config experiments/kafka_internals/exp-02-hot-partition/topics/exp02.hotkey.yaml with cluster config deploy/topicctl/cluster.yaml"
+time="2026-09-26 03:27:25" level=info msg="Starting apply for topic exp02.hotkey in environment lab, cluster kafka-lab"
+time="2026-09-26 03:27:25" level=info msg="Validating configs..."
+time="2026-09-26 03:27:25" level=info msg="Checking if topic already exists..."
+time="2026-09-26 03:27:25" level=info msg="It looks like this topic doesn't already exist. Will create it with this config:
+{
+  "Topic": "exp02.hotkey",
+  "NumPartitions": 6,
+  "ReplicationFactor": 3,
+  "ReplicaAssignments": null,
+  "ConfigEntries": [
+    {
+      "ConfigName": "min.insync.replicas",
+      "ConfigValue": "2"
+    }
+  ]
+}"
+time="2026-09-26 03:27:25" level=info msg="Automatically answering yes because skip is set to true"
+time="2026-09-26 03:27:25" level=info msg="Creating new topic with config {Topic:exp02.hotkey NumPartitions:6 ReplicationFactor:3 ReplicaAssignments:[] ConfigEntries:[{ConfigName:min.insync.replicas ConfigValue:2}]}"
+time="2026-09-26 03:27:25" level=info msg="Sleeping for 2s"
+time="2026-09-26 03:27:27" level=info msg="Checking partition placement..."
+time="2026-09-26 03:27:27" level=info msg="Partition placement already satisfies strategy 'any'"
+time="2026-09-26 03:27:27" level=info msg="Checking leaders..."
+time="2026-09-26 03:27:27" level=info msg="Apply completed successfully!"
+time="2026-09-26 03:27:30" level=info msg="Processing topic exp02.uniform in config experiments/kafka_internals/exp-02-hot-partition/topics/exp02.uniform.yaml with cluster config deploy/topicctl/cluster.yaml"
+time="2026-09-26 03:27:30" level=info msg="Starting apply for topic exp02.uniform in environment lab, cluster kafka-lab"
+time="2026-09-26 03:27:30" level=info msg="Validating configs..."
+time="2026-09-26 03:27:30" level=info msg="Checking if topic already exists..."
+time="2026-09-26 03:27:30" level=info msg="It looks like this topic doesn't already exist. Will create it with this config:
+{
+  "Topic": "exp02.uniform",
+  "NumPartitions": 6,
+  "ReplicationFactor": 3,
+  "ReplicaAssignments": null,
+  "ConfigEntries": [
+    {
+      "ConfigName": "min.insync.replicas",
+      "ConfigValue": "2"
+    }
+  ]
+}"
+time="2026-09-26 03:27:30" level=info msg="Automatically answering yes because skip is set to true"
+time="2026-09-26 03:27:30" level=info msg="Creating new topic with config {Topic:exp02.uniform NumPartitions:6 ReplicationFactor:3 ReplicaAssignments:[] ConfigEntries:[{ConfigName:min.insync.replicas ConfigValue:2}]}"
+time="2026-09-26 03:27:30" level=info msg="Sleeping for 2s"
+time="2026-09-26 03:27:32" level=info msg="Checking partition placement..."
+time="2026-09-26 03:27:32" level=info msg="Partition placement already satisfies strategy 'any'"
+time="2026-09-26 03:27:32" level=info msg="Checking leaders..."
+time="2026-09-26 03:27:32" level=info msg="Apply completed successfully!"
+
+== run 1, skewed cell: one merchant sends 80% of the events ==
+events             20000 over 20 merchants, 80% to one of them
+partitions         p3:17052 (85%)  p1:842 (4%)  p2:842 (4%)  p0:632 (3%)  p4:421 (2%)  p5:211 (1%)
+hottest partition  p3 with 17052 records (85%)
+ceiling            1.17× — the most any group can gain over one consumer: all records ÷ the hottest partition
+
+consumers  time to drain  vs one consumer  idle members  per consumer
+1          5.27s          1.00×            0             [20000]
+2          4.96s          1.06×            0             [1895 18105]
+3          5.01s          1.05×            0             [1053 17894 1053]
+6          4.68s          1.12×            0             [632 421 842 842 17052 211]
+7          4.63s          1.14×            1             [842 17052 0 632 842 421 211]
+
+== run 1, control cell: the same events over a thousand merchants, none hot ==
+events             20000 over 1000 merchants, 0% to one of them
+partitions         p3:3606 (18%)  p1:3424 (17%)  p2:3404 (17%)  p4:3402 (17%)  p0:3243 (16%)  p5:2921 (15%)
+hottest partition  p3 with 3606 records (18%)
+ceiling            5.55× — the most any group can gain over one consumer: all records ÷ the hottest partition
+
+consumers  time to drain  vs one consumer  idle members  per consumer
+1          5.44s          1.00×            0             [20000]
+2          2.66s          2.05×            0             [9749 10251]
+3          1.77s          3.07×            0             [6345 6645 7010]
+6          940ms          5.82×            0             [3606 3424 3404 3402 2921 3243]
+7          940ms          5.81×            1             [3402 2921 3243 3606 3424 0 3404]
+time="2026-09-26 03:28:14" level=info msg="Processing topic exp02.hotkey in config experiments/kafka_internals/exp-02-hot-partition/topics/exp02.hotkey.yaml with cluster config deploy/topicctl/cluster.yaml"
+time="2026-09-26 03:28:14" level=info msg="Starting apply for topic exp02.hotkey in environment lab, cluster kafka-lab"
+time="2026-09-26 03:28:14" level=info msg="Validating configs..."
+time="2026-09-26 03:28:14" level=info msg="Checking if topic already exists..."
+time="2026-09-26 03:28:14" level=info msg="It looks like this topic doesn't already exist. Will create it with this config:
+{
+  "Topic": "exp02.hotkey",
+  "NumPartitions": 6,
+  "ReplicationFactor": 3,
+  "ReplicaAssignments": null,
+  "ConfigEntries": [
+    {
+      "ConfigName": "min.insync.replicas",
+      "ConfigValue": "2"
+    }
+  ]
+}"
+time="2026-09-26 03:28:14" level=info msg="Automatically answering yes because skip is set to true"
+time="2026-09-26 03:28:14" level=info msg="Creating new topic with config {Topic:exp02.hotkey NumPartitions:6 ReplicationFactor:3 ReplicaAssignments:[] ConfigEntries:[{ConfigName:min.insync.replicas ConfigValue:2}]}"
+time="2026-09-26 03:28:14" level=info msg="Sleeping for 2s"
+time="2026-09-26 03:28:16" level=info msg="Checking partition placement..."
+time="2026-09-26 03:28:16" level=info msg="Partition placement already satisfies strategy 'any'"
+time="2026-09-26 03:28:16" level=info msg="Checking leaders..."
+time="2026-09-26 03:28:16" level=info msg="Apply completed successfully!"
+time="2026-09-26 03:28:18" level=info msg="Processing topic exp02.uniform in config experiments/kafka_internals/exp-02-hot-partition/topics/exp02.uniform.yaml with cluster config deploy/topicctl/cluster.yaml"
+time="2026-09-26 03:28:18" level=info msg="Starting apply for topic exp02.uniform in environment lab, cluster kafka-lab"
+time="2026-09-26 03:28:18" level=info msg="Validating configs..."
+time="2026-09-26 03:28:18" level=info msg="Checking if topic already exists..."
+time="2026-09-26 03:28:18" level=info msg="It looks like this topic doesn't already exist. Will create it with this config:
+{
+  "Topic": "exp02.uniform",
+  "NumPartitions": 6,
+  "ReplicationFactor": 3,
+  "ReplicaAssignments": null,
+  "ConfigEntries": [
+    {
+      "ConfigName": "min.insync.replicas",
+      "ConfigValue": "2"
+    }
+  ]
+}"
+time="2026-09-26 03:28:18" level=info msg="Automatically answering yes because skip is set to true"
+time="2026-09-26 03:28:18" level=info msg="Creating new topic with config {Topic:exp02.uniform NumPartitions:6 ReplicationFactor:3 ReplicaAssignments:[] ConfigEntries:[{ConfigName:min.insync.replicas ConfigValue:2}]}"
+time="2026-09-26 03:28:18" level=info msg="Sleeping for 2s"
+time="2026-09-26 03:28:21" level=info msg="Checking partition placement..."
+time="2026-09-26 03:28:21" level=info msg="Partition placement already satisfies strategy 'any'"
+time="2026-09-26 03:28:21" level=info msg="Checking leaders..."
+time="2026-09-26 03:28:21" level=info msg="Apply completed successfully!"
+
+== run 2, skewed cell: one merchant sends 80% of the events ==
+events             20000 over 20 merchants, 80% to one of them
+partitions         p3:17052 (85%)  p1:842 (4%)  p2:842 (4%)  p0:632 (3%)  p4:421 (2%)  p5:211 (1%)
+hottest partition  p3 with 17052 records (85%)
+ceiling            1.17× — the most any group can gain over one consumer: all records ÷ the hottest partition
+
+consumers  time to drain  vs one consumer  idle members  per consumer
+1          5.07s          1.00×            0             [20000]
+2          4.55s          1.11×            0             [18105 1895]
+3          4.66s          1.09×            0             [17894 1053 1053]
+6          4.38s          1.16×            0             [842 632 842 17052 211 421]
+7          4.38s          1.16×            1             [0 842 17052 632 842 211 421]
+
+== run 2, control cell: the same events over a thousand merchants, none hot ==
+events             20000 over 1000 merchants, 0% to one of them
+partitions         p3:3606 (18%)  p1:3424 (17%)  p2:3404 (17%)  p4:3402 (17%)  p0:3243 (16%)  p5:2921 (15%)
+hottest partition  p3 with 3606 records (18%)
+ceiling            5.55× — the most any group can gain over one consumer: all records ÷ the hottest partition
+
+consumers  time to drain  vs one consumer  idle members  per consumer
+1          5.08s          1.00×            0             [20000]
+2          2.64s          1.92×            0             [10251 9749]
+3          1.79s          2.85×            0             [7010 6645 6345]
+6          980ms          5.17×            0             [2921 3424 3402 3606 3404 3243]
+7          980ms          5.20×            1             [3404 0 3424 3606 3243 3402 2921]
+time="2026-09-26 03:28:59" level=info msg="Processing topic exp02.hotkey in config experiments/kafka_internals/exp-02-hot-partition/topics/exp02.hotkey.yaml with cluster config deploy/topicctl/cluster.yaml"
+time="2026-09-26 03:28:59" level=info msg="Starting apply for topic exp02.hotkey in environment lab, cluster kafka-lab"
+time="2026-09-26 03:28:59" level=info msg="Validating configs..."
+time="2026-09-26 03:28:59" level=info msg="Checking if topic already exists..."
+time="2026-09-26 03:28:59" level=info msg="It looks like this topic doesn't already exist. Will create it with this config:
+{
+  "Topic": "exp02.hotkey",
+  "NumPartitions": 6,
+  "ReplicationFactor": 3,
+  "ReplicaAssignments": null,
+  "ConfigEntries": [
+    {
+      "ConfigName": "min.insync.replicas",
+      "ConfigValue": "2"
+    }
+  ]
+}"
+time="2026-09-26 03:28:59" level=info msg="Automatically answering yes because skip is set to true"
+time="2026-09-26 03:28:59" level=info msg="Creating new topic with config {Topic:exp02.hotkey NumPartitions:6 ReplicationFactor:3 ReplicaAssignments:[] ConfigEntries:[{ConfigName:min.insync.replicas ConfigValue:2}]}"
+time="2026-09-26 03:28:59" level=info msg="Sleeping for 2s"
+time="2026-09-26 03:29:01" level=info msg="Checking partition placement..."
+time="2026-09-26 03:29:01" level=info msg="Partition placement already satisfies strategy 'any'"
+time="2026-09-26 03:29:01" level=info msg="Checking leaders..."
+time="2026-09-26 03:29:01" level=info msg="Apply completed successfully!"
+time="2026-09-26 03:29:04" level=info msg="Processing topic exp02.uniform in config experiments/kafka_internals/exp-02-hot-partition/topics/exp02.uniform.yaml with cluster config deploy/topicctl/cluster.yaml"
+time="2026-09-26 03:29:04" level=info msg="Starting apply for topic exp02.uniform in environment lab, cluster kafka-lab"
+time="2026-09-26 03:29:04" level=info msg="Validating configs..."
+time="2026-09-26 03:29:04" level=info msg="Checking if topic already exists..."
+time="2026-09-26 03:29:04" level=info msg="It looks like this topic doesn't already exist. Will create it with this config:
+{
+  "Topic": "exp02.uniform",
+  "NumPartitions": 6,
+  "ReplicationFactor": 3,
+  "ReplicaAssignments": null,
+  "ConfigEntries": [
+    {
+      "ConfigName": "min.insync.replicas",
+      "ConfigValue": "2"
+    }
+  ]
+}"
+time="2026-09-26 03:29:04" level=info msg="Automatically answering yes because skip is set to true"
+time="2026-09-26 03:29:04" level=info msg="Creating new topic with config {Topic:exp02.uniform NumPartitions:6 ReplicationFactor:3 ReplicaAssignments:[] ConfigEntries:[{ConfigName:min.insync.replicas ConfigValue:2}]}"
+time="2026-09-26 03:29:04" level=info msg="Sleeping for 2s"
+time="2026-09-26 03:29:06" level=info msg="Checking partition placement..."
+time="2026-09-26 03:29:06" level=info msg="Partition placement already satisfies strategy 'any'"
+time="2026-09-26 03:29:06" level=info msg="Checking leaders..."
+time="2026-09-26 03:29:06" level=info msg="Apply completed successfully!"
+
+== run 3, skewed cell: one merchant sends 80% of the events ==
+events             20000 over 20 merchants, 80% to one of them
+partitions         p3:17052 (85%)  p1:842 (4%)  p2:842 (4%)  p0:632 (3%)  p4:421 (2%)  p5:211 (1%)
+hottest partition  p3 with 17052 records (85%)
+ceiling            1.17× — the most any group can gain over one consumer: all records ÷ the hottest partition
+
+consumers  time to drain  vs one consumer  idle members  per consumer
+1          5.35s          1.00×            0             [20000]
+2          5.03s          1.06×            0             [18105 1895]
+3          4.87s          1.10×            0             [1053 1053 17894]
+6          4.64s          1.15×            0             [421 842 17052 211 632 842]
+7          4.31s          1.24×            1             [632 421 842 0 17052 842 211]
+
+== run 3, control cell: the same events over a thousand merchants, none hot ==
+events             20000 over 1000 merchants, 0% to one of them
+partitions         p3:3606 (18%)  p1:3424 (17%)  p2:3404 (17%)  p4:3402 (17%)  p0:3243 (16%)  p5:2921 (15%)
+hottest partition  p3 with 3606 records (18%)
+ceiling            5.55× — the most any group can gain over one consumer: all records ÷ the hottest partition
+
+consumers  time to drain  vs one consumer  idle members  per consumer
+1          5.07s          1.00×            0             [20000]
+2          2.7s           1.88×            0             [10251 9749]
+3          1.83s          2.78×            0             [6645 7010 6345]
+6          970ms          5.23×            0             [3404 3606 2921 3402 3424 3243]
+7          970ms          5.23×            1             [3402 0 3404 3606 2921 3243 3424]

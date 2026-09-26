@@ -12,13 +12,16 @@ make exp-13
 
 | | cell A — one broker down | cell B — two brokers down |
 |---|---|---|
-| payments accepted during the outage | **302 · 302** | **303 · 303** |
+| payments accepted during the outage | **302 · 302 · 302** | **303 · 303 · 303** |
 | payments refused | **0** | **0** |
-| peak outbox backlog | 88 · 91 records | 469 · 523 records |
+| outbox backlog, highest while the brokers were down | 88 · 91 · 133 records | 303 · 309 · 308 records |
+| outbox backlog, highest overall | the same | 469 · 523 · 468 records — reached *after* the brokers returned |
 | what the cluster said about itself | 3 partitions under-replicated | **0 under-replicated, 0 without a leader** |
-| back to the pre-outage backlog | already caught up when it returned | **18.3 s · 24.2 s** after they returned |
+| back to the pre-outage backlog | already caught up when it returned | **18.3 s · 24.2 s · 18.3 s** after they returned |
+| what the dashboard's backlog panel showed | 0, and 84 on one scrape | **1, flat, through the whole outage** |
 
-Two runs, 2026-09-25, in [`results/`](results/).
+Three runs: two on 2026-09-25 and [one on 2026-09-26](results/run-2026-09-26-162208.log), the
+last also dumping the dashboard's panels from Prometheus for each cell's window.
 
 ## What it shows
 
@@ -35,9 +38,10 @@ drains on its own, before the broker is even back: by the time the container was
 again the queue was already at its pre-outage level.
 
 **Two brokers down is the case the outbox exists for.** Nothing can be published for the
-whole thirty seconds, the backlog grows to four or five hundred records, and the relay
-works it off in eighteen to twenty-four seconds once the cluster is whole — while payments keep
-arriving at ten a second throughout.
+whole thirty seconds and the backlog grows by the load, about 300 records. It keeps growing
+for a while after the cluster is whole — to 468–523 — because the relay's first sweeps
+after the outage are still waiting out their timeouts against the dead connections; then it
+works the queue off in 18–24 s while payments keep arriving at ten a second throughout.
 
 **And the cluster reports itself healthy the entire time.** In cell B the metadata says
 zero under-replicated partitions and zero without a leader, which is exactly wrong: two
@@ -47,11 +51,26 @@ serving the last metadata it had, from before the kill. `kafka-topics.sh --descr
 not even get that far — it times out on `listPartitionReassignments`, an operation that
 needs the controller.
 
+**And the dashboard's backlog panel lied too — that one is ours.** Read from Prometheus for
+cell B's window, the panel sat at **1** from before the kill until the backlog had drained,
+while the service's own database held 308 records at the height of the outage. The relay
+reports the backlog when a sweep finishes, and during the outage no sweep finished: each
+one waited on a publish to a cluster that could not answer, up to the relay's 30 s sweep
+timeout. So in the one failure this panel was built for, every panel an operator would
+look at said *healthy* — backlog 1, brokers 3, under-replicated 0 — and only
+`published/s` falling to zero said otherwise. The number that moved, in both cells and
+within a second, was the backlog as this experiment read it: straight from Postgres. The
+relay has to measure it on a clock of its own, not at the end of a sweep; that fix is
+owed, and until it lands the runbook points at `published/s` and the database, not at this
+panel. The dashboard also trails the cluster by 15–20 s in cell A (brokers 2 from +40 s to
++65 s for a kill at +20 s and a restart at +50 s): scrape interval, exporter polling and
+rate windows, stacked.
+
 That is the part worth carrying into a runbook. The dashboard panel labelled
 "under-replicated partitions" is not a health check for a cluster that has lost its quorum;
-it is a report from a cluster that can no longer tell you anything. The number that did
-move, in both cells and within a second, was the outbox backlog — measured in the service's
-own database, which is the one component the outage could not reach.
+it is a report from a cluster that can no longer tell you anything. The backlog measured in
+the service's own database is the one number the outage could not reach — as long as it is
+read from there, and not from a gauge that only moves when a sweep succeeds.
 
 ## Four ways this run lied before it told the truth
 
