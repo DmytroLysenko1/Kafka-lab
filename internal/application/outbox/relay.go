@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -19,7 +20,7 @@ const (
 	// on a context that cannot be cancelled, so this deadline can never truncate it.
 	sweepTimeout = 30 * time.Second
 	// The backlog is a number for a dashboard, not work. It gets a short leash of its own:
-	// a slow count must not delay the sweep that follows it.
+	// a count that hangs must not stop the gauge from moving for longer than this.
 	backlogTimeout = 2 * time.Second
 )
 
@@ -33,7 +34,8 @@ type claimStore interface {
 // called once they leave here is the metrics adapter's business, not this package's. The
 // backlog is reported separately because it can be unavailable on its own: a sweep that
 // failed must still be counted as a failed sweep, and a backlog nobody could read must not
-// be reported as a backlog of zero.
+// be reported as a backlog of zero. The two are reported from different goroutines, so an
+// observer must be safe for concurrent use.
 type observer interface {
 	Swept(published int, took time.Duration, err error)
 	Backlog(records int)
@@ -108,10 +110,19 @@ func (r *Relay) Sweep(ctx context.Context) (int, error) {
 // Run sweeps until the context is cancelled. A failed sweep is logged and retried on the
 // next tick rather than ending the relay: the usual reason for one is a broker that will
 // come back, and the records it did not publish are still in the table.
+//
+// The backlog is counted on a clock of its own. Counted at the end of a sweep, it froze
+// through the very outage it exists for: a sweep publishing to a cluster that cannot
+// answer does not end until its timeout, and exp-13 watched the gauge sit at 1 while 308
+// records waited.
 func (r *Relay) Run(ctx context.Context, every time.Duration) error {
 	if every <= 0 {
 		return fmt.Errorf("outbox: run every %s: %w", every, ErrInterval)
 	}
+
+	var backlogLoop sync.WaitGroup
+	defer backlogLoop.Wait()
+	backlogLoop.Go(func() { r.countBacklog(ctx, every) })
 
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
@@ -133,7 +144,7 @@ func (r *Relay) sweepOnce(ctx context.Context) {
 
 	started := r.now()
 	published, err := r.Sweep(sweeping)
-	r.observe(ctx, published, r.now().Sub(started), err)
+	r.observer.Swept(published, r.now().Sub(started), err)
 
 	switch {
 	case err != nil && ctx.Err() != nil:
@@ -145,19 +156,33 @@ func (r *Relay) sweepOnce(ctx context.Context) {
 	}
 }
 
-// observe reports the sweep first and the backlog second: the sweep is what happened and
-// must be counted even when the database is too unwell to answer how much is waiting. A
-// backlog that cannot be read leaves the last known one standing rather than reporting a
-// zero, which an operator would read as "nothing is waiting" at the worst possible moment.
-func (r *Relay) observe(ctx context.Context, published int, took time.Duration, sweepErr error) {
-	r.observer.Swept(published, took, sweepErr)
+func (r *Relay) countBacklog(ctx context.Context, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
 
-	counting, cancel := context.WithTimeout(ctx, backlogTimeout)
+	for {
+		r.reportBacklog(ctx)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// reportBacklog leaves the last known backlog standing when it cannot be read, rather than
+// reporting a zero, which an operator would read as "nothing is waiting" at the worst
+// possible moment.
+func (r *Relay) reportBacklog(ctx context.Context) {
+	bounded, cancel := context.WithTimeout(ctx, backlogTimeout)
 	defer cancel()
 
-	backlog, err := r.outbox.Backlog(counting)
+	backlog, err := r.outbox.Backlog(bounded)
 	if err != nil {
-		r.logger.WarnContext(ctx, "outbox backlog unavailable", "error", err)
+		if ctx.Err() == nil {
+			r.logger.WarnContext(ctx, "outbox backlog unavailable", "error", err)
+		}
 		return
 	}
 	r.observer.Backlog(backlog)

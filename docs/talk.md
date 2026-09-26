@@ -105,10 +105,10 @@ an operation that needs the controller.
 **Monday.** A green replication panel is not a health check for a cluster that may have
 lost its quorum — it is a report from a component that can no longer tell you anything, and
 it reads as good news. Watch a number the outage cannot reach: the outbox backlog, in your
-own database — counted there, not by a process that only reports it after a publish
-succeeds. This stand's own dashboard got that wrong: its backlog panel read 1 through the
-whole outage while 308 records waited, because the relay set it at the end of a sweep and
-no sweep ended.
+own database — counted there, on a clock of its own, not by a process that only reports
+it after a publish succeeds. This stand's own dashboard got that wrong at first: its
+backlog panel read 1 through the whole outage while 308 records waited, because the relay
+set it at the end of a sweep and no sweep ended.
 
 > exp-13 again. This is the line the [runbook](runbook.md) opens with.
 
@@ -199,9 +199,9 @@ go build -o /tmp/consumer ./cmd/payments-consumer   # program it built, and the 
 
 Open Grafana on `localhost:3000`, take a payment with `curl`, watch it go through. Then
 `docker kill kafka-lab-kafka1 kafka-lab-kafka2` and watch the replication and broker panels
-insist everything is fine while `published/s` drops to zero — and the backlog panel stay
-flat, which is the stand's own bug from exp-13, until the relay measures it on its own
-clock.
+insist everything is fine while `published/s` drops to zero and the backlog panel climbs —
+which it did only after exp-13 caught it sitting flat and the relay learned to count it on
+its own clock.
 
 The interactive walkthroughs in [`dynamic/`](dynamic/) tell the same stories step by step —
 write path, read path, the lost message, the outbox, the rebalance, the retry chain — and

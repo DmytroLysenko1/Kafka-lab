@@ -42,23 +42,42 @@ func report(out io.Writer, s *settings, samples []sample, attempts []attempt, ki
 	for _, span := range phases {
 		accepted, refused := countAttempts(attempts, span)
 		state := worst(samples, span)
-		written.printf("%-24s %-12s %10d %10d %14d %12s %10s\n",
+		written.printf("%-24s %-12s %10d %10d %14s %12s %10s\n",
 			span.name,
 			fmt.Sprintf("%.0f–%.0f", span.from.Seconds(), span.until.Seconds()),
-			accepted, refused, state.backlog,
-			partitions(state.underReplicated, state.clusterKnown), partitions(state.leaderless, state.clusterKnown))
+			accepted, refused, reading(state.backlog, state.backlogKnown),
+			reading(state.underReplicated, state.clusterKnown), reading(state.leaderless, state.clusterKnown))
 	}
 
-	steady := worst(samples, phases[0]).backlog
-	written.printf("\npeak backlog: %d records\n", peak(samples))
-	if caught, ok := caughtUp(samples, revived, steady); ok {
-		written.printf("backlog back to its pre-outage level (%d records) %s after the brokers came back\n",
-			steady, caught.Round(100*time.Millisecond))
-	} else {
-		written.printf("backlog never returned to its pre-outage level (%d records) while the run lasted\n", steady)
-	}
+	writePeak(written, samples)
+	writeCatchUp(written, worst(samples, phases[0]), samples, revived)
 	written.printf("outbox drained %s after the run stopped taking payments\n", drained.Round(100*time.Millisecond))
 	return written.err
+}
+
+func writePeak(written *lines, samples []sample) {
+	highest, ok := peak(samples)
+	if !ok {
+		written.printf("\npeak backlog: unknown, no reading was taken\n")
+		return
+	}
+	written.printf("\npeak backlog: %d records\n", highest)
+}
+
+// writeCatchUp measures the catch-up against the backlog read before the kill. A run that
+// read none has no level to measure against, and says so rather than measuring against zero.
+func writeCatchUp(written *lines, before sample, samples []sample, revived time.Duration) {
+	if !before.backlogKnown {
+		written.printf("no backlog was read before the kill, so there is no level to measure the catch-up against\n")
+		return
+	}
+	caught, ok := caughtUp(samples, revived, before.backlog)
+	if !ok {
+		written.printf("backlog never returned to its pre-outage level (%d records) while the run lasted\n", before.backlog)
+		return
+	}
+	written.printf("backlog back to its pre-outage level (%d records) %s after the brokers came back\n",
+		before.backlog, caught.Round(100*time.Millisecond))
 }
 
 func countAttempts(attempts []attempt, span phase) (accepted, refused int) {
@@ -97,7 +116,7 @@ func worst(samples []sample, span phase) sample {
 	return highest
 }
 
-func partitions(count int, known bool) string {
+func reading(count int, known bool) string {
 	if !known {
 		return "unknown"
 	}
@@ -117,12 +136,13 @@ func caughtUp(samples []sample, revived time.Duration, steady int) (time.Duratio
 	return 0, false
 }
 
-func peak(samples []sample) int {
-	highest := 0
+func peak(samples []sample) (int, bool) {
+	highest, known := 0, false
 	for _, reading := range samples {
 		if reading.backlogKnown {
 			highest = max(highest, reading.backlog)
+			known = true
 		}
 	}
-	return highest
+	return highest, known
 }

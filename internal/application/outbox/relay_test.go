@@ -26,7 +26,10 @@ var (
 
 // fakeOutbox is the store and the transaction manager at once, as Postgres is: what is
 // written inside WithinTx lands only when it commits, so a test can tell a record that was
-// published-and-forgotten from one that was never published.
+// published-and-forgotten from one that was never published. Like Postgres, it does not
+// hold the whole table while a transaction is open — a backlog count is answered while a
+// sweep is still waiting on the broker, as `SELECT count(*)` is beside rows claimed with
+// FOR UPDATE SKIP LOCKED.
 type fakeOutbox struct {
 	mu           sync.Mutex
 	records      []Record
@@ -41,26 +44,34 @@ func newFakeOutbox(records ...Record) *fakeOutbox {
 	return &fakeOutbox{records: records, published: make(map[int64]time.Time)}
 }
 
+// WithinTx runs one transaction at a time, as the relay does; the staged writes are applied
+// under the lock only once fn has returned and the commit has not failed.
 func (f *fakeOutbox) WithinTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.staged = nil
-	if err := fn(ctx); err != nil {
-		f.staged = nil
+	f.mu.Unlock()
+
+	err := fn(ctx)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	staged := f.staged
+	f.staged = nil
+	switch {
+	case err != nil:
 		return err
-	}
-	if f.failCommit != nil {
-		f.staged = nil
+	case f.failCommit != nil:
 		return f.failCommit
 	}
-	for _, apply := range f.staged {
+	for _, apply := range staged {
 		apply()
 	}
-	f.staged = nil
 	return nil
 }
 
 func (f *fakeOutbox) Claim(_ context.Context, limit int) ([]Record, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	claimed := make([]Record, 0, limit)
 	for _, record := range f.records {
 		if _, gone := f.published[record.ID]; gone {
@@ -75,6 +86,8 @@ func (f *fakeOutbox) Claim(_ context.Context, limit int) ([]Record, error) {
 }
 
 func (f *fakeOutbox) MarkPublished(_ context.Context, ids []int64, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.staged = append(f.staged, func() {
 		for _, id := range ids {
 			if _, already := f.published[id]; already {
@@ -84,6 +97,13 @@ func (f *fakeOutbox) MarkPublished(_ context.Context, ids []int64, at time.Time)
 		}
 	})
 	return nil
+}
+
+// accept is the API taking payments while the relay runs: new records in the table.
+func (f *fakeOutbox) accept(records ...Record) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.records = append(f.records, records...)
 }
 
 func (f *fakeOutbox) Backlog(ctx context.Context) (int, error) {
@@ -150,6 +170,9 @@ type fakePublisher struct {
 	mu      sync.Mutex
 	batches [][]int64
 	fail    error
+	// unanswered is a cluster that takes the request and never replies: Publish waits for
+	// its context, as a produce to a cluster without a quorum does until the sweep times out.
+	unanswered bool
 }
 
 func (p *fakePublisher) breaks(err error) {
@@ -164,18 +187,21 @@ func (p *fakePublisher) published() [][]int64 {
 	return slices.Clone(p.batches)
 }
 
-func (p *fakePublisher) Publish(_ context.Context, records []Record) error {
+func (p *fakePublisher) Publish(ctx context.Context, records []Record) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	sent := make([]int64, 0, len(records))
 	for _, record := range records {
 		sent = append(sent, record.ID)
 	}
 	p.batches = append(p.batches, sent)
-	if p.fail != nil {
-		return p.fail
+	fail, unanswered := p.fail, p.unanswered
+	p.mu.Unlock()
+
+	if unanswered {
+		<-ctx.Done()
+		return ctx.Err()
 	}
-	return nil
+	return fail
 }
 
 func authorized(id int64) Record {
@@ -380,9 +406,7 @@ func TestRunKeepsSweepingAfterAFailedSweep(t *testing.T) {
 	})
 }
 
-// The two numbers an operator reads during an outage: how each sweep went, and how much is
-// still waiting behind it.
-func TestEachSweepIsReportedWithTheBacklogBehindIt(t *testing.T) {
+func TestEachSweepIsReportedWithWhatItPublished(t *testing.T) {
 	outbox := newFakeOutbox(authorized(1), authorized(2), authorized(3))
 	watch := &watcher{}
 	relay := watched(t, outbox, &fakePublisher{}, 2, watch)
@@ -390,12 +414,9 @@ func TestEachSweepIsReportedWithTheBacklogBehindIt(t *testing.T) {
 	relay.sweepOnce(t.Context())
 	relay.sweepOnce(t.Context())
 
-	sweeps, backlogs := watch.reported()
+	sweeps, _ := watch.reported()
 	if diff := cmp.Diff([]sweep{{published: 2}, {published: 1}}, sweeps, cmp.AllowUnexported(sweep{})); diff != "" {
 		t.Errorf("sweeps reported (-want +got):\n%s", diff)
-	}
-	if diff := cmp.Diff([]int{1, 0}, backlogs); diff != "" {
-		t.Errorf("backlogs reported (-want +got):\n%s", diff)
 	}
 }
 
@@ -414,6 +435,45 @@ func TestAFailedSweepIsStillReported(t *testing.T) {
 	}
 }
 
+// The failure exp-13 found on the dashboard: with the cluster unable to answer, no sweep
+// ends, and a backlog reported at the end of a sweep sat at its last value while payments
+// kept arriving. An operator must see the backlog grow while the sweep is stuck.
+func TestTheBacklogKeepsBeingReportedWhileASweepIsStuckOnTheBroker(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		outbox := newFakeOutbox(authorized(1))
+		watch := &watcher{}
+		relay := watched(t, outbox, &fakePublisher{unanswered: true}, 10, watch)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		stopped := make(chan error, 1)
+		go func() { stopped <- relay.Run(ctx, time.Second) }()
+
+		for id := int64(2); id <= 4; id++ {
+			time.Sleep(time.Second)
+			outbox.accept(authorized(id))
+			synctest.Wait()
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+
+		sweeps, backlogs := watch.reported()
+		if diff := cmp.Diff(0, len(sweeps)); diff != "" {
+			t.Errorf("sweeps ended although the broker never answered (-want +got):\n%s", diff)
+		}
+		if len(backlogs) == 0 {
+			t.Fatal("no backlog was reported while the sweep was stuck")
+		}
+		if diff := cmp.Diff(4, backlogs[len(backlogs)-1]); diff != "" {
+			t.Errorf("latest backlog reported while the sweep was stuck (-want +got):\n%s", diff)
+		}
+
+		cancel()
+		if err := <-stopped; err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	})
+}
+
 // A backlog nobody could read is not a backlog of zero: reporting it as one would tell an
 // operator that everything had drained at the exact moment the database stopped answering.
 func TestABacklogThatCannotBeReadIsNotReportedAsZero(t *testing.T) {
@@ -422,12 +482,9 @@ func TestABacklogThatCannotBeReadIsNotReportedAsZero(t *testing.T) {
 	watch := &watcher{}
 	relay := watched(t, outbox, &fakePublisher{}, 10, watch)
 
-	relay.sweepOnce(t.Context())
+	relay.reportBacklog(t.Context())
 
-	sweeps, backlogs := watch.reported()
-	if diff := cmp.Diff(1, len(sweeps)); diff != "" {
-		t.Errorf("sweeps reported (-want +got):\n%s", diff)
-	}
+	_, backlogs := watch.reported()
 	if diff := cmp.Diff(0, len(backlogs)); diff != "" {
 		t.Errorf("backlogs reported despite the failure (-want +got):\n%s", diff)
 	}
@@ -435,32 +492,33 @@ func TestABacklogThatCannotBeReadIsNotReportedAsZero(t *testing.T) {
 
 // A database too slow to count the backlog must not hold up the sweeps: the number is for
 // a dashboard, the sweeps are the work.
-func TestABacklogThatNeverAnswersDoesNotHoldUpTheRelay(t *testing.T) {
+func TestABacklogThatNeverAnswersDoesNotHoldUpTheSweeps(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		outbox := newFakeOutbox(authorized(1))
 		outbox.stallBacklog = true
 		watch := &watcher{}
 		relay := watched(t, outbox, &fakePublisher{}, 10, watch)
 
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			relay.sweepOnce(t.Context())
-		}()
-
+		ctx, cancel := context.WithCancel(t.Context())
+		stopped := make(chan error, 1)
+		go func() { stopped <- relay.Run(ctx, time.Second) }()
 		synctest.Wait()
-		select {
-		case <-done:
-		case <-time.After(backlogTimeout + time.Second):
-			t.Fatal("the sweep is still waiting on a backlog count")
-		}
+
+		outbox.accept(authorized(2))
+		time.Sleep(time.Second)
+		synctest.Wait()
 
 		sweeps, backlogs := watch.reported()
-		if diff := cmp.Diff(1, len(sweeps)); diff != "" {
-			t.Errorf("sweeps reported (-want +got):\n%s", diff)
+		if diff := cmp.Diff([]sweep{{published: 1}, {published: 1}}, sweeps, cmp.AllowUnexported(sweep{})); diff != "" {
+			t.Errorf("sweeps while the backlog count hung (-want +got):\n%s", diff)
 		}
 		if diff := cmp.Diff(0, len(backlogs)); diff != "" {
 			t.Errorf("a backlog was reported although the count never answered (-want +got):\n%s", diff)
+		}
+
+		cancel()
+		if err := <-stopped; err != nil {
+			t.Fatalf("run: %v", err)
 		}
 	})
 }

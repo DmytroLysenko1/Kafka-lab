@@ -3,6 +3,7 @@ package metrics_test
 import (
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func TestTheRelayReportsPublishedRecordsSweepOutcomesAndItsBacklog(t *testing.T)
 	observed.Backlog(7)
 
 	expected := `
-# HELP outbox_backlog_records Outbox records waiting to be published, as of the last sweep.
+# HELP outbox_backlog_records Outbox records waiting to be published, counted by the relay on a tick of its own.
 # TYPE outbox_backlog_records gauge
 outbox_backlog_records 7
 # HELP outbox_records_published_total Outbox records the relay published and marked, after the broker acknowledged them.
@@ -36,6 +37,41 @@ outbox_sweeps_total{outcome="ok"} 1
 `
 	if err := testutil.GatherAndCompare(observed.Gatherer(), strings.NewReader(expected),
 		"outbox_backlog_records", "outbox_records_published_total", "outbox_sweeps_total"); err != nil {
+		t.Error(err)
+	}
+}
+
+// The relay reports sweeps and the backlog from two goroutines — the backlog on a clock of
+// its own, so that it keeps moving while a sweep is stuck on a dead cluster. This is the
+// contract that makes that safe, proved against the real type under -race rather than
+// assumed from the library underneath it.
+func TestSweepsAndTheBacklogCanBeReportedAtTheSameTime(t *testing.T) {
+	observed := metrics.New()
+	const reports = 1000
+
+	var reporters sync.WaitGroup
+	reporters.Go(func() {
+		for range reports {
+			observed.Swept(1, time.Millisecond, nil)
+		}
+	})
+	reporters.Go(func() {
+		for backlog := range reports {
+			observed.Backlog(backlog)
+		}
+	})
+	reporters.Wait()
+
+	expected := `
+# HELP outbox_backlog_records Outbox records waiting to be published, counted by the relay on a tick of its own.
+# TYPE outbox_backlog_records gauge
+outbox_backlog_records 999
+# HELP outbox_records_published_total Outbox records the relay published and marked, after the broker acknowledged them.
+# TYPE outbox_records_published_total counter
+outbox_records_published_total 1000
+`
+	if err := testutil.GatherAndCompare(observed.Gatherer(), strings.NewReader(expected),
+		"outbox_backlog_records", "outbox_records_published_total"); err != nil {
 		t.Error(err)
 	}
 }
