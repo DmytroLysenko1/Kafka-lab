@@ -23,7 +23,6 @@ import (
 
 const (
 	defaultBrokers = "localhost:19092,localhost:29092,localhost:39092"
-	topic          = "exp02.hotkey"
 
 	pollBatch    = 500
 	fillerBytes  = 60
@@ -34,7 +33,7 @@ const (
 
 var (
 	errShape       = errors.New("exp-02: event count out of range")
-	errSkew        = errors.New("exp-02: -hot-share must be a percentage between 1 and 100")
+	errSkew        = errors.New("exp-02: -hot-share must be a percentage between 0 and 100")
 	errGroupSizes  = errors.New("exp-02: -consumers must be a comma-separated list of positive counts")
 	errIncomplete  = errors.New("exp-02: a drain did not see exactly the events this run produced")
 	errUndecodable = errors.New("exp-02: undecodable event")
@@ -42,6 +41,7 @@ var (
 
 type settings struct {
 	brokers   string
+	topic     string
 	events    int
 	merchants int
 	hotShare  int
@@ -77,9 +77,10 @@ func run() error {
 		groups string
 	)
 	flag.StringVar(&cfg.brokers, "brokers", defaultBrokers, "comma-separated bootstrap brokers")
+	flag.StringVar(&cfg.topic, "topic", "exp02.hotkey", "topic to produce into and drain; the control cell uses its own")
 	flag.IntVar(&cfg.events, "events", 20_000, "events to produce")
 	flag.IntVar(&cfg.merchants, "merchants", 20, "merchants to spread the cold events over")
-	flag.IntVar(&cfg.hotShare, "hot-share", 80, "percentage of events belonging to one merchant")
+	flag.IntVar(&cfg.hotShare, "hot-share", 80, "percentage of events belonging to one merchant; 0 spreads every event over the merchants")
 	flag.DurationVar(&cfg.handler, "handler", 200*time.Microsecond, "work per record, so drain time is about handling and not the network")
 	flag.StringVar(&groups, "consumers", "1,2,3,6,7", "group sizes to measure, in order")
 	flag.DurationVar(&cfg.timeout, "timeout", 10*time.Minute, "deadline for the whole run")
@@ -108,7 +109,7 @@ func (cfg *settings) validate() error {
 		return fmt.Errorf("%w: -events is %d, wanted 1 to %d", errShape, cfg.events, maxEvents)
 	case cfg.merchants <= 1:
 		return fmt.Errorf("%w: -merchants is %d, wanted at least 2", errShape, cfg.merchants)
-	case cfg.hotShare < 1 || cfg.hotShare > 100:
+	case cfg.hotShare < 0 || cfg.hotShare > 100:
 		return fmt.Errorf("%w: got %d", errSkew, cfg.hotShare)
 	}
 	return nil
@@ -174,7 +175,7 @@ func produce(ctx context.Context, client *kgo.Client, runID string, cfg *setting
 			return nil, fmt.Errorf("exp-02: encode event %d: %w", i, err)
 		}
 		records = append(records, &kgo.Record{
-			Topic: topic,
+			Topic: cfg.topic,
 			Key:   []byte(merchant),
 			Value: value,
 		})
@@ -248,7 +249,7 @@ func consume(ctx context.Context, finish *completion, cfg *settings, runID, grou
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(strings.Split(cfg.brokers, ",")...),
 		kgo.ConsumerGroup(group),
-		kgo.ConsumeTopics(topic),
+		kgo.ConsumeTopics(cfg.topic),
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.DisableAutoCommit(),
 	)
@@ -342,12 +343,13 @@ func report(out io.Writer, cfg *settings, perPartition map[int32]int, drains []d
 		fmt.Sprintf("events\t%d over %d merchants, %d%% to one of them", cfg.events, cfg.merchants, cfg.hotShare),
 		fmt.Sprintf("partitions\t%s", formatShares(distribution(perPartition))),
 		fmt.Sprintf("hottest partition\tp%d with %d records (%.0f%%)", hot.Partition, hot.Records, hot.Percent),
+		fmt.Sprintf("ceiling\t%.2f× — the most any group can gain over one consumer: all records ÷ the hottest partition", ceiling(cfg.events, hot.Records)),
 		"",
-		"consumers\ttime to drain\tidle members\tper consumer",
+		"consumers\ttime to drain\tvs one consumer\tidle members\tper consumer",
 	)
 	for _, measured := range drains {
-		lines = append(lines, fmt.Sprintf("%d\t%s\t%d\t%v",
-			measured.Consumers, measured.Took.Round(10*time.Millisecond), idle(measured.PerConsumer), measured.PerConsumer))
+		lines = append(lines, fmt.Sprintf("%d\t%s\t%.2f×\t%d\t%v",
+			measured.Consumers, measured.Took.Round(10*time.Millisecond), speedup(drains[0], measured), idle(measured.PerConsumer), measured.PerConsumer))
 	}
 
 	for _, line := range lines {

@@ -43,8 +43,12 @@ the grid is `5ms / 16KiB / none`. Ranges are over all three runs, every codec an
 ceilings where the row does not split them; two single-cell p99 spikes, 42.0 ms at linger 0
 and 30.7 ms at 5 ms, are left out of the p99 column.
 
-**Compression belongs to the batch, not the codec.** zstd went from 2.9× to 5.65× on the
-same bytes by changing nothing but how long the producer waited.
+**Batching sets how much any codec can do; the codec still decides how much of it is
+done.** zstd went from 2.9× to 5.65× on the same bytes by changing nothing but how long the
+producer waited, and snappy from 2.05× to 3.28× the same way. At the same batching the
+codecs stay apart: at 5 ms linger zstd compressed 4.75–4.81× and snappy 2.82–2.84×, and
+zstd at linger 0 already matched snappy at its best. Both knobs matter; the one a default
+leaves at its worst is the batching.
 
 **Linger is an upper bound, not a price.** 10 ms added about 6 ms of median. At 50 ms
 with a 16 KiB ceiling the median was 12 ms, yet the average batch was ≈40 records of ≈250

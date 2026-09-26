@@ -658,7 +658,7 @@ of [`tuning-checklist.md`](tuning-checklist.md).
 
 ## exp-17 — linger, batch size and the codec, under one fixed load
 
-Date: 2026-09-21 · `make exp-17` · run logs: [run 1](../experiments/transaction_guarantee/exp-17-batching-sweep/results/run-2026-09-21-191906.log) · [run 2](../experiments/transaction_guarantee/exp-17-batching-sweep/results/run-2026-09-21-192434.log) ·
+Date: 2026-09-21 · `make exp-17` · run logs: [run 1](../experiments/transaction_guarantee/exp-17-batching-sweep/results/superseded/run-2026-09-21-191906.log) · [run 2](../experiments/transaction_guarantee/exp-17-batching-sweep/results/superseded/run-2026-09-21-192434.log) ·
 [the Java client's own defaults](../experiments/transaction_guarantee/exp-17-batching-sweep/results/java-client-defaults.log)
 
 **Hypothesis.** Linger trades latency for throughput: waiting fills batches, and full

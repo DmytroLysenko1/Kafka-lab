@@ -21,7 +21,7 @@ The shapes transfer. The magnitudes are the stand's.
 | `acks=1` and the leader lost | Producer reported success | **2 000 acknowledged records lost** | [exp-08](../experiments/transaction_guarantee/exp-08-acks/) |
 | Idempotence turned off, retries under load | Nothing visible | 80–291 duplicate events per run | [exp-09](../experiments/transaction_guarantee/exp-09-reordering/) |
 | A handler retrying inside the poll loop | Lag identical to the healthy case | Member removed, a stale commit **rewound a partition 1 726–1 732 records** | [exp-16](../experiments/transaction_guarantee/exp-16-lag-backpressure/) |
-| A transaction left open | Consumers stalled on an unrelated topic | Records hidden for **23.2 s** | [exp-10d](../experiments/transaction_guarantee/exp-10d-hanging-transaction/) |
+| A transaction left open | `read_committed` consumers of the partition stalled, behind a producer they had nothing to do with | Records hidden for **23.2 s** | [exp-10d](../experiments/transaction_guarantee/exp-10d-hanging-transaction/) |
 
 ## The failures worth reading twice
 
@@ -88,7 +88,5 @@ that paused its fetches and kept polling had none of that.
   nothing measurable here: one machine, local SSD, loopback network. On a cluster where
   replication competes with clients for one NIC the trade is real; this stand is not
   evidence of it.
-- **A retry-topic chain under load.** The topics exist in the catalog and the design is in
-  [case 07](static/07-retry-dlq.md); only the dead letter end of it has a run behind it.
 - **Reusing a deleted field number** (exp-12d/d2) — the two cells of the schema matrix that
   were not run.

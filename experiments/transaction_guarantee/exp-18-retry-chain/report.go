@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,6 +35,7 @@ type counts struct {
 	healthyWhileLocked           int
 	healthyTotal, hotTotal       int
 	totalOfCellsMerchants, inbox int64
+	rows                         []counted
 }
 
 func measure(ctx context.Context, pool *pgxpool.Pool, s *settings, produced payments, line *timeline) (counts, error) {
@@ -53,6 +56,11 @@ func measure(ctx context.Context, pool *pgxpool.Pool, s *settings, produced paym
 			return counts{}, fmt.Errorf("scan the inbox: %w", err)
 		}
 		result.add(produced.hot[eventID], consumedAt, line)
+		id, err := strconv.ParseInt(eventID, 10, 64)
+		if err != nil {
+			return counts{}, fmt.Errorf("event id %q in the inbox: %w", eventID, err)
+		}
+		result.rows = append(result.rows, counted{eventID: id, hot: produced.hot[eventID], at: consumedAt})
 	}
 	if err := rows.Err(); err != nil {
 		return counts{}, fmt.Errorf("read the inbox: %w", err)
@@ -102,6 +110,7 @@ func report(ctx context.Context, out io.Writer, pool *pgxpool.Pool, admin *kadm.
 	written.printf("healthy payments counted while the merchant was still locked: %d of %d\n", result.healthyWhileLocked, result.healthyTotal)
 	written.printf("contended payments counted: %d of %d, the last at +%s\n", result.hot, result.hotTotal, seconds(result.hotLast))
 	written.printf("lock released at: %s\n", since(line.started, line.released))
+	writeOrder(written, result.rows)
 	written.printf("consumer restarts: %d\n", line.restarts)
 	if s.chained() {
 		writeChain(ctx, written, admin, s)
@@ -127,6 +136,23 @@ func writeChain(ctx context.Context, written *lines, admin *kadm.Client, s *sett
 		written.printf("copies into %s: %s\n", s.topic(next.suffix), copies(ctx, admin, s.topic(next.suffix)))
 	}
 	written.printf("copies into %s: %s\n", s.topic("dlq"), copies(ctx, admin, s.topic("dlq")))
+}
+
+// writeOrder reports what the run did to the order payments were produced in, and the
+// waits the healthy payments sat through — both read from the inbox, not inferred.
+func writeOrder(written *lines, rows []counted) {
+	order := reorderingOf(rows)
+	written.printf("payments counted ahead of an earlier contended payment: %d\n", order.overtakes)
+	written.printf("contended payments counted out of the order they were produced in: %d of %d pairs\n", order.hotInversions, order.hotPairs)
+	gaps := stalls(rows)
+	parts := make([]string, 0, len(gaps))
+	var total time.Duration
+	for _, gap := range gaps {
+		parts = append(parts, seconds(gap))
+		total += gap
+	}
+	written.printf("waits between healthy payments of %s or more: %d, together %s [%s]\n",
+		stallThreshold, len(gaps), seconds(total), strings.Join(parts, " "))
 }
 
 func copies(ctx context.Context, admin *kadm.Client, topic string) string {

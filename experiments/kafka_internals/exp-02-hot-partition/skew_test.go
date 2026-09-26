@@ -84,3 +84,25 @@ func TestIdleCountsMembersThatHandledNothing(t *testing.T) {
 		})
 	}
 }
+
+// The ceiling is what makes the skewed cell's result a consequence of its design rather
+// than a finding: at 85% on one partition no group can drain more than 1.17× faster.
+func TestTheCeilingIsTheTopicOverItsHottestPartition(t *testing.T) {
+	tests := []struct {
+		name    string
+		events  int
+		hottest int
+		want    float64
+	}{
+		{name: "the skewed cell: 17 052 of 20 000 on one partition", events: 20_000, hottest: 17_052, want: 20_000.0 / 17_052},
+		{name: "six even partitions", events: 600, hottest: 100, want: 6},
+		{name: "nothing produced", events: 0, hottest: 0, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if diff := cmp.Diff(tt.want, ceiling(tt.events, tt.hottest)); diff != "" {
+				t.Errorf("ceiling (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

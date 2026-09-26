@@ -57,8 +57,8 @@ exp04() { "$binary" -records "$records" "$@"; }
   killed="$(now_ms)"
   echo
 
-  exp04 -phase degraded -since "$killed"
-  echo
+  degraded="$(exp04 -phase degraded -since "$killed")"
+  printf '%s\n\n' "$degraded"
 
   echo "starting kafka$victim again"
   docker start "kafka-lab-kafka$victim" >/dev/null
@@ -76,6 +76,12 @@ exp04() { "$binary" -records "$records" "$@"; }
   echo
 
   exp04 -phase elected -since "$elected"
+  echo
+
+  # Every write the cluster said yes to, before the kill and after it, has to be readable
+  # from the leader that replaced the dead one.
+  acknowledged="$(printf '%s\n%s\n' "$baseline" "$degraded" | awk '/^writes accepted/ {sum += $3} END {print sum + 0}')"
+  exp04 -phase readback -expect "$acknowledged"
 } 2>&1 | tee "$log"
 
 echo "written to ${log#"$repo"/}"
