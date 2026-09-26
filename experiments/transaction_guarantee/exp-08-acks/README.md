@@ -9,8 +9,12 @@ instead — failing loudly rather than lying quietly.
 make exp-08
 ```
 
-Two single-partition topics, RF 3, and two logs. The `acks=1` half pauses both followers,
-writes, kills the leader and thaws the followers; the `acks=all` half kills one broker.
+Three single-partition topics, RF 3, three cells and a log for each. The `acks=1` cell
+pauses both followers, writes, kills the leader and thaws the followers; the
+`acks=all`/`min.insync.replicas=3` cell kills one broker. The third cell is the control the
+first two lacked: the `acks=1` cell's failure step for step — followers paused, write,
+leader killed, followers thawed — with only `acks` changed to `all`, on a topic at
+`min.insync.replicas=2`. Without it the first two cells compare two different failures.
 Every paused or killed broker is put back on every exit path, leadership included.
 
 | Knob | Default | Why |
@@ -18,9 +22,9 @@ Every paused or killed broker is put back on every exit path, leadership include
 | `RECORDS` | 2 000 | enough that a partial loss would be visible as a number |
 | `RECORD_BYTES` | 4 096 | uncompressed, so the log on disk is the size it looks |
 
-## Result — 2026-09-21
+## Result — 2026-09-21, rerun 2026-09-26
 
-### `acks=all` with `min.insync.replicas=3` — [run log](results/acks-all-2026-09-21-183122.log) · [rerun](results/acks-all-2026-09-22-000605.log)
+### `acks=all` with `min.insync.replicas=3` — [run log](results/acks-all-2026-09-21-183122.log) · [rerun](results/acks-all-2026-09-22-000605.log) · [rerun](results/acks-all-2026-09-26-161734.log)
 
 | Cluster | Accepted |
 |---|---|
@@ -36,7 +40,7 @@ follower still in the in-sync set, the leader appended the records and answered
 `REQUEST_TIMED_OUT` instead of acknowledging them — it never told the producer they were
 safe.
 
-### `acks=1`, followers paused — [run log](results/acks-one-2026-09-22-000605.log)
+### `acks=1`, followers paused — [run log](results/acks-one-2026-09-22-000605.log) · [rerun](results/acks-one-2026-09-26-161734.log)
 
 | | |
 |---|---|
@@ -48,7 +52,32 @@ Both followers were paused before the write, so the leader acknowledged 8 MB tha
 nowhere else. It was killed, the followers were thawed after 1 s, and the controller fenced
 the dead leader after 10.9 s and elected a follower — cleanly, because a paused follower is
 still in the in-sync set. The new leader had none of the records, and every one the
-producer had been told was written is gone, with no error anywhere.
+producer had been told was written is gone, with no error anywhere. The rerun reproduced it
+exactly: 2 000 acknowledged, 0 readable, fenced after 10.3 s.
+
+### `acks=all`, the same failure — [run log](results/acks-all-paused-2026-09-26-161734.log)
+
+| | |
+|---|---|
+| acknowledged, with both followers paused | **0 of 2 000** — the producer gave up after 3 s: *records have timed out before they were able to be produced* |
+| readable after the leader was killed and a follower elected | 0 |
+| lost | **0 of the 0 that were acknowledged** |
+
+The same pause, the same kill, the same empty new leader — and nothing the producer was
+told had been written went missing, because it was told nothing had been. The 2 000
+records are gone in both cells; the difference is entirely in what the caller believes.
+With `acks=1` a service would have marked 2 000 payments as published; with `acks=all` it
+got an error within its delivery timeout and would still hold them, in an outbox, to send
+again. This is the comparison the hypothesis asks for, and the first two cells could not
+make it.
+
+The producer here runs with idempotence off, as in the `acks=1` cell, and for a second
+reason: franz-go's idempotent producer cannot give up on a batch the leader answered
+`REQUEST_TIMED_OUT` (the leader may have appended it, and dropping it would break the
+sequence numbers), so it retries until the in-sync set answers. The first attempt at this
+cell did exactly that and hung for twelve minutes past every deadline set on it. With
+idempotence on, `acks=all` still never acknowledges during the pause — it just never
+answers at all, which is what exp-09 shows from the other side.
 
 **This does not lean on the stand's shape.** Pausing two of three combined broker and
 controller nodes also freezes the KRaft quorum, and a frozen quorum cannot shrink an
@@ -94,5 +123,6 @@ The reasoning, and the false zero this instrument printed before it was fixed, a
 ```
 make reset-topic TOPIC=exp08.acks1
 make reset-topic TOPIC=exp08.isr3
+make reset-topic TOPIC=exp08.all2
 make elect-preferred
 ```

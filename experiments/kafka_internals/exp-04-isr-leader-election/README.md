@@ -36,24 +36,42 @@ measuring.
 |---|---|---|
 | `RECORDS` | 300 | enough to prove writes are served, small enough that the phase is about availability, not throughput |
 
-## Result — 2026-09-20
+## Result — three runs
 
-[run log](results/run-2026-09-20-200722.log) · broker IDs are whatever the assignment
-produced on this run — the previous run killed kafka3, this one kafka2. The result is the
-shape, `[a b c]` → `[b b c]` → `[a b c]`.
+Runs: [2026-09-20 15:41](results/run-2026-09-20-154106.log),
+[2026-09-20 20:07](results/run-2026-09-20-200722.log) (killed kafka2) and
+[2026-09-26](results/run-2026-09-26-034607.log) (killed kafka3, which was also the KRaft
+controller). Broker IDs are whatever the assignment produced; the result is the shape,
+`[a b c]` → `[b b c]` → `[a b c]`. The
+phase table is the 2026-09-26 run, the only one that also reads the topic back:
 
 | Phase | Leaders | Smallest ISR | Writes accepted |
 |---|---|---|---|
-| baseline | `[2 3 1]` | 3 of 3 | 300 of 300 |
-| degraded, kafka2 killed | `[3 3 1]` | **2**, with `min.insync.replicas` 2 | **300 of 300** |
-| recovered, kafka2 back | `[3 3 1]` | 3 of 3 | — |
-| after preferred election | `[2 3 1]` | 3 of 3 | — |
+| baseline | `[3 1 2]` | 3 of 3 | 300 of 300 |
+| degraded, kafka3 killed | `[1 1 2]` | **2**, with `min.insync.replicas` 2 | **300 of 300** |
+| recovered, kafka3 back | `[1 1 2]` | 3 of 3 | — |
+| after preferred election | `[3 1 2]` | 3 of 3 | — |
+| readback | — | — | **600 of 600 acknowledged records readable, 0 lost** |
 
 | What | Within | Of that, spent polling |
 |---|---|---|
-| kill → ISR shrinks and no partition is leaderless | **10.6 s** | 10.6 s |
-| restart → ISR whole again | **5.1 s** | 5.1 s |
-| preferred election → leadership back | **0 s** | 0 s |
+| kill → ISR shrinks and no partition is leaderless | **10.1 s · 10.6 s · 15.3 s** (the last with the controller killed) | the whole interval |
+| restart → ISR whole again | **5.1 s** in every run | the whole interval |
+| preferred election → leadership back | **0–0.1 s** | 0 s |
+
+**The degraded window was a pause, not data.** The readback reads the topic to its end after
+recovery and finds every one of the 600 acknowledged writes. It says that for writes made
+before the kill and after the re-election; the kill itself happens between the two write
+phases, so nothing was in flight when it landed — that case is exp-08.
+
+**Killing the controller costs about five seconds more.** In the 15.3 s run the killed
+broker was also the active KRaft controller. The [surviving brokers' logs](results/controller-failover-2026-09-26-034607.log)
+show them lose it and elect kafka2 about three seconds after the kill; a new controller has
+no record of when the dead broker last heartbeated, so its 9 s session starts over. That is
+roughly 12 of the 15.3 s; the rest is not isolated by this run. The two earlier runs did not
+record which broker was the controller, so they cannot serve as a clean control; the run now
+prints it before every kill. On three combined nodes one kill in three lands on the
+controller.
 
 Every interval is an upper bound measured from the event the shell timed, so the second
 column matters: it is how long the measuring process actually spent watching. On the first
@@ -79,7 +97,7 @@ the same broker, and puts the default back on every exit path:
 
 | `broker.session.timeout.ms` | `replica.lag.time.max.ms` | kill → ISR shrinks |
 |---|---|---|
-| 9 000 | 30 000 | 10.1 s · 10.6 s |
+| 9 000 | 30 000 | 10.1 s · 10.6 s · 15.3 s (the last with the controller killed) |
 | **20 000** | 30 000 | **20.3 s** |
 
 [log](results/exp-04c-2026-09-21-172333.log), which prints the timers the broker is
@@ -99,10 +117,13 @@ cluster, not a bug: the ratio only improves when there are more brokers than rep
 broker reports `min.insync.replicas` 2 — exactly the threshold. The next failure is the one
 that turns `acks=all` into `NOT_ENOUGH_REPLICAS`; that is exp-08.
 
-**Leadership did not come back on its own.** The replica rejoined in 5.1 s, but partition 0
-was still led by its replacement, and stayed that way until asked. `auto.leader.rebalance.enable`
-is off on this stand, so the preferred election is a step someone has to run. Left undone,
-every restart leaves the cluster a little more lopsided.
+**Leadership did not come back on its own — on this stand.** The replica rejoined in 5.1 s,
+but partition 0 was still led by its replacement, and stayed that way until asked.
+`auto.leader.rebalance.enable` is off here; the broker default is on, and then the
+controller moves leadership back itself on a check every 300 s
+([config](results/leader-rebalance-config.log)) — not measured. With it off, the preferred
+election is a step someone has to run, and every restart left undone leaves the cluster a
+little more lopsided.
 
 **What is not demonstrated here.** Unclean leader election needs the ISR to collapse to a
 replica that is behind, which on three combined broker/controller nodes means killing two of

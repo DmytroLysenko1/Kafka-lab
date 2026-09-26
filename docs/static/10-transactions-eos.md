@@ -157,12 +157,12 @@ written; it stops `read_committed` readers being given them.
 | unrelated producer | 100 records written after it, **no transaction at all** |
 | high watermark / last stable offset | **101 / 0** — 101 records reported as lag, none deliverable |
 | `read_uncommitted` saw the 100 after | **0 s** |
-| `read_committed` saw them after | **23.2 s** |
+| `read_committed` saw them after | **23.2 s**, and 27.3 s in a second run |
 
 An unrelated producer with no transaction was held back for the full life of someone
 else's. The stall is not the timeout alone: the coordinator looks for expired transactions
 every `transaction.abort.timed.out.transaction.cleanup.interval.ms`, 10 s by default
 ([read off the broker](../../experiments/transaction_guarantee/exp-10d-hanging-transaction/results/broker-transaction-timers.log)), so a
-20 s timeout releases readers somewhere between 20 and 30 s — 23.2 s here. With
+20 s timeout releases readers somewhere between 20 and 30 s — 23.2 s and 27.3 s in exp-10d's two runs. With
 franz-go's default of 40 s that window is 40–50 s, and the broker lets a producer ask for
 up to `transaction.max.timeout.ms`, 15 minutes.

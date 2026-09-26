@@ -1,0 +1,44 @@
+exp-04 — ISR, leader election and recovery
+date: 2026-09-26-034607
+client: franz-go v1.22.0
+
+phase                 baseline, every broker up
+writes accepted       300 of 300 with acks=all
+leaders by partition  [3 1 2]
+smallest ISR          3 of 3 replicas
+under-replicated      0
+LEADER_P0             3
+
+killing kafka3, the broker leading partition 0
+
+phase                     degraded, one broker killed
+noticed within            15.3s of the kill
+  of that, spent polling  15.3s
+leaders by partition      [1 1 2]
+leaderless partitions     0
+under-replicated          3 of 3
+smallest ISR              2, with min.insync.replicas 2
+writes accepted           300 of 300 with acks=all
+
+starting kafka3 again
+
+phase                            recovered, the broker is back
+ISR restored within              5.1s of the restart
+  of that, spent polling         5s
+leaders by partition             [1 1 2]
+smallest ISR                     3 of 3 replicas
+partitions led by a replacement  1 of 3
+
+asking for a preferred leader election
+
+phase                            elected, preferred leadership asked for explicitly
+leadership back within           100ms of the election
+  of that, spent polling         0s
+leaders by partition             [3 1 2]
+smallest ISR                     3 of 3 replicas
+partitions led by a replacement  0 of 3
+
+phase         readback, after the failover and the recovery
+acknowledged  600 writes, over every phase
+readable      600 records
+lost          0

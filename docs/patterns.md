@@ -134,7 +134,7 @@ Waiting inside the handler is the alternative everyone writes first, and exp-16 
 against pausing: through a 20 s dependency outage the lag was identical either way, but the
 blocking handler held the rebalance, the group removed the member after the 8 s rebalance
 timeout, its next accepted commit rewound a partition by 1 726–1 732 records, and one run in
-three handled 1 739 records twice. The handler that paused fetching and rewound to its first
+four handled 1 739 records twice. The handler that paused fetching and rewound to its first
 unhandled record showed none of it
 ([exp-16](../experiments/transaction_guarantee/exp-16-lag-backpressure/)).
 
@@ -149,14 +149,14 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 | Anti-pattern | What it costs, measured | Run |
 |---|---|---|
 | Assuming a global order across partitions | 6 827 – 8 721 of 10 000 events handled out of their business order, every payment split across partitions; keyed: 0, every run | [exp-01](../experiments/kafka_internals/exp-01-partition-keys/) |
-| A key that concentrates traffic (hot partition) | 85% of records on one partition; going from one consumer to seven moved the drain from 5.63 s to 4.76 s, within the variance of five single-shot cells, and the seventh handled nothing | [exp-02](../experiments/kafka_internals/exp-02-hot-partition/) |
+| A key that concentrates traffic (hot partition) | 85% of records on one partition; six consumers drained it 1.12–1.16× faster than one against a ceiling of 1.17×, while the same six drained evenly keyed events 5.2–5.8× faster (three runs each), and the seventh handled nothing | [exp-02](../experiments/kafka_internals/exp-02-hot-partition/) |
 | Retention as an afterthought | a 5 s retention left 0 of 2 000 records readable; compaction is the opposite lever and left 50 of 2 010 | [exp-03](../experiments/kafka_internals/exp-03-segments-retention/) |
 | Committing the offset before the work | 49 of 1 000 payments gone with no error anywhere; with `GreedyAutoCommit`, the unwritten rest of a batch — 38 and 41 | [exp-05](../experiments/transaction_guarantee/exp-05-at-most-once/), [exp-05b](../experiments/transaction_guarantee/exp-05b-autocommit-greedy/) |
 | `acks=1` on a topic that carries money | 2 000 records acknowledged, 0 readable after the leader died inside the replication window | [exp-08](../experiments/transaction_guarantee/exp-08-acks/) |
-| Turning idempotence off to "go faster" | 80–291 duplicates per run, each one a record the leader had appended before answering `REQUEST_TIMED_OUT` | [exp-09](../experiments/transaction_guarantee/exp-09-reordering/) |
-| Blocking retry inside the handler | member removed from the group, one commit refused, a partition rewound 1 726–1 732 records, 1 739 handled twice | [exp-16](../experiments/transaction_guarantee/exp-16-lag-backpressure/) |
+| Turning idempotence off to "go faster" | 80–291 duplicates per run over five runs; in the three that counted retries, exactly the records the leader had appended before answering `REQUEST_TIMED_OUT` — 80, 80 and 191 | [exp-09](../experiments/transaction_guarantee/exp-09-reordering/) |
+| Blocking retry inside the handler | member removed from the group, one commit refused, a partition rewound 1 726–1 732 records in every run, 1 739 handled twice in one of four | [exp-16](../experiments/transaction_guarantee/exp-16-lag-backpressure/) |
 | One failure class for everything the database says | a row lock on one merchant read as "the database is down": every payment behind it waited out the 30 s lock, through 13 restarts | [exp-18](../experiments/transaction_guarantee/exp-18-retry-chain/) |
-| Leaving a transaction open | `read_committed` consumers saw nothing for 23.2 s behind a 20 s transaction timeout — lag with no messages, on a partition whose producer had nothing to do with the transaction | [exp-10d](../experiments/transaction_guarantee/exp-10d-hanging-transaction/) |
+| Leaving a transaction open | `read_committed` consumers saw nothing for 23.2–27.3 s behind a 20 s transaction timeout — lag with no messages, on a partition whose producer had nothing to do with the transaction | [exp-10d](../experiments/transaction_guarantee/exp-10d-hanging-transaction/) |
 | Treating a Kafka transaction as covering the database | Kafka exactly 1 000, Postgres 1 050 | [exp-10b](../experiments/transaction_guarantee/exp-10b-database-boundary/) |
 | Porting a Java config to franz-go unchanged | the defaults differ where it matters: one in-flight request instead of five, snappy instead of none, 10 ms of linger instead of 5, `AtStart` instead of `latest` | [checklist §7](tuning-checklist.md) |
 
@@ -169,7 +169,7 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 | An event must accompany a database write | outbox in the same transaction, relay afterwards | a Kafka transaction does not reach the database: 1 000 against 1 050 (exp-10b) |
 | A consumer writes anything that must not happen twice | inbox: claim and write in one transaction | 50 redeliveries refused, 1 000 rows (exp-07) |
 | Events of one entity must stay in order | key by the entity id; never rely on order across keys | keyless: up to 8 721 violations per 10 000; keyed: 0 (exp-01) |
-| A single tenant dominates the traffic | split the key or route that tenant to its own topic | adding consumers bought nothing measurable (exp-02) |
+| A single tenant dominates the traffic | split the key or route that tenant to its own topic | adding consumers bought 12–16%, the most the hot partition allowed, where even keys gave 5.2–5.8× (exp-02) |
 | A payment topic's durability | `acks=all` **and** `min.insync.replicas=2`; idempotence on | `acks=1` lost 2 000 acknowledged records (exp-08); at min.isr 1 `acks=all` means one machine |
 | One record keeps failing | retry topics on `LogAppendTime`, then DLQ; pause the waiting partition, not the tier | a locked merchant held every payment behind it for the whole 30 s lock; moved aside, the other 594 were counted while it was still locked (exp-18) |
 | A dependency is down for everybody | pause fetching, rewind, keep polling — do not wait in the handler | the blocking handler lost its membership and rewound the group (exp-16) |

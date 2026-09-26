@@ -297,6 +297,14 @@ waits for six payments, 16 of the 17 s. A batch therefore also has a budget of i
 one locked merchant's payments cannot hold the rebalance past its 60 s timeout, the failure
 exp-16 measured.
 
+**The time is paid for with order.** Counted within a partition — the only order Kafka
+keeps — no payment overtook a contended one without the chain, and 280–316 did with it
+(exp-18, third run). That is the mechanism working, and it is also a contract change for
+anyone downstream: a partition's events stop arriving in the order they were produced for
+every key that ever meets a lock. The inbox here counts authorisations, whose order does not
+matter; events of one payment whose order does would need the chain to park the later ones
+behind the earlier, which this chain does not do.
+
 **A lock on the whole table is not contention on one row.** A migration or a bulk update
 that holds every merchant makes every payment contended, and the chain carries all of them
 to the DLQ eleven minutes in. That is the outage case above; the chain does not detect it.

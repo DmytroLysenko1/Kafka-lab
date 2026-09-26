@@ -77,9 +77,10 @@ records still being handled on the partitions that did not move.*
 
 The trade is one extra round against keeping every unmoved partition in service. exp-14
 measured what the extra round costs in franz-go: the client notices it with a heartbeat
-500 ms after the first, so the moved partitions stopped for 0.52–0.68 s while the three
+500 ms after the first, so the moved partitions stopped for 0.51–0.68 s while the three
 that stayed kept flowing at their baseline. Eager, in the same two-member group, stopped all
-six for only 39–75 ms — a round that small costs less than cooperative's wait. Cooperative wins where
+six, and not one gap outgrew what the same partitions showed with nobody joining — a round
+that small costs less than cooperative's wait. Cooperative wins where
 eager's round is long: many members, slow handlers, real network latency — none of which
 this stand has, so that side is argued, not measured.
 
@@ -127,8 +128,8 @@ handling happened earlier.
 
 | Run | Metric | Result |
 |---|---|---|
-| exp-14 eager | per-partition stop when a member joins a group of one | **all six revoked, 39–75 ms each** — no longer than a steady-state poll cycle ([exp-14](../../experiments/transaction_guarantee/exp-14-rebalance-strategies/)) |
-| exp-14 cooperative | the same | **three moved, 0.52–0.68 s; three stayed, at their baseline** |
+| exp-14 eager | per-partition stop when a member joins a group of one | **all six revoked; gaps 37–75 ms against a 29–73 ms baseline over four runs** — the revocation is visible, its cost is not ([exp-14](../../experiments/transaction_guarantee/exp-14-rebalance-strategies/)) |
+| exp-14 cooperative | the same | **three moved, 0.51–0.68 s over four runs; three stayed at their baseline, once at twice it (125–141 ms)** |
 | exp-14 KIP-848 | the same | **three moved, 4.9–6.5 s; three stayed, at their baseline.** The instant runs waited the 5 s heartbeat interval to within 100 ms; the blocking runs took up to 1.5 s longer, which the heartbeat does not explain and this run does not isolate |
 | eager in a large group or with slow handlers | per-partition stop | not measured — two members on a local network cannot show it |
 | static membership | rebalances per rolling deploy with and without `group.instance.id` | **measured (exp-14b)**: a restart inside the session timeout cost 2.05 s of idle partitions and no assignment change for the surviving member, against three changes without `group.instance.id`; a static member that *dies* costs the whole session timeout, 12.6 s at a 12 s setting, against 0.6 s for a dynamic one ([exp-14b](../../experiments/transaction_guarantee/exp-14b-membership/)). A rolling deploy of many static members at once is still unmeasured |

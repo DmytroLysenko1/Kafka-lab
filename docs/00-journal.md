@@ -1538,3 +1538,59 @@ that can write to the topic can pre-empt a real payment's id. On a stand with no
 authentication, such a producer could as easily publish a payment outright; the fix is
 producer ACLs on every topic of the chain, and it is written down in case 07 rather than
 patched in the consumer.
+
+## 2026-09-26 — the audit's reruns, and what they took back
+
+**What was done.** An audit of every run against its own hypothesis found cells without
+controls, claims resting on one pass, and numbers quoted from logs that said something
+else. Every flagged experiment was rerun or given the cell it lacked. Most results held;
+what follows is what did not, and what the instruments got wrong on the way.
+
+**Withdrawn or corrected.**
+- *exp-02.* "Seven members bought 15%" was one pass; the 2026-09-25 entry above then called
+  it noise. Both were half right. Three runs with a control cell show the skewed topic has
+  a ceiling of 1.17× — all records over the hottest partition — and six members reached
+  1.12–1.16×, while the same six drained evenly keyed events 5.2–5.8× faster than one. The
+  gain is real and the key caps it.
+- *exp-14.* "Eager stopped every partition for 39–75 ms" quoted gaps that sit inside the
+  baseline poll cycle (29–73 ms). Over four runs the revocation is in the log and its cost
+  is not measurable here.
+- *exp-17/17b.* "Batching matters more than the codec" and "bytes are the ceiling" went
+  beyond the runs: batching doubles every codec's ratio, zstd still compresses ≈1.7× better
+  than snappy at equal batching, and the byte ceiling is inferred, not isolated.
+- *exp-09.* The reordering it was built to show never happened on franz-go in five runs;
+  the duplicates were exactly the records appended before a `REQUEST_TIMED_OUT`.
+- *exp-04.* "Leadership never comes back" is this stand's `auto.leader.rebalance.enable=false`,
+  not Kafka's; the default moves it back on a 300 s check. And one kill in three lands on
+  the KRaft controller: that run took 15.3 s, not 10, because the new controller starts the
+  dead broker's session over. The run now prints the controller before every kill.
+
+**The instruments, again.** Four of the reruns first measured the instrument:
+- exp-14's producer used the run's context, so franz-go failed the last tick's buffered
+  records at shutdown and the run reported a gap in the stream where there was none.
+- exp-08's new control cell hung for twelve minutes past every deadline: an idempotent
+  franz-go producer cannot give up on a batch the leader answered `REQUEST_TIMED_OUT`,
+  since the leader may have appended it. Its `count` then reported "2 000 of 2 000 lost"
+  for a producer that had been acknowledged nothing — loss was measured against what was
+  sent, not against what was promised.
+- exp-18's reordering metric compared payments across partitions and found 954 overtakes
+  in the cell without a chain, where Kafka had never ordered them. Within a partition it is
+  0 without the chain and 280–316 with it — the price of the time the chain saves.
+- And the laptop slept. A chain of reruns left running with the lid closed produced an
+  exp-13 whose 90 s cells took 18 minutes of wall clock, and an exp-08 frozen mid-cell with
+  a broker killed. Both exited 0 or would have. Every rerun since checks `pmset` for a sleep
+  inside its window.
+
+**The finding that matters is ours.** exp-13 now dumps the dashboard's panels from
+Prometheus for each cell's window, and in the two-broker outage every panel an operator
+would look at said *healthy*: under-replicated 0 and `kafka_brokers` 3 — the frozen
+metadata, as documented — and the outbox backlog **1**, flat, while Postgres held 308. The
+relay sets that gauge when a sweep ends, and during a full outage no sweep ends. The
+backlog was the one number this repo told operators to trust because the outage cannot
+reach it; the database cannot be reached, but the gauge could. Until the relay measures it
+on its own clock, the runbook reads it from Postgres.
+
+**Checked and held.** exp-03, 10d, 11, 12, 15 and 16 reproduced on rerun; exp-08's
+`acks=1` loss reproduced exactly, and its new control cell answered the hypothesis the
+first two cells could not: under the identical failure `acks=all` acknowledged none of the
+2 000 records and so lost none of what it had promised.

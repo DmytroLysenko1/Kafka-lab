@@ -29,7 +29,7 @@ const (
 var phases = []string{"write-acks-one", "count", "write-acks-all", "write-acks-all-bounded", "leader", "await-shrunk", "await-full"}
 
 var (
-	errPhase = errors.New("exp-08: -phase must be write-acks-one, count, write-acks-all, leader, await-shrunk or await-full")
+	errPhase = errors.New("exp-08: -phase must be write-acks-one, count, write-acks-all, write-acks-all-bounded, leader, await-shrunk or await-full")
 	errShape = errors.New("exp-08: -records out of range")
 	errTopic = errors.New("exp-08: -topic is required")
 )
@@ -40,7 +40,10 @@ type settings struct {
 	phase       string
 	records     int
 	recordBytes int
-	timeout     time.Duration
+	// acknowledged is how many of the records the write phase was told yes to; count
+	// measures loss against it, not against how many were sent.
+	acknowledged int
+	timeout      time.Duration
 }
 
 func main() {
@@ -57,6 +60,7 @@ func run() error {
 	flag.StringVar(&cfg.phase, "phase", "", strings.Join(phases, ", "))
 	flag.IntVar(&cfg.records, "records", 500, "records this phase writes")
 	flag.IntVar(&cfg.recordBytes, "record-bytes", 4096, "payload size, which decides whether one fetch can carry the whole log")
+	flag.IntVar(&cfg.acknowledged, "acknowledged", -1, "records the write phase reported acknowledged; -1 means all of -records")
 	flag.DurationVar(&cfg.timeout, "timeout", 2*time.Minute, "deadline for this phase")
 	flag.Parse()
 
@@ -69,6 +73,11 @@ func run() error {
 		return fmt.Errorf("%w: -records is %d", errShape, cfg.records)
 	case cfg.recordBytes <= 0 || cfg.recordBytes > maxRecordBytes:
 		return fmt.Errorf("%w: -record-bytes is %d", errShape, cfg.recordBytes)
+	case cfg.acknowledged > cfg.records:
+		return fmt.Errorf("%w: -acknowledged %d above -records %d", errShape, cfg.acknowledged, cfg.records)
+	}
+	if cfg.acknowledged < 0 {
+		cfg.acknowledged = cfg.records
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -164,6 +173,11 @@ func writeAcksAllBounded(ctx context.Context, cfg *settings, out io.Writer) erro
 	client, err := kgo.NewClient(
 		kgo.SeedBrokers(strings.Split(cfg.brokers, ",")...),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
+		// As in the acks=1 cell, and for a second reason: an idempotent producer cannot give
+		// up on a batch the leader answered REQUEST_TIMED_OUT, since the leader may have
+		// appended it, so it retries until the in-sync set answers. The first run of this
+		// cell did exactly that for twelve minutes, past every deadline set here.
+		kgo.DisableIdempotentWrite(),
 		kgo.ProduceRequestTimeout(boundedRequest),
 		kgo.RecordDeliveryTimeout(boundedDelivery),
 		kgo.ProducerBatchCompression(kgo.NoCompression()),

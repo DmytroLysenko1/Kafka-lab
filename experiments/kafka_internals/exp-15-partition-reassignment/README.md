@@ -11,16 +11,17 @@ make exp-15
 
 | | cell A — no throttle | cell B — 1 MiB/s |
 |---|---|---|
-| how long the move took | **2.2 s** | **24.8 s** |
-| copied onto the new replicas | 66.3 MiB | 71.1 MiB |
+| how long the move took | **2.2–2.3 s** | **24.8–25.9 s** |
+| copied onto the new replicas | 66.3–66.4 MiB | 71.1–73.3 MiB |
 | effective replication rate | ~30 MiB/s | ~2.9 MiB/s across three brokers, ~0.96 MiB/s each |
-| producer median, before → during | 2.6 → 1.7 ms | 2.9 → 1.7 ms |
-| producer p95, before → during | 6.1 → 5.3 ms | 6.8 → 3.4 ms |
+| producer median, before → during | 2.6–3.0 → 1.5–1.8 ms | 2.7–3.0 → 1.6–1.7 ms |
+| producer p95, before → during | 6.1–6.8 → 3.4–5.3 ms | 6.8–6.9 → 3.4–3.6 ms |
 
-**One run**, 2026-09-25, in [`results/`](results/) — every number above is from it. An
-earlier draft of this table printed a second value in each pair; that run's log was never
-committed, so those figures have been removed rather than left standing without evidence.
-A repeat is owed here: every other measured experiment in this repository has at least two.
+Three runs — [2026-09-25](results/run-2026-09-25-033634.log),
+[2026-09-26 first](results/run-2026-09-26-025847.log) and
+[second](results/run-2026-09-26-030319.log). An earlier draft of this table printed a second
+value in each pair from a run whose log was never committed; those figures were withdrawn,
+and the two runs of 2026-09-26 were made to replace them.
 
 ## What it shows
 
@@ -29,18 +30,22 @@ move into a 24.8 s one, and the arithmetic matches: about 22 MiB arriving at eac
 brokers at 1 MiB/s. If you need to know how long a move will take, this is the number to
 divide by — not the aggregate, the per-broker rate.
 
-**And on this stand it bought nothing.** Producer latency did not get worse during the
-unthrottled move — median and p95 during the copy were no higher than before it, in either
-cell and in both runs. That is an honest null result rather than a recommendation: three
+**And on this stand it bought nothing measurable.** Producer latency did not get worse
+during the unthrottled move — median and p95 during the copy were no higher than before it,
+in either cell and in all three runs. Read that with its confound: the "before" window is
+the first fifteen seconds of the producer, warm-up included, which is part of why "during"
+comes out lower. One throttled cell had a single 505.7 ms write during the copy and another
+of 502.3 ms after it; the other two runs had nothing near that, and one outlier is not a
+cost. That is an honest null result rather than a recommendation: three
 brokers on one laptop share a local SSD and a loopback network, and 66 MiB at 30 MiB/s
 never came close to saturating either. On a cluster where replication and client traffic
 compete for the same NIC, the throttle is the difference between a planned move and an
 incident — this run simply cannot show that, and says so rather than implying it.
 
 **What it does show is the shape of the operation.** A replication factor is not a setting
-you edit. topicctl refuses the change outright — *"Replication in topic config (2) is not
-equal to observed max ISR (3); this cannot be resolved by topicctl"* — so the experiment
-has to drop and recreate the topic between cells. The move itself is a plan file, an
+you edit: topicctl does not change one, so the experiment drops and recreates the topic
+between cells. (The refusal it prints when asked was seen by hand while building this run;
+it is not in the logs.) The move itself is a plan file, an
 `--execute`, and a `--verify` you must keep running until it reports completion, because
 `--verify` is also what removes the throttle it set. Forget it and every later replication
 on that cluster crawls at a megabyte a second, with nothing in the topic's own config to

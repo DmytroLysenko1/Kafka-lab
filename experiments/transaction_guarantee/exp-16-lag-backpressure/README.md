@@ -30,21 +30,25 @@ and every accepted commit is checked against the one before it on the same parti
 |---|---|---|
 | `HANDLERS` | `block pause` | `HANDLERS=block` repeats one shape; see the third finding |
 
-## Result — 2026-09-22
+## Result — 2026-09-22, and 2026-09-26
 
-Three runs of each: block [1](results/block-2026-09-22-012039.log) ·
-[2](results/block-2026-09-22-012322.log) · [3](results/block-2026-09-22-012605.log),
+Four runs of each: block [1](results/block-2026-09-22-012039.log) ·
+[2](results/block-2026-09-22-012322.log) · [3](results/block-2026-09-22-012605.log) ·
+[4](results/block-2026-09-26-030750.log),
 pause [1](results/pause-2026-09-22-012039.log) · [2](results/pause-2026-09-22-012322.log) ·
-[3](results/pause-2026-09-22-012605.log).
+[3](results/pause-2026-09-22-012605.log) · [4](results/pause-2026-09-26-030750.log). The
+fourth pair was run after the offset-read guard went in (`labkit.OffsetAt`), so that no
+number here rests only on the instrument that could read a failed lookup as zero; it
+agrees with the first three.
 
 | | block | pause |
 |---|---|---|
-| peak lag | 7 982–8 501, at 35–38 s | 7 940–7 972, at 35 s |
+| peak lag | 7 968–8 501, at 35–38 s | 7 940–7 972, at 35 s |
 | lag back under 100 | 10–13 s after the dependency came back | 11 s |
 | the joining member first owned a partition | **8 s after joining** | 2.0–2.1 s after joining |
 | commits the group refused | 1 — `UNKNOWN_MEMBER_ID` | 0 |
 | accepted commits that moved an offset backwards | **2 in every run, one of 1 726–1 732 records** | none |
-| records handled twice | **1 739**, 6, 8 | 0 |
+| records handled twice | **1 739**, 6, 8, 4 | 0 |
 | records never handled | 0 | 0 |
 
 **Lag is the outage, not the handler.** Both shapes built the same backlog at the same rate

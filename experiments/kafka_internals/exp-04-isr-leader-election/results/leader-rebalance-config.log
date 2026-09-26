@@ -1,0 +1,5 @@
+Leader rebalance settings on the running broker, 2026-09-26 (Kafka 4.3.1).
+kafka-configs.sh --entity-type brokers --entity-name 1 --describe --all | grep -iE 'auto.leader.rebalance|imbalance'
+
+  auto.leader.rebalance.enable=false sensitive=false synonyms={STATIC_BROKER_CONFIG:auto.leader.rebalance.enable=false, DEFAULT_CONFIG:auto.leader.rebalance.enable=true}
+  leader.imbalance.check.interval.seconds=300 sensitive=false synonyms={DEFAULT_CONFIG:leader.imbalance.check.interval.seconds=300}

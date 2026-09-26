@@ -122,18 +122,24 @@ without warning.
 One topic, 3 partitions, RF 3, `min.insync.replicas=2`; `docker kill` on the broker leading
 partition 0, then a restart, then an explicit preferred election.
 
+The phase table is one run, [2026-09-26](../../experiments/kafka_internals/exp-04-isr-leader-election/results/run-2026-09-26-034607.log):
+
 | Phase | Leaders | Smallest ISR | Writes accepted, `acks=all` |
 |---|---|---|---|
 | baseline | `[3 1 2]` | 3 of 3 | 300 of 300 |
-| kafka3 killed | `[1 1 2]` | **2**, with `min.insync.replicas` 2 as the broker reports it | **300 of 300** — written *after* the controller finished re-electing, so this is a settled two-of-three cluster accepting writes, not a measurement of the kill itself. The run never reads the topic back, so it says nothing about whether anything acknowledged was lost |
+| kafka3 killed | `[1 1 2]` | **2**, with `min.insync.replicas` 2 as the broker reports it | **300 of 300** — written *after* the controller finished re-electing, so this is a settled two-of-three cluster accepting writes, not a measurement of the kill itself |
 | kafka3 back | `[1 1 2]` | 3 of 3 | — |
 | after preferred election | `[3 1 2]` | 3 of 3 | — |
+| readback | — | — | **600 of 600 acknowledged writes readable, 0 lost** |
+
+The timings over the three runs that measured them — two on 2026-09-20, and the 2026-09-26
+run, whose killed broker was also the KRaft controller (the earlier two did not record it):
 
 | What | Within | Of that, spent polling |
 |---|---|---|
-| kill → ISR shrinks and no partition is leaderless | **10.6 s** | 10.6 s |
-| restart → ISR whole again | **5.1 s** | 5.1 s |
-| preferred election → leadership back on the preferred replica | **0 s** | 0 s |
+| kill → ISR shrinks and no partition is leaderless | **10.1 s · 10.6 s · 15.3 s** | the whole interval |
+| restart → ISR whole again | **5.1 s** in every run | the whole interval |
+| preferred election → leadership back on the preferred replica | **0–0.1 s** | 0 s |
 
 Each interval is an upper bound from the event the shell timed; the second column is how
 much of it the measuring process spent watching. The first two rows are real intervals. The
@@ -141,9 +147,19 @@ third is degenerate — leadership was already back at the first poll — so all
 can say about a preferred election is that it finishes faster than a process can start and
 ask.
 
+**Killing the controller costs about five seconds more.** In the 15.3 s run kafka3 was also
+the active KRaft controller — the [surviving brokers' logs](../../experiments/kafka_internals/exp-04-isr-leader-election/results/controller-failover-2026-09-26-034607.log)
+show them lose it and elect kafka2 about three seconds after the kill (a 2 s fetch timeout,
+then one failed election round). A new controller does not inherit the old one's view of
+who last heartbeated, so the dead broker's 9 s session starts over when it takes office. That
+accounts for roughly 12 of the 15.3 s; the rest is not isolated by this run, and the earlier
+runs did not record the controller, so they are not a clean control. On three combined
+nodes one kill in three lands on the controller, so the failover budget is the larger
+figure, not the smaller.
+
 **The detector is the heartbeat session, not the lag timer — and this was measured, not
 argued.** `replica.lag.time.max.ms` (30 s) is the figure usually quoted for a replica
-leaving the ISR, and the 10.1 s and 10.6 s measured here cannot be it. A crashed broker is
+leaving the ISR, and the 10.1–15.3 s measured here cannot be it. A crashed broker is
 not a slow follower: the controller fences a broker whose heartbeats stop after
 `broker.session.timeout.ms` — 9 s, heartbeats every 2 s, both
 [read off the running broker](../../experiments/kafka_internals/exp-04-isr-leader-election/results/broker-timers.log)
@@ -154,7 +170,7 @@ exp-04c raises the session timeout to 20 s, changes nothing else, and kills the 
 
 | `broker.session.timeout.ms` | `replica.lag.time.max.ms` | kill → ISR shrinks |
 |---|---|---|
-| 9 000 | 30 000 | 10.1 s · 10.6 s |
+| 9 000 | 30 000 | 10.1 s · 10.6 s · 15.3 s (the last with the controller killed) |
 | **20 000** | 30 000 | **20.3 s** |
 
 The reaction moved with the session timeout across an 11-second change while the lag timer
@@ -182,14 +198,20 @@ partition 0 stayed with its replacement until a preferred election was asked for
 already done at the first poll — see the table above. `auto.leader.rebalance.enable` is off
 here on purpose, so that step belongs to
 whoever restarts a broker — skipped after each restart, leadership drifts onto the survivors.
+This is the stand's setting, not Kafka's behaviour: the broker default is `true`, and then
+the controller moves leadership back to the preferred replicas itself, on a check every
+`leader.imbalance.check.interval.seconds` — 300 s
+([read off the broker](../../experiments/kafka_internals/exp-04-isr-leader-election/results/leader-rebalance-config.log)).
+Minutes later, not never. Not measured here.
 
 ## Still to be measured
 
 | Run | What it shows | Status |
 |---|---|---|
 | exp-04b | `unclean.leader.election.enable=true`: acknowledged records missing after promotion, counted | blocked — see below |
-| exp-08 | `acks=all` with `min.insync.replicas=3` under one broker kill — a different failure from the `acks=1` half, which is exp-08c below; `acks=all` under the same frozen-follower pause is what exp-09 shows: appended, never acknowledged, `REQUEST_TIMED_OUT` | **measured**: `acks=all` refused all 2 000 with `NOT_ENOUGH_REPLICAS` once a broker died, and accepted all 2 000 before it [run](../../experiments/transaction_guarantee/exp-08-acks/results/acks-all-2026-09-21-183122.log) |
-| exp-08c | the `acks=1` loss itself, with the follower genuinely held back | **measured**, now the `acks=1` half of exp-08: both followers paused, 2 000 acknowledged, the leader killed, a follower elected — 0 readable, 2 000 lost [run](../../experiments/transaction_guarantee/exp-08-acks/results/acks-one-2026-09-22-000605.log). Throttling could not do it (it does not restrain in-sync replicas); pausing does |
+| exp-08b | `acks=all` with `min.insync.replicas=3` under one broker kill — a different failure from the `acks=1` cell, exp-08a below | **measured**: `acks=all` refused all 2 000 with `NOT_ENOUGH_REPLICAS` once a broker died, and accepted all 2 000 before it [run](../../experiments/transaction_guarantee/exp-08-acks/results/acks-all-2026-09-21-183122.log) |
+| exp-08a | the `acks=1` loss itself, with the follower genuinely held back | **measured**, the `acks=1` cell of exp-08: both followers paused, 2 000 acknowledged, the leader killed, a follower elected — 0 readable, 2 000 lost [run](../../experiments/transaction_guarantee/exp-08-acks/results/acks-one-2026-09-22-000605.log). Throttling could not do it (it does not restrain in-sync replicas); pausing does |
+| exp-08c | `acks=all` at `min.insync.replicas=2` under exp-08a's failure, step for step | **measured**: 0 of 2 000 acknowledged — the producer was refused within its 3 s delivery timeout — and so 0 lost, against exp-08a's 2 000 [run](../../experiments/transaction_guarantee/exp-08-acks/results/acks-all-paused-2026-09-26-161734.log) |
 
 exp-04b cannot run on this stand. Promoting an out-of-sync replica requires the ISR to
 collapse onto one, which on three combined broker/controller nodes means killing two of

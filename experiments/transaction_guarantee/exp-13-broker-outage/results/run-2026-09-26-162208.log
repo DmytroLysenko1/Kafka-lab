@@ -1,0 +1,72 @@
+exp-13 — a broker outage under load: does the front door keep answering, and what piles up
+date: 2026-09-26-162208
+load: 10 payments/s for 90s; brokers killed at 20s for 30s
+
+== cell A: one broker down — still above min.insync.replicas ==
+phase                    seconds        accepted    refused  backlog (max)   under-repl  no leader
+before the kill          0–20                202          0              4            0          0
+brokers 1 down           20–50               302          0            133            3          0
+after they came back     50–90               395          0              3            3          0
+
+peak backlog: 133 records
+backlog back to its pre-outage level (4 records) 100ms after the brokers came back
+outbox drained 500ms after the run stopped taking payments
+grafana window: from=1790428943000 to=1790429044000
+dashboard, from Prometheus, every 5 s (a dash is a scrape that had no answer):
+  t(s)       backlog  published/s    api 2xx/s   under-repl      brokers
+     0           0.0            -            -          0.0          3.0
+     5           0.0          1.0            -          0.0          3.0
+    10           0.0          2.8          2.6          0.0          3.0
+    15           0.0          4.4          4.2          0.0          3.0
+    20           0.0          6.1          5.9          0.0          3.0
+    25           0.0          6.8          7.6          0.0          3.0
+    30           0.0          6.7          9.6          0.0          3.0
+    35          84.0          5.0         10.0          1.0          3.0
+    40           0.0         10.0         10.0          3.0          2.0
+    45           0.0         10.0         10.0          3.0          2.0
+    50           0.0         11.2         10.0          3.0          2.0
+    55           0.0         13.2         10.0          3.0          2.0
+    60           0.0         15.0         10.0          3.0          2.0
+    65           0.0         10.0         10.0          3.0          2.0
+    70           0.0         10.0         10.0          0.0          3.0
+    75           0.0         10.0         10.0          0.0          3.0
+    80           0.0         10.0         10.0          0.0          3.0
+    85           0.0         10.0         10.0          0.0          3.0
+    90           0.0         10.0         10.0          0.0          3.0
+    95           0.0          8.9          8.6          0.0          3.0
+   100           0.0          6.9          6.6          0.0          3.0
+
+== cell B: two brokers down — below min.insync.replicas ==
+phase                    seconds        accepted    refused  backlog (max)   under-repl  no leader
+before the kill          0–20                203          0              5            0          0
+brokers 1,2 down         20–51               303          0            308            0          0
+after they came back     51–90               393          0            468            3          0
+
+peak backlog: 468 records
+backlog back to its pre-outage level (5 records) 18.3s after the brokers came back
+outbox drained 500ms after the run stopped taking payments
+grafana window: from=1790429051000 to=1790429152000
+dashboard, from Prometheus, every 5 s (a dash is a scrape that had no answer):
+  t(s)       backlog  published/s    api 2xx/s   under-repl      brokers
+     0             -          4.8          4.6          0.0          3.0
+     5           4.0          3.0          3.0          0.0          3.0
+    10           1.0          3.0          3.0          0.0          3.0
+    15           1.0          4.0          4.5          0.0          3.0
+    20           1.0          6.0          6.5          0.0          3.0
+    25           1.0          7.8          8.1          0.0          3.0
+    30           1.0          7.5          9.8          0.0          3.0
+    35           1.0          5.8         10.0          0.0          3.0
+    40           1.0          3.8         10.0          0.0          3.0
+    45           1.0          1.8         10.0          0.0          3.0
+    50           1.0          0.0         10.0          0.0          3.0
+    55           1.0          0.0         10.0          0.0          3.0
+    60           1.0          0.0         10.0          0.0          3.0
+    65           1.0          0.0         10.0          0.0          3.0
+    70           1.0          0.0         10.0          0.0          3.0
+    75           1.0         20.2         10.0          0.0          3.0
+    80           1.0         22.2         10.0          0.0          3.0
+    85           1.0         24.2         10.0          0.0          3.0
+    90           1.0         26.2         10.0          0.0          3.0
+    95           0.0         28.1          9.5          0.0          3.0
+   100           0.0          7.9          7.5          0.0          3.0
+

@@ -52,6 +52,12 @@ exp04() { "$binary" -records "$records" "$@"; }
 
   # kill, not stop: SIGTERM gives Kafka a controlled shutdown, which hands leadership over
   # politely and measures the good case. A crash is the case worth measuring.
+  # Killing the active KRaft controller adds a quorum election and restarts the dead broker's
+  # session on the new controller: 15.3 s against 10.1–10.6 s. Which case a run measured has
+  # to be in its log, or the two get averaged into one number.
+  controller="$(docker exec "kafka-lab-kafka$victim" /opt/kafka/bin/kafka-metadata-quorum.sh \
+    --bootstrap-server localhost:9092 describe --status | awk '/^LeaderId/ {print $2}')"
+  echo "active controller     kafka$controller"
   echo "killing kafka$victim, the broker leading partition 0"
   docker kill "kafka-lab-kafka$victim" >/dev/null
   killed="$(now_ms)"

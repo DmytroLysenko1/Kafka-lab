@@ -85,7 +85,9 @@ log="$here/results/acks-one-$stamp.log"
   for id in $followers; do docker pause "kafka-lab-kafka$id" >/dev/null; done
   # Only the leader is reachable, so it is the only seed: a metadata request sent to a
   # frozen broker would hang instead of failing.
-  exp08 -topic exp08.acks1 -phase write-acks-one -brokers "localhost:${victim}9092" -timeout 1m
+  written="$(exp08 -topic exp08.acks1 -phase write-acks-one -brokers "localhost:${victim}9092" -timeout 1m)"
+  echo "$written"
+  acknowledged="$(awk '/^acknowledged/ {print $2}' <<<"$written")"
   echo
 
   echo "killing kafka$victim, the leader that acknowledged them, then thawing the followers"
@@ -97,7 +99,7 @@ log="$here/results/acks-one-$stamp.log"
 
   exp08 -topic exp08.acks1 -phase leader
   echo
-  exp08 -topic exp08.acks1 -phase count -timeout 3m
+  exp08 -topic exp08.acks1 -phase count -acknowledged "$acknowledged" -timeout 3m
 } 2>&1 | tee "$log"
 
 # The restarted broker has to be back in the in-sync set before the next half asks it
@@ -165,7 +167,9 @@ log="$here/results/acks-all-paused-$stamp.log"
   echo "pausing the followers:$followers"
   paused_at="$(date +%s)"
   for id in $followers; do docker pause "kafka-lab-kafka$id" >/dev/null; done
-  exp08 -topic exp08.all2 -phase write-acks-all-bounded -brokers "localhost:${victim}9092" -timeout 1m
+  written="$(exp08 -topic exp08.all2 -phase write-acks-all-bounded -brokers "localhost:${victim}9092" -timeout 1m)"
+  echo "$written"
+  acknowledged="$(awk '/^acknowledged/ {print $2}' <<<"$written")"
   echo
 
   echo "killing kafka$victim, the leader that held the records, then thawing the followers"
@@ -177,7 +181,7 @@ log="$here/results/acks-all-paused-$stamp.log"
 
   exp08 -topic exp08.all2 -phase leader
   echo
-  exp08 -topic exp08.all2 -phase count -timeout 3m
+  exp08 -topic exp08.all2 -phase count -acknowledged "$acknowledged" -timeout 3m
 } 2>&1 | tee "$log"
 
 rm -rf "$(dirname "$binary")"

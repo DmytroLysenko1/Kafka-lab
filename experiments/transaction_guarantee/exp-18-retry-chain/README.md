@@ -31,10 +31,11 @@ Each cell has its own topics, groups, merchants and range of event ids, and `run
 resets all of them first. The timings are read from `inbox.consumed_at`, not from the
 harness.
 
-## Result — 2026-09-25
+## Result — 2026-09-25, rerun 2026-09-26
 
-Two runs on the final code: [1](results/run-2026-09-25-210354.log) ·
-[2](results/run-2026-09-25-210657.log). Six earlier runs, on the code before the review
+Three runs on the final code: [1](results/run-2026-09-25-210354.log) ·
+[2](results/run-2026-09-25-210657.log) · [3](results/run-2026-09-26-161858.log), the third
+also measuring order and waits (below). Six earlier runs, on the code before the review
 fixes below, are not kept; they agree with these except for the replay latency in cell C,
 which is what one of those fixes changed.
 
@@ -66,6 +67,30 @@ not to the statement: when a tier's transaction is already queued on the row, th
 stage first waits up to 2 s for the tuple lock behind it, then up to 2 s more for the row
 itself. The bound is still finite — one wait per transaction queued ahead, and each stage
 has at most one — but "2 s per contended payment" is the floor, not the ceiling.
+
+**The chain buys that time with the partition's order.** The third run reads each
+payment's partition off the topic and counts, within a partition — the only order Kafka
+keeps — the payments counted ahead of an earlier contended one:
+
+| | A — no chain | B | C |
+|---|---|---|---|
+| payments counted ahead of an earlier contended payment on their partition | **0** | **280** | **316** |
+| waits between healthy payments of 300 ms or more | 4, together **29.5 s** | 6, together **15.8 s** | 6, together **15.8 s** |
+
+Without the chain the partition keeps its order and pays for it in time: nothing behind a
+contended payment is counted until the lock goes. With it, hundreds of later payments on the
+same partition are counted first — which is the point, and also the price. A consumer
+downstream that assumes one partition's events arrive in the order they were produced is
+wrong for every merchant that ever meets a lock. Here that is harmless, because the inbox
+counts authorisations and their order does not matter; for events of one payment whose
+order does (authorised, then captured), the chain needs keying by payment and a rule that
+parks the later event behind the earlier one, which this run does not have. Among the
+contended payments themselves no pair on one partition was counted out of order, but there
+were only one to four such pairs per cell — too few to call their order kept.
+
+The metric's first version compared payments across partitions and counted 954 overtakes
+in cell A, where nothing had overtaken anything: Kafka never ordered them in the first
+place. That run's log is not kept.
 
 **Escalation happened as designed.** In B every contended payment failed on the main topic
 and in the 3 s and 6 s tiers, where the lock was still held; three of the six reached the
