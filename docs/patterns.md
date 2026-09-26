@@ -3,8 +3,8 @@
 Every pattern here points at a case file or an experiment in this repository. Every
 anti-pattern points at the run where the damage is a number. Where nothing was run, the
 section says so in its own words rather than borrowing confidence from the ones that were:
-three of the sections below — CDC, stream enrichment and the retry chain's own experiment —
-are reasoning, not measurement, and are marked.
+two of the sections below — CDC and stream enrichment — are reasoning, not measurement, and
+are marked.
 
 The recommendations at the end are for the services we actually build: payments, where a
 lost event is money and a duplicated one is a second charge.
@@ -174,7 +174,7 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 | One record keeps failing | retry topics on `LogAppendTime`, then DLQ; pause the waiting partition, not the tier | a locked merchant held every payment behind it for the whole 30 s lock; moved aside, the other 594 were counted while it was still locked (exp-18) |
 | A dependency is down for everybody | pause fetching, rewind, keep polling — do not wait in the handler | the blocking handler lost its membership and rewound the group (exp-16) |
 | A consumer group is deployed several times a day | `group.instance.id`, session timeout sized to cover a restart | static: a restart costs 2.05 s and no rebalance; a death costs the whole session timeout (exp-14b) |
-| Throughput matters more than a few milliseconds | linger and a codec; zstd on full batches | compression raised throughput at saturation and the ratio is set by batching, 2.9× to 5.65× (exp-17, exp-17b) |
+| Throughput matters more than a few milliseconds | linger and a codec; zstd on full batches | compression raised throughput at saturation; batching took zstd from 2.9× to 5.65×, and at equal batching zstd still compressed ≈1.7× better than snappy (exp-17, exp-17b) |
 
 ---
 

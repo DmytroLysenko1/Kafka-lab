@@ -1,0 +1,36 @@
+exp-12 — schema evolution: what the registry allows, and what the bytes do anyway
+date: 2026-09-26-025512
+registry: Apicurio 3.0.9
+client: franz-go v1.22.0
+
+== what the registry lets through ==
+before any level is set, on a subject just created:
+  the subject reports       NONE
+  the registry-wide default NONE
+
+change                                 level      registry
+add an optional field                  NONE       accepted
+remove a field                         NONE       accepted
+retype a field, keeping its number     NONE       accepted
+
+add an optional field                  BACKWARD   accepted
+remove a field                         BACKWARD   refused (409)
+retype a field, keeping its number     BACKWARD   refused (409)
+
+add an optional field                  FULL       accepted
+remove a field                         FULL       accepted
+retype a field, keeping its number     FULL       refused (409)
+
+
+== what a v1 consumer does with each of them ==
+produced: v1, the schema the consumer was built against
+produced: a field added at the end
+produced: the amount removed
+produced: the amount retyped to a string, keeping its number
+record                                         what the v1 consumer did with it
+v1, the schema the consumer was built against  counted
+a field added at the end                       counted
+the amount removed                             dead letter: merchants: the event cannot be processed: merchant: an authorised amount is positive
+the amount retyped to a string, keeping its number dead letter: merchants: the event cannot be processed: merchant: an authorised amount is positive
+
+merchant total: 3998 minor units from 4 records

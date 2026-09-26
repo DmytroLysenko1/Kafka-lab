@@ -252,6 +252,13 @@ func produce(ctx context.Context, cfg *settings) error {
 		}
 	}
 
+	// The records get a context the end of the run cannot cancel. franz-go fails a buffered
+	// record whose context is done, so with the run's own context the last tick's records
+	// were failed at shutdown and counted as a gap in the stream — 15 and 18 of them in the
+	// two runs that surfaced it — when nothing had gone wrong. The run ending stops new
+	// records; the ones already sent are flushed and must still be acknowledged.
+	sending := context.WithoutCancel(ctx)
+
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	perTick := cfg.rate / perSecondPerTick
@@ -261,7 +268,7 @@ func produce(ctx context.Context, cfg *settings) error {
 			return flushed(ctx, client, &failed)
 		case <-ticker.C:
 			for range perTick {
-				client.Produce(ctx, &kgo.Record{
+				client.Produce(sending, &kgo.Record{
 					Partition: int32(seq % partitions),
 					Value:     strconv.AppendInt(nil, seq, 10),
 				}, acked)

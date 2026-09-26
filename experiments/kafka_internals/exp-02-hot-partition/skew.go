@@ -71,3 +71,21 @@ func formatShares(shares []share) string {
 	}
 	return strings.Join(parts, "  ")
 }
+
+// ceiling is how much faster than one consumer any group can drain the topic: one member
+// still has to work through the hottest partition alone, and the handler costs the same
+// per record, so the drain time cannot fall below that partition's share of the total.
+func ceiling(events, hottest int) float64 {
+	if hottest == 0 {
+		return 0
+	}
+	return float64(events) / float64(hottest)
+}
+
+// speedup is how much faster a drain was than the one it is compared against.
+func speedup(baseline, measured drain) float64 {
+	if measured.Took <= 0 {
+		return 0
+	}
+	return float64(baseline.Took) / float64(measured.Took)
+}

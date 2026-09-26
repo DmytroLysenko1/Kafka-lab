@@ -44,7 +44,7 @@ restore() {
 trap restore EXIT
 
 make exp-topics EXP="${here#"$repo"/experiments/}"
-for topic in exp08.acks1 exp08.isr3; do make reset-topic TOPIC="$topic"; done
+for topic in exp08.acks1 exp08.isr3 exp08.all2; do make reset-topic TOPIC="$topic"; done
 
 binary="$(mktemp -d)/exp08"
 go build -o "$binary" ./experiments/transaction_guarantee/exp-08-acks
@@ -136,5 +136,49 @@ log="$here/results/acks-all-$stamp.log"
   exp08 -topic exp08.isr3 -phase write-acks-all
 } 2>&1 | tee "$log"
 
+# The restarted broker has to rejoin before the third cell kills a leader again.
+docker start "kafka-lab-kafka$victim" >/dev/null
+exp08 -topic exp08.isr3 -phase await-full -timeout 3m
+victim=""
+
+# ---------------------------------------------------------------- cell three: acks=all, the same failure
+# The acks=1 cell's failure step for step — followers paused, write, leader killed,
+# followers thawed — with only the producer's acks changed, and min.insync.replicas 2 as in
+# the catalog. This is the comparison the first two cells cannot make: they are different
+# failures.
+victim="$(leader_of exp08.all2)"
+require_broker "$victim" exp08.all2
+followers=""
+for id in 1 2 3; do [ "$id" != "$victim" ] && followers="$followers $id"; done
+
+log="$here/results/acks-all-paused-$stamp.log"
+{
+  echo "exp-08c — acks=all under the acks=1 cell's failure: what is acknowledged, and what survives"
+  echo "date: $stamp"
+  echo "client: franz-go $(go list -m github.com/twmb/franz-go | awk '{print $2}')"
+  echo "records: $records of $record_bytes bytes, uncompressed"
+  echo
+
+  exp08 -topic exp08.all2 -phase leader
+  echo
+
+  echo "pausing the followers:$followers"
+  paused_at="$(date +%s)"
+  for id in $followers; do docker pause "kafka-lab-kafka$id" >/dev/null; done
+  exp08 -topic exp08.all2 -phase write-acks-all-bounded -brokers "localhost:${victim}9092" -timeout 1m
+  echo
+
+  echo "killing kafka$victim, the leader that held the records, then thawing the followers"
+  docker kill "kafka-lab-kafka$victim" >/dev/null
+  for id in $followers; do docker unpause "kafka-lab-kafka$id" >/dev/null; done
+  echo "followers paused for $(( $(date +%s) - paused_at ))s, against a broker.session.timeout.ms of ${session_timeout_ms}ms"
+  exp08 -topic exp08.all2 -phase await-shrunk -timeout 3m
+  echo
+
+  exp08 -topic exp08.all2 -phase leader
+  echo
+  exp08 -topic exp08.all2 -phase count -timeout 3m
+} 2>&1 | tee "$log"
+
 rm -rf "$(dirname "$binary")"
-echo "written to ${log#"$repo"/} and its acks-one sibling"
+echo "written to ${log#"$repo"/} and its acks-one and acks-all siblings"

@@ -18,6 +18,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
+
+	"github.com/DmytroLysenko1/Kafka-lab/experiments/labkit"
 )
 
 const (
@@ -30,10 +32,10 @@ const (
 
 // phases run in this order, each one a separate process so the shell can kill and restart a
 // broker between them and time the cluster's reaction from the failure itself.
-var phases = []string{"baseline", "degraded", "recovered", "elected"}
+var phases = []string{"baseline", "degraded", "recovered", "elected", "readback"}
 
 var (
-	errPhase    = errors.New("exp-04: -phase must be baseline, degraded, recovered or elected")
+	errPhase    = errors.New("exp-04: -phase must be baseline, degraded, recovered, elected or readback")
 	errShape    = errors.New("exp-04: -records out of range")
 	errNoShift  = errors.New("exp-04: the cluster never reached the expected state inside the deadline")
 	errNoConfig = errors.New("exp-04: the topic does not report the config the phase needs")
@@ -43,6 +45,7 @@ type settings struct {
 	brokers string
 	phase   string
 	records int
+	expect  int
 	since   int64
 	timeout time.Duration
 }
@@ -60,6 +63,7 @@ func run() error {
 	flag.StringVar(&cfg.phase, "phase", "", "baseline, degraded, recovered or elected")
 	flag.IntVar(&cfg.records, "records", 300, "records to write in this phase")
 	flag.Int64Var(&cfg.since, "since", 0, "unix milliseconds of the event this phase reacts to, for timing")
+	flag.IntVar(&cfg.expect, "expect", 0, "readback: how many writes the earlier phases were told were accepted")
 	flag.DurationVar(&cfg.timeout, "timeout", 2*time.Minute, "deadline for this phase")
 	flag.Parse()
 
@@ -96,6 +100,8 @@ func measure(ctx context.Context, cfg *settings, out io.Writer) error {
 		return degraded(ctx, client, admin, cfg, out)
 	case "recovered":
 		return recovered(ctx, admin, cfg, out)
+	case "readback":
+		return readback(ctx, cfg, out)
 	default:
 		return elected(ctx, admin, cfg, out)
 	}
@@ -247,6 +253,27 @@ func observe(ctx context.Context, admin *kadm.Client) ([]partition, error) {
 		})
 	}
 	return partitions, nil
+}
+
+// readbackStall is how long the log may go quiet before the read is called short. A short
+// read is a failed run, never "the rest was lost": that would be the claim this phase
+// exists to test, produced by the instrument instead of by the cluster.
+const readbackStall = 10 * time.Second
+
+// readback reads the whole partition after the leader was killed and replaced, and counts
+// it against every write the cluster acknowledged: "a pause, not data" is a claim about
+// the log, so the log is what answers it.
+func readback(ctx context.Context, cfg *settings, out io.Writer) error {
+	records, err := labkit.ReadAll(ctx, strings.Split(cfg.brokers, ","), topic, readbackStall)
+	if err != nil {
+		return fmt.Errorf("exp-04: read the topic back: %w", err)
+	}
+	return render(out, []string{
+		"phase	readback, after the failover and the recovery",
+		fmt.Sprintf("acknowledged	%d writes, over every phase", cfg.expect),
+		fmt.Sprintf("readable	%d records", len(records)),
+		fmt.Sprintf("lost	%d", max(cfg.expect-len(records), 0)),
+	})
 }
 
 // write reports how many records the cluster accepted rather than failing the phase: a

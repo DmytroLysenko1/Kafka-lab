@@ -50,6 +50,37 @@ go build -o "$binaries/exp-13" ./experiments/transaction_guarantee/exp-13-broker
 go build -o "$binaries/api" ./cmd/payments-api
 go build -o "$binaries/relay" ./cmd/outbox-relay
 
+# dashboard prints what the Grafana dashboard showed during a cell, read from Prometheus for
+# the same window: the panels an operator would have looked at, as numbers in the log rather
+# than a claim that the dashboard "shows it". One row per 5 s scrape.
+dashboard() {
+  local from="$1" to="$2"
+  python3 - "$from" "$to" <<'PY'
+import json, sys, urllib.parse, urllib.request
+start, end = sys.argv[1], sys.argv[2]
+panels = [
+    ("backlog", 'sum(outbox_backlog_records{service="outbox-relay"})'),
+    ("published/s", 'sum(rate(outbox_records_published_total{service="outbox-relay"}[30s]))'),
+    ("api 2xx/s", 'sum(rate(http_requests_total{status=~"2.."}[30s]))'),
+    ("under-repl", 'sum(kafka_topic_partition_under_replicated_partition{topic="exp13.payments"})'),
+    ("brokers", 'kafka_brokers'),
+]
+columns = {}
+for name, query in panels:
+    url = "http://localhost:9090/api/v1/query_range?" + urllib.parse.urlencode(
+        {"query": query, "start": start, "end": end, "step": "5"})
+    with urllib.request.urlopen(url, timeout=10) as answer:
+        result = json.load(answer)["data"]["result"]
+    columns[name] = {int(float(t)): v for t, v in result[0]["values"]} if result else {}
+times = sorted({t for column in columns.values() for t in column})
+print("dashboard, from Prometheus, every 5 s (a dash is a scrape that had no answer):")
+print("  t(s) " + "".join(f"{name:>13}" for name, _ in panels))
+for t in times:
+    row = "".join(f"{(format(float(columns[n][t]), '.1f') if t in columns[n] else '-'):>13}" for n, _ in panels)
+    print(f"  {t - int(float(start)):>4} " + row)
+PY
+}
+
 cell() {
   local name="$1" victims="$2" merchant="$3"
 
@@ -66,8 +97,14 @@ cell() {
   sleep 4
 
   echo "== $name =="
+  local from
+  from="$(date +%s)"
   "$binaries/exp-13" -merchant "$merchant" -rate "$rate" -window "$window" \
     -kill-after "$kill_after" -down-for "$down_for" -victims "$victims"
+  # Two more scrapes, so the last seconds of the cell are in Prometheus before it is asked.
+  sleep 10
+  echo "grafana window: from=${from}000 to=$(date +%s)000"
+  dashboard "$from" "$(date +%s)" || echo "dashboard: Prometheus did not answer"
 
   kill $api $relay 2>/dev/null || true
   wait $api $relay 2>/dev/null || true

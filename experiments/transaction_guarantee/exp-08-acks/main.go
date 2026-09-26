@@ -26,7 +26,7 @@ const (
 	readStall      = 10 * time.Second
 )
 
-var phases = []string{"write-acks-one", "count", "write-acks-all", "leader", "await-shrunk", "await-full"}
+var phases = []string{"write-acks-one", "count", "write-acks-all", "write-acks-all-bounded", "leader", "await-shrunk", "await-full"}
 
 var (
 	errPhase = errors.New("exp-08: -phase must be write-acks-one, count, write-acks-all, leader, await-shrunk or await-full")
@@ -83,6 +83,8 @@ func measure(ctx context.Context, cfg *settings, out io.Writer) error {
 	switch cfg.phase {
 	case "write-acks-one":
 		return writeAcksOne(ctx, cfg, out)
+	case "write-acks-all-bounded":
+		return writeAcksAllBounded(ctx, cfg, out)
 	case "write-acks-all":
 		return writeAcksAll(ctx, cfg, out)
 	case "count":
@@ -143,6 +145,38 @@ func writeAcksAll(ctx context.Context, cfg *settings, out io.Writer) error {
 		"acks\tall, every replica in the in-sync set",
 		fmt.Sprintf("accepted\t%d of %d%s", accepted, cfg.records, note(failure)),
 		fmt.Sprintf("refused outright\t%s", refusal(failure)),
+	})
+}
+
+// boundedDelivery is how long an acks=all write may wait for its in-sync set before the
+// producer gives up. It is kept inside the followers' pause, which is itself kept under
+// broker.session.timeout.ms, so the failure is the same one the acks=1 cell sees: the
+// followers are silent, not gone.
+const (
+	boundedDelivery = 3 * time.Second
+	boundedRequest  = 2 * time.Second
+)
+
+// writeAcksAllBounded is the acks=1 cell's write with one thing changed: it waits for the
+// in-sync set. With the followers paused the set cannot answer, so no record can be
+// acknowledged — whatever happens to the leader next, the caller was never told yes.
+func writeAcksAllBounded(ctx context.Context, cfg *settings, out io.Writer) error {
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(strings.Split(cfg.brokers, ",")...),
+		kgo.RequiredAcks(kgo.AllISRAcks()),
+		kgo.ProduceRequestTimeout(boundedRequest),
+		kgo.RecordDeliveryTimeout(boundedDelivery),
+		kgo.ProducerBatchCompression(kgo.NoCompression()),
+	)
+	if err != nil {
+		return fmt.Errorf("exp-08: kafka client: %w", err)
+	}
+	defer client.Close()
+
+	accepted, failure := write(ctx, client, cfg)
+	return render(out, []string{
+		fmt.Sprintf("acks	all, every replica in the in-sync set; the producer gives up after %s", boundedDelivery),
+		fmt.Sprintf("acknowledged	%d of %d%s", accepted, cfg.records, note(failure)),
 	})
 }
 

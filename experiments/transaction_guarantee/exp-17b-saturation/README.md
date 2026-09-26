@@ -43,8 +43,11 @@ expires, but this mode does not print batch sizes, so that is inferred, not meas
 89 MB/s on the wire and got no further. Every codec put less on the wire and delivered more
 records: against `none` in the same run and linger, snappy 1.7–4.6×, lz4 1.1–3.1× and zstd
 2.1–4.7×. On this stand the brokers share a laptop with the producer and write every byte
-three times, so bytes, not the producer's CPU, were the first ceiling — for `none`. Where
-the ceiling moved to for the compressed cells is not isolated here.
+three times, so bytes, not the producer's CPU, were most likely the first ceiling for
+`none` — an inference from the stand's shape, not a measurement: no broker, disk or network
+figure was taken. Where the ceiling moved to for the compressed cells is not isolated
+either; zstd delivered more records while putting less on the wire than `none` did, so the
+two cells were not held by the same limit.
 
 **What the codecs cost the producer.** Against `none` in the same run and linger, zstd
 added 1.9–3.0 ms of CPU per megabyte — 34–67% more — for 5.78× compression. snappy and lz4

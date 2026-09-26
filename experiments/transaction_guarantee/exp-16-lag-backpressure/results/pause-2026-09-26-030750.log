@@ -1,0 +1,79 @@
+exp-16 — a dependency outage with a join in the middle, handler: pause
+date: 2026-09-26-030750
+client: franz-go v1.22.0
+
+handler                pause: on failure pauses fetching, rewinds to the first unhandled record, releases the rebalance
+group                  exp16-pause-1790381357662680000
+load                   400 records/s over 3 partitions, 50s
+dependency down        15s to 35s
+second consumer joins  20s
+rebalance timeout      8s
+
+what the members went through
+  0s     A assigned [0 1 2]
+  15.1s  A paused fetching, rewound, released the rebalance
+  21.6s  A revoked []
+  21.6s  B assigned []
+  21.6s  A revoked [2]
+  21.6s  A assigned []
+  21.6s  A revoked []
+  22.1s  B revoked []
+  22.1s  A assigned []
+  22.1s  B assigned [2]
+  22.2s  B paused fetching, rewound, released the rebalance
+  35.4s  B dependency back, resumed fetching
+  35.4s  A dependency back, resumed fetching
+  1m15s  B revoked [2]
+  1m15s  A revoked [0 1]
+
+lag, sampled every second (every second sample shown)
+  1s     2
+  3s     0
+  5s     0
+  7s     2
+  9s     0
+  11s    2
+  13s    2
+  15s    0
+  17s    791
+  19s    1584
+  21s    2376
+  23s    3174
+  25s    3974
+  27s    4772
+  29s    5566
+  31s    6364
+  33s    7158
+  35s    7956
+  37s    6356
+  39s    4052
+  41s    2602
+  43s    1536
+  45s    568
+  47s    0
+  49s    4
+  51s    0
+  53s    0
+  55s    0
+  57s    0
+  59s    0
+  1m1s   0
+  1m3s   0
+  1m5s   0
+  1m7s   0
+  1m9s   0
+  1m11s  0
+  1m13s  0
+
+peak lag                                 7956 at 35s
+lag under 100 again                      46s, 11s after the dependency came back
+second consumer first owned a partition  22.1s, 2.1s after it joined
+commits refused by the group             0
+produced and acknowledged                19938
+  handled twice                          0, 0 of them by both members
+after the group refused a member's commit, until it was assigned again
+  records it handled                             none
+  commits that still reported success            none
+accepted commits that moved an offset backwards  none
+  never handled                                  0
+lag samples that failed                          0

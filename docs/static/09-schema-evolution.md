@@ -29,13 +29,13 @@ sequenceDiagram
 
     P->>SR: register PaymentCaptured v2, merchant_ref deleted
     Note over SR: the only compatibility check that will ever run:<br/>once, here, against the previous version.<br/>Nothing is checked again at read time
-    SR-->>P: accepted, schema id 47 (exp-12f)
+    SR-->>P: accepted, schema id N
 
     rect rgba(229, 57, 53, 0.16)
         Note over P,C1: v2 bytes now meet v1 readers, with the registry's<br/>strictest verdict already given and never revisited
-        P->>T: produce: magic 0x00 + id 47 + payload without merchant_ref
+        P->>T: produce: magic 0x00 + id N + payload without merchant_ref
         T-->>C1: those bytes
-        C1->>SR: GET schema 47, cached after the first call
+        C1->>SR: GET schema N, cached after the first call
         Note over T,C1: Avro: v1 declares merchant_ref with no default,<br/>so resolution fails and the consumer stops — loudly.<br/>proto3: there is no "required", so merchant_ref decodes<br/>as "" and the handler carries on with an empty merchant
     end
 ```
@@ -58,7 +58,7 @@ sequenceDiagram
     participant C2 as payments-consumer v2
 
     P->>SR: register PaymentCaptured v2, merchant_ref deleted
-    SR-->>P: accepted, schema id 47
+    SR-->>P: accepted, schema id N
 
     Note over C2: v2 consumers roll out first and immediately<br/>start reading v1 bytes, still produced by v1 producers
     P->>T: produce with the v1 schema, id 31

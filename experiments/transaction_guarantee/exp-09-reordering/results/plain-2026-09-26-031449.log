@@ -1,0 +1,16 @@
+exp-09 — reordering under a frozen follower, producer: plain
+date: 2026-09-26-031449
+client: franz-go v1.22.0
+stream: 120s, follower frozen and thawed 3 times
+
+LEADER_P0         3
+FOLLOWER_P0       1
+in-sync replicas  [3 1 2] of [3 1 2]
+
+flap 1: freezing kafka1
+in-sync set shrank after  25.3s
+in-sync replicas          [3 2] of [3 1 2]
+in-sync set whole again after  5s
+in-sync replicas               [1 2 3] of [3 1 2]
+
+flap 2: freezing kafka1
