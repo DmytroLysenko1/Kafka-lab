@@ -1,0 +1,104 @@
+# The schema registry, as in compose: Confluent's wire protocol under /apis/ccompat/v7,
+# storage in a database of its own so registered schemas survive a restart.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: apicurio
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: apicurio
+spec:
+  replicas: 1
+  # Recreate, not a rolling update: a second pod during the rollout would open a second JDBC
+  # pool of 20 (APICURIO_DATASOURCE_JDBC_MAX_SIZE below) that the connection budget in
+  # deploy/helm/payments/values.yaml does not hold. The seconds the registry is down cost the
+  # services nothing: the relay and the consumer cache every schema id they have used, and only
+  # a process starting in that window waits for it.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: apicurio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: apicurio
+    spec:
+      # The restricted profile, as for the payments pods. No readOnlyRootFilesystem: Quarkus
+      # unpacks to /tmp and the image is not ours to rearrange.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: apicurio
+          image: apicurio/apicurio-registry:3.0.9@sha256:51bd0274264269c5431ee14f9882abce308affe53a8f3846eba3d93226d5e125
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # The image's launcher defaults the heap to 80% of the container limit, leaving
+            # metaspace, code cache and threads ~100Mi of a 512Mi limit: the container would be
+            # OOM-killed before the GC ever ran out of heap. Half the limit for the heap.
+            - name: JAVA_MAX_MEM_RATIO
+              value: "50"
+            - name: APICURIO_STORAGE_KIND
+              value: sql
+            - name: APICURIO_STORAGE_SQL_KIND
+              value: postgresql
+            - name: APICURIO_DATASOURCE_URL
+              value: jdbc:postgresql://payments-db-rw:5432/apicurio
+            # The service's own database role: a registry role of its own would be the
+            # production shape; in the lab one role owns both databases (postgres.yaml).
+            - name: APICURIO_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef: { name: payments-db-app, key: username }
+            - name: APICURIO_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: payments-db-app, key: password }
+            # The image opens 20 connections at start (min-size) and may grow to 100
+            # (max-size, application.properties in the 3.0.9 jar) — more than the 97 Postgres
+            # has for everyone. Fixed at the 20 it holds idle (pg_stat_activity, 27.09.2026):
+            # the producers cache schema ids, so the registry sees a lookup per schema, not
+            # per record. The budget is in deploy/helm/payments/values.yaml.
+            - name: APICURIO_DATASOURCE_JDBC_MAX_SIZE
+              value: "20"
+          # Ready in 5–9 s when observed; 60 s leaves room for a cold node and a slow database.
+          startupProbe:
+            httpGet: { path: /health/started, port: http }
+            periodSeconds: 5
+            failureThreshold: 12
+          # /health/ready checks the database; 3 s, like the API's readiness, so a slow
+          # query reads as slow rather than as a failed probe.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          # Liveness is the port, not /health/live: Apicurio's liveness endpoint reports its
+          # datasource, answered 503 while drill 04 case f had the database down, and got the
+          # registry restarted for an outage that was not its own. Whether it can serve is
+          # readiness' question.
+          livenessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 20
+          # deploy/k8s/drills/results/resources-20260927-214046.log: 211Mi typical, 220Mi peak;
+          # the request is the typical, the limit 2.3× the peak for heap growth under a burst of
+          # new schemas. CPU 8m p95.
+          resources:
+            requests: { cpu: 50m, memory: 224Mi }
+            limits: { memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: apicurio
+  namespace: lab
+spec:
+  selector:
+    app.kubernetes.io/name: apicurio
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

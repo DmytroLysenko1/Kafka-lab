@@ -51,6 +51,10 @@ explicitly and did not record what an unconfigured subject reports; the third
 ([log](results/run-2026-09-26-025512.log)) asks first, and that is what the default is
 quoted from.
 
+The runs below read the merchant's total from `merchant_totals`, the single-currency table
+that per-currency totals have since replaced; every payment in them is EUR, so the numbers
+are what `merchant_currency_totals` would show.
+
 ## What it shows
 
 The registry is a policy engine that is off by default, and the wire format will not tell

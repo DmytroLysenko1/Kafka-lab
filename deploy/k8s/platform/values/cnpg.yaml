@@ -1,0 +1,4 @@
+# Figures: deploy/k8s/drills/results/resources-20260927-175351.log.
+resources:
+  requests: { cpu: 20m, memory: 64Mi }
+  limits: { memory: 128Mi }

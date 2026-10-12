@@ -479,8 +479,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (tier) (rate(payment_events_retried_total[30s]))",
-          "legendFormat": "{{tier}}",
+          "expr": "sum by (topic) (rate(payment_events_retried_total[30s]))",
+          "legendFormat": "{{topic}}",
           "refId": "A"
         }
       ]

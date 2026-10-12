@@ -1,0 +1,58 @@
+# Tails pod logs through the Kubernetes API rather than from /var/log on each node: one
+# replica is enough for a three-node lab, and it needs no hostPath mount.
+alloy:
+  configMap:
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
+        }
+      }
+  # resources-20260927-175351.log: 102Mi typical, 138Mi peak, 143m CPU p95 while the drills
+  # made the pods log hard. 192Mi left 1.39× over the peak; now request ≈ typical, limit
+  # ~1.6× the peak, CPU request at a third of the drill p95 (it is only a scheduling hint).
+  # resources-20260927-214046.log, after the first resize: 170Mi peak as the drills made the
+  # pods log hard. Over the stand's whole day the peak is 208Mi (max_over_time, 27.09 17:56Z,
+  # before that log's window opened): 256Mi was 1.23× it, 320Mi is 1.54×.
+  resources:
+    requests: { cpu: 50m, memory: 112Mi }
+    limits: { memory: 320Mi }
+controller:
+  type: deployment
+  replicas: 1
+# The config-reloader sidecar came with a request and no limit. resources-20260927-175351.log:
+# 13Mi typical, 20Mi peak.
+# resources-20260927-214046.log: 34Mi peak; 48Mi was 1.41× it.
+configReloader:
+  resources:
+    requests: { cpu: 10m, memory: 24Mi }
+    limits: { memory: 64Mi }

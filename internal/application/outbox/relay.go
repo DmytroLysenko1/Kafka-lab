@@ -9,20 +9,47 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+
+	"github.com/DmytroLysenko1/Kafka-lab/pkg/telemetry"
 )
 
-var ErrInterval = errors.New("outbox: the relay needs a positive sweep interval")
-
-const (
-	// The publish inside a sweep is bounded by the publisher and the commit by the store,
-	// each on its own timeout; this is the outer fence around the pair, so a database that
-	// stops answering cannot hold the claimed rows and the loop with them. The commit runs
-	// on a context that cannot be cancelled, so this deadline can never truncate it.
-	sweepTimeout = 30 * time.Second
-	// The backlog is a number for a dashboard, not work. It gets a short leash of its own:
-	// a count that hangs must not stop the gauge from moving for longer than this.
-	backlogTimeout = 2 * time.Second
+var (
+	ErrInterval = errors.New("outbox: the relay needs a positive sweep interval")
+	// ErrBatch guards Run's shortcut: with a batch of 0 every empty sweep would count as a
+	// full one, and Run would sweep back to back forever without ever waiting for the tick.
+	ErrBatch = errors.New("outbox: the relay needs a positive batch size")
+	// ErrTimeout guards the loop: a zero sweep timeout would fail every sweep at once and a
+	// zero backlog timeout would never let the gauge move.
+	ErrTimeout = errors.New("outbox: the relay needs positive sweep and backlog timeouts")
+	// ErrStorage is the outbox table failing: the sweep is retried on the next tick, and the
+	// rows it could not claim or mark are still there.
+	ErrStorage = errors.New("outbox: storage failure")
 )
+
+// Limits are how much one sweep takes and how long the relay waits on its stores. They are the
+// deployment's numbers, set where the relay is wired (cmd/outbox-relay): the relay only holds
+// itself to them.
+type Limits struct {
+	// Batch is the most rows one sweep claims and publishes.
+	Batch int
+	// SweepTimeout is the outer fence around one sweep's publish and commit, each of which
+	// has a bound of its own: a database that stops answering cannot hold the claimed rows,
+	// and the loop with them, past it.
+	SweepTimeout time.Duration
+	// BacklogTimeout is the leash on counting the backlog, which is a number for a dashboard,
+	// not work: a count that hangs must not stop the gauge from moving for longer.
+	BacklogTimeout time.Duration
+}
+
+func (l Limits) check() error {
+	switch {
+	case l.Batch <= 0:
+		return ErrBatch
+	case l.SweepTimeout <= 0 || l.BacklogTimeout <= 0:
+		return ErrTimeout
+	}
+	return nil
+}
 
 type claimStore interface {
 	Claim(ctx context.Context, limit int) ([]Record, error)
@@ -56,21 +83,24 @@ type Relay struct {
 	publisher eventPublisher
 	tx        txManager
 	now       Clock
-	batch     int
+	limits    Limits
 	logger    *slog.Logger
 	observer  observer
 }
 
-func NewRelay(outbox claimStore, publisher eventPublisher, tx txManager, now Clock, batch int, logger *slog.Logger, watch observer) *Relay {
+func NewRelay(outbox claimStore, publisher eventPublisher, tx txManager, now Clock, limits Limits, logger *slog.Logger, watch observer) (*Relay, error) {
+	if err := limits.check(); err != nil {
+		return nil, err
+	}
 	return &Relay{
 		outbox:    outbox,
 		publisher: publisher,
 		tx:        tx,
 		now:       now,
-		batch:     batch,
+		limits:    limits,
 		logger:    logger,
 		observer:  watch,
-	}
+	}, nil
 }
 
 // Sweep publishes one batch and reports how many records went out. The order is the whole
@@ -78,10 +108,17 @@ func NewRelay(outbox claimStore, publisher eventPublisher, tx txManager, now Clo
 // a crash in between republishes an event rather than losing it. A consumer sees the
 // duplicate; nobody sees a payment that was never announced.
 func (r *Relay) Sweep(ctx context.Context) (int, error) {
+	ctx, end := telemetry.Start(ctx, "outbox.Sweep")
+	published, err := r.sweep(ctx)
+	end(err)
+	return published, err
+}
+
+func (r *Relay) sweep(ctx context.Context) (int, error) {
 	published := 0
 
 	err := r.tx.WithinTx(ctx, func(ctx context.Context) error {
-		claimed, err := r.outbox.Claim(ctx, r.batch)
+		claimed, err := r.outbox.Claim(ctx, r.limits.Batch)
 		if err != nil {
 			return err
 		}
@@ -122,13 +159,17 @@ func (r *Relay) Run(ctx context.Context, every time.Duration) error {
 
 	var backlogLoop sync.WaitGroup
 	defer backlogLoop.Wait()
-	backlogLoop.Go(func() { r.countBacklog(ctx, every) })
+	backlogLoop.Go(func() {
+		r.countBacklog(ctx, every)
+	})
 
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 
 	for {
-		r.sweepOnce(ctx)
+		if r.sweepOnce(ctx) && ctx.Err() == nil {
+			continue
+		}
 
 		select {
 		case <-ctx.Done():
@@ -138,22 +179,32 @@ func (r *Relay) Run(ctx context.Context, every time.Duration) error {
 	}
 }
 
-func (r *Relay) sweepOnce(ctx context.Context) {
-	sweeping, cancel := context.WithTimeout(ctx, sweepTimeout)
+// sweepOnce reports whether the sweep came back full. A full batch means more records are
+// likely waiting, and Run sweeps again at once instead of waiting for the tick: with a batch
+// of 100 and a tick of 1 s, waiting would cap the relay at 100 events a second whatever the
+// broker could take. A failed or partial sweep waits for the tick, so a broker that refuses
+// everything is not hammered in a loop.
+func (r *Relay) sweepOnce(ctx context.Context) bool {
+	sweeping, cancel := context.WithTimeout(ctx, r.limits.SweepTimeout)
 	defer cancel()
 
 	started := r.now()
 	published, err := r.Sweep(sweeping)
+	if err != nil && ctx.Err() != nil {
+		// Stopping, not failing: a sweep the shutdown cut short is not reported as a failed
+		// one, or every rollout would show on the sweep-outcome panel.
+		return false
+	}
 	r.observer.Swept(published, r.now().Sub(started), err)
 
 	switch {
-	case err != nil && ctx.Err() != nil:
-		return
 	case err != nil:
 		r.logger.ErrorContext(ctx, "outbox sweep failed", "error", err)
+		return false
 	case published > 0:
 		r.logger.InfoContext(ctx, "outbox published", "records", published)
 	}
+	return published == r.limits.Batch
 }
 
 func (r *Relay) countBacklog(ctx context.Context, every time.Duration) {
@@ -175,7 +226,7 @@ func (r *Relay) countBacklog(ctx context.Context, every time.Duration) {
 // reporting a zero, which an operator would read as "nothing is waiting" at the worst
 // possible moment.
 func (r *Relay) reportBacklog(ctx context.Context) {
-	bounded, cancel := context.WithTimeout(ctx, backlogTimeout)
+	bounded, cancel := context.WithTimeout(ctx, r.limits.BacklogTimeout)
 	defer cancel()
 
 	backlog, err := r.outbox.Backlog(bounded)

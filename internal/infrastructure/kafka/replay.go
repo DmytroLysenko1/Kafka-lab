@@ -16,8 +16,10 @@ var (
 )
 
 // replayIdle is how long a poll may return nothing before the replay gives up. Silence
-// while records are known to remain is a broken read, never the end of the topic.
-const replayIdle = 10 * time.Second
+// while records are known to remain is a broken read, never the end of the topic. 20 s outlasts
+// a leader election (10.1–15.3 s, exp-04), so a replay that meets one waits it out instead of
+// reporting a stall.
+const replayIdle = 20 * time.Second
 
 type replays interface {
 	Replay(ctx context.Context, record *kgo.Record, topic string) error

@@ -26,7 +26,7 @@ make reset-topic TOPIC=exp12.evolution.dlq
 make migrate
 docker exec -i kafka-lab-postgres psql -U lab -d lab -q -c \
   "DELETE FROM inbox WHERE event_id LIKE 'exp12-%';
-   DELETE FROM merchant_totals WHERE merchant_id = 'exp12';"
+   DELETE FROM merchant_currency_totals WHERE merchant_id = 'exp12';"
 
 binary="$(mktemp -d)/exp-12"
 trap 'rm -rf "$(dirname "$binary")"' EXIT

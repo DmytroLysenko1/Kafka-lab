@@ -23,6 +23,7 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/outboxwire"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
 
@@ -165,7 +166,7 @@ func producePoison(ctx context.Context, client *kgo.Client, s *settings) error {
 		Value: []byte("this was never protobuf"),
 		Headers: []kgo.RecordHeader{
 			{Key: "event_id", Value: []byte(s.merchant + "-poison")},
-			{Key: "event_type", Value: []byte(outbox.EventTypeAuthorized)},
+			{Key: "event_type", Value: []byte(outboxwire.EventTypeAuthorized)},
 		},
 	}
 	if err := client.ProduceSync(ctx, record).FirstErr(); err != nil {
@@ -175,7 +176,7 @@ func producePoison(ctx context.Context, client *kgo.Client, s *settings) error {
 }
 
 func goodRecord(s *settings, i int) (outbox.Record, error) {
-	payload, err := json.Marshal(outbox.AuthorizedPayload{
+	payload, err := json.Marshal(outboxwire.Payload{
 		PaymentID:   fmt.Sprintf("%s-%d", s.merchant, i),
 		MerchantID:  s.merchant,
 		AmountMinor: 1,
@@ -188,7 +189,7 @@ func goodRecord(s *settings, i int) (outbox.Record, error) {
 	return outbox.Record{
 		ID:          s.firstEventID + int64(i),
 		AggregateID: fmt.Sprintf("%s-%d", s.merchant, i),
-		EventType:   outbox.EventTypeAuthorized,
+		EventType:   outboxwire.EventTypeAuthorized,
 		Payload:     payload,
 		OccurredAt:  time.Now().UTC(),
 	}, nil
@@ -207,7 +208,7 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 	}
 	defer closeDead()
 
-	record := merchants.NewRecordAuthorized(
+	record := merchants.NewRecordMovement(
 		postgres.NewInboxStore(storage),
 		postgres.NewTotalsStore(storage),
 		storage,
@@ -248,12 +249,19 @@ func deadLetters(s *settings) (deadLetterSink, func(), error) {
 	return dead, dead.Close, nil
 }
 
+// handled is the merchant's EUR total — every payment this experiment sends is in EUR, so it
+// is the whole of what was counted.
 func handled(ctx context.Context, storage *postgres.Storage, s *settings) int64 {
-	total, err := merchants.NewReadTotal(postgres.NewTotalsStore(storage)).Execute(ctx, s.merchant)
+	totals, err := merchants.NewReadTotals(postgres.NewTotalsStore(storage)).Execute(ctx, s.merchant)
 	if err != nil {
 		return 0
 	}
-	return total
+	for _, total := range totals {
+		if total.Currency().String() == "EUR" {
+			return total.Authorized()
+		}
+	}
+	return 0
 }
 
 // measured is what the cluster says about the run, separate from how it is printed.

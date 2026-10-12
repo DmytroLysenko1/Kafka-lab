@@ -2,6 +2,7 @@ package payment_test
 
 import (
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -49,10 +50,10 @@ func TestAuthorizeKeepsTheAmountItWasGivenAndStampsTheEventWithTheSameTime(t *te
 	if diff := cmp.Diff("authorized", authorized.Status().String()); diff != "" {
 		t.Errorf("status mismatch (-want +got):\n%s", diff)
 	}
-	if !authorized.AuthorizedAt().Equal(at) {
-		t.Errorf("authorized at = %s, want the instant it was given, %s", authorized.AuthorizedAt(), at)
+	if !authorized.History().AuthorizedAt().Equal(at) {
+		t.Errorf("authorized at = %s, want the instant it was given, %s", authorized.History().AuthorizedAt(), at)
 	}
-	if location := authorized.AuthorizedAt().Location(); location != time.UTC {
+	if location := authorized.History().AuthorizedAt().Location(); location != time.UTC {
 		t.Errorf("authorized at is in %s; events cross time zones and must carry UTC", location)
 	}
 
@@ -67,8 +68,8 @@ func TestAuthorizeKeepsTheAmountItWasGivenAndStampsTheEventWithTheSameTime(t *te
 	if diff := cmp.Diff(id.String(), raised.PaymentID().String()); diff != "" {
 		t.Errorf("event payment id mismatch (-want +got):\n%s", diff)
 	}
-	if !raised.OccurredAt().Equal(authorized.AuthorizedAt()) {
-		t.Errorf("event time %s differs from the payment's %s", raised.OccurredAt(), authorized.AuthorizedAt())
+	if !raised.OccurredAt().Equal(authorized.History().AuthorizedAt()) {
+		t.Errorf("event time %s differs from the payment's %s", raised.OccurredAt(), authorized.History().AuthorizedAt())
 	}
 }
 
@@ -108,7 +109,7 @@ func TestAReplayStandsOnlyForTheSamePayment(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			earlier := payment.Reconstitute(payment.NewID(), merchant(t), eur(t, 1999), payment.StatusAuthorized, time.Now())
+			earlier := payment.Reconstitute(payment.NewID(), merchant(t), eur(t, 1999), payment.StatusAuthorized, payment.NewHistory(time.Now(), time.Time{}, time.Time{}))
 			other, err := payment.ParseMerchantID(tt.args.other)
 			if err != nil {
 				t.Fatalf("merchant: %v", err)
@@ -131,7 +132,7 @@ func TestAReconstitutedPaymentHasNothingToPublish(t *testing.T) {
 	at := time.Date(2026, time.September, 26, 9, 0, 0, 0, time.FixedZone("EEST", 3*60*60))
 	id := payment.NewID()
 
-	stored := payment.Reconstitute(id, merchant(t), eur(t, 1999), payment.StatusAuthorized, at)
+	stored := payment.Reconstitute(id, merchant(t), eur(t, 1999), payment.StatusAuthorized, payment.NewHistory(at, time.Time{}, time.Time{}))
 
 	if diff := cmp.Diff(0, len(stored.PullEvents())); diff != "" {
 		t.Errorf("events (-want +got):\n%s", diff)
@@ -142,38 +143,9 @@ func TestAReconstitutedPaymentHasNothingToPublish(t *testing.T) {
 		At                   time.Time
 	}
 	want := view{ID: id.String(), Merchant: merchantUnderTest, Status: "authorized", Minor: 1999, At: at.UTC()}
-	got := view{ID: stored.ID().String(), Merchant: stored.Merchant().String(), Status: stored.Status().String(), Minor: stored.Amount().Minor(), At: stored.AuthorizedAt()}
+	got := view{ID: stored.ID().String(), Merchant: stored.Merchant().String(), Status: stored.Status().String(), Minor: stored.Amount().Minor(), At: stored.History().AuthorizedAt()}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("reconstituted payment (-want +got):\n%s", diff)
-	}
-}
-
-// A status read back from storage that no payment can be in is a corrupted row; reading it
-// as "unknown" would let a comparison go ahead against it.
-func TestOnlyAStatusAPaymentCanBeInIsReadBack(t *testing.T) {
-	type args struct {
-		value string
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    payment.Status
-		wantErr error
-	}{
-		{name: "authorized", args: args{value: "authorized"}, want: payment.StatusAuthorized},
-		{name: "unknown", args: args{value: "unknown"}, want: payment.StatusUnknown, wantErr: payment.ErrStatusUnknown},
-		{name: "empty", args: args{value: ""}, want: payment.StatusUnknown, wantErr: payment.ErrStatusUnknown},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := payment.ParseStatus(tt.args.value)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("err = %v, want %v", err, tt.wantErr)
-			}
-			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Errorf("status (-want +got):\n%s", diff)
-			}
-		})
 	}
 }
 
@@ -186,10 +158,38 @@ func usd(t *testing.T, minor int64) payment.Money {
 	return amount
 }
 
-func TestAuthorizeRefusesAnAmountThatReservesNothing(t *testing.T) {
-	_, err := payment.Authorize(payment.NewID(), merchant(t), eur(t, 0), time.Now())
-	if !errors.Is(err, payment.ErrAmountNotPositive) {
-		t.Errorf("err = %v, want %v", err, payment.ErrAmountNotPositive)
+// An authorisation is bounded on both sides. Zero reserves nothing and would still emit an
+// event. Past 2^50 the payment would be accepted here and then refused by the consumer that
+// keeps the merchant's totals — a 201 for a payment no total would ever show.
+func TestAuthorizeAcceptsOnlyAnAmountATotalCanKeep(t *testing.T) {
+	type args struct {
+		minor int64
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    int64
+		wantErr error
+	}{
+		{name: "nothing", args: args{minor: 0}, wantErr: payment.ErrAmountNotPositive},
+		{name: "one minor unit", args: args{minor: 1}, want: 1},
+		{name: "the largest one authorisation may be", args: args{minor: 1 << 50}, want: 1 << 50},
+		{name: "one past it", args: args{minor: 1<<50 + 1}, wantErr: payment.ErrAmountTooLarge},
+		{name: "the largest int64", args: args{minor: math.MaxInt64}, wantErr: payment.ErrAmountTooLarge},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authorized, err := payment.Authorize(payment.NewID(), merchant(t), eur(t, tt.args.minor), time.Now())
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if diff := cmp.Diff(tt.want, authorized.Amount().Minor()); diff != "" {
+				t.Errorf("amount (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 
@@ -201,6 +201,8 @@ func TestParseMerchantIDRefusesWhatCannotIdentifyAMerchant(t *testing.T) {
 	}{
 		{name: "empty", args: "", wantErr: payment.ErrMerchantRequired},
 		{name: "longer than the column that stores it", args: string(make([]byte, 65)), wantErr: payment.ErrMerchantTooLong},
+		{name: "a NUL byte, which Postgres will not store as text", args: "m-\x00", wantErr: payment.ErrMerchantInvalid},
+		{name: "bytes that are not UTF-8", args: "m-\xff", wantErr: payment.ErrMerchantInvalid},
 	}
 
 	for _, tt := range tests {

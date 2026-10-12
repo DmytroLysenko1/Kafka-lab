@@ -1,7 +1,9 @@
 name: kafka-lab
 
 x-broker: &broker
-  image: apache/kafka:4.3.1
+  # Every image below is pinned by digest, like the Kubernetes stand's: a tag moves when it
+  # is rebuilt, and an experiment rerun on a moved image is not the experiment that was run.
+  image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
   # No restart policy on purpose: exp-04/exp-13 kill a broker and expect it to stay dead
   # until the experiment brings it back. `restart: unless-stopped` would resurrect it.
   restart: "no"
@@ -15,6 +17,9 @@ x-broker: &broker
     timeout: 10s
     retries: 5
     start_period: 60s
+  # The image's default heap (1g) plus ~300M off-heap, with headroom for the experiments'
+  # load; the Kubernetes stand runs a 512m heap in 800Mi, measured. Two cores keep one busy
+  # broker from starving the other two on a laptop during exp-17's throughput sweep.
   deploy:
     resources:
       limits:
@@ -45,6 +50,7 @@ x-broker-env: &broker-env
   # instead; the retention check also runs every 300 s, which makes exp-03 look broken.
   KAFKA_AUTO_LEADER_REBALANCE_ENABLE: "false"
   KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 5000
+  # The cleaner's idle wait, 15 s by default: with it exp-03's compaction shows in seconds.
   KAFKA_LOG_CLEANER_BACKOFF_MS: 5000
   KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
   # The controller fences a broker whose heartbeats stop after this long, which is what
@@ -57,10 +63,98 @@ x-broker-env: &broker-env
   # min.insync.replicas into its cluster-wide default when the cluster is first formatted.
   KAFKA_DEFAULT_REPLICATION_FACTOR: 3
   KAFKA_MIN_INSYNC_REPLICAS: 2
+  # 3 s by default: the coordinator waits that long for more members before the first
+  # rebalance of a new group. The experiments time rebalances (exp-14) and start groups
+  # hundreds of times; 3 s of wait in each measurement would be Kafka's pause, not the
+  # strategy's. In production keep the default — it saves a rebalance per member at startup.
   KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
   KAFKA_LOG_DIRS: /var/lib/kafka/data
 
+# The payments services as containers, behind the `app` profile: `make up` still starts only
+# the stand, and the experiments keep running the services from a terminal, where they can
+# be killed and restarted at will. The profile is the other way to run the same code, and
+# the two are meant to be used one at a time: both bind the same loopback ports.
+x-app: &app
+  restart: "no"
+  profiles: [app]
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+  # The memory limit of the Kubernetes chart, where it is measured (~24Mi peak); no CPU limit,
+  # as there.
+  deploy:
+    resources:
+      limits:
+        memory: 64M
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://${POSTGRES_LAB_USER:-lab}:${POSTGRES_LAB_PASSWORD:-lab}@postgres:5432/${POSTGRES_LAB_DB:-lab}?sslmode=disable
+  KAFKA_BROKERS: kafka1:9092,kafka2:9092,kafka3:9092
+  # Every service exports its spans to Tempo; without the variable they still propagate the
+  # trace they are handed, and export nothing (pkg/telemetry).
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+
 services:
+  migrate:
+    profiles: [app]
+    image: kafka-lab/migrate:${IMAGE_TAG:-dev}
+    build: { context: .., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: migrate } }
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+    environment:
+      <<: *app-env
+
+  payments-api:
+    <<: *app
+    image: kafka-lab/payments-api:${IMAGE_TAG:-dev}
+    build: { context: .., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: payments-api } }
+    container_name: kafka-lab-payments-api
+    # Published on loopback under the same ports the host-run services use, so prometheus
+    # scrapes host.docker.internal:910x either way and its config does not fork per mode.
+    ports:
+      - "127.0.0.1:8081:8081"
+      - "127.0.0.1:9103:9103"
+    environment:
+      <<: *app-env
+      # Empty when unset, and the API refuses to start on an empty key — make app-up says so first.
+      PAYMENTS_API_KEY: ${PAYMENTS_API_KEY:-}
+      PAYMENTS_API_ADDR: 0.0.0.0:8081
+      METRICS_ADDR: 0.0.0.0:9103
+
+  outbox-relay:
+    <<: *app
+    image: kafka-lab/outbox-relay:${IMAGE_TAG:-dev}
+    build: { context: .., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: outbox-relay } }
+    container_name: kafka-lab-outbox-relay
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      apicurio:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:9101:9101"
+    environment:
+      <<: *app-env
+      SCHEMA_REGISTRY_URL: http://apicurio:8080/apis/ccompat/v7
+      METRICS_ADDR: 0.0.0.0:9101
+
+  payments-consumer:
+    <<: *app
+    image: kafka-lab/payments-consumer:${IMAGE_TAG:-dev}
+    build: { context: .., dockerfile: deploy/docker/Dockerfile, args: { SERVICE: payments-consumer } }
+    container_name: kafka-lab-payments-consumer
+    ports:
+      - "127.0.0.1:9102:9102"
+    environment:
+      <<: *app-env
+      METRICS_ADDR: 0.0.0.0:9102
+
   kafka1:
     <<: *broker
     hostname: kafka1
@@ -106,7 +200,7 @@ services:
   # Credentials are lab constants, and the port is bound to loopback: nothing here is a
   # secret. Experiments own their own tables and create them on start.
   postgres:
-    image: postgres:18.6-alpine
+    image: postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     hostname: postgres
     container_name: kafka-lab-postgres
     restart: "no"
@@ -121,6 +215,9 @@ services:
       # to start on a volume mounted at .../data, which is where 17 and earlier put it.
       - postgres-data:/var/lib/postgresql
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    # Generous on purpose, on the stand that runs experiments: room for the ones that load
+    # Postgres hardest (exp-18's contended rows, the integration tests' parallel pools); the
+    # Kubernetes stand's instance, sized from measurement, peaked at 195Mi under the drills.
     deploy:
       resources:
         limits:
@@ -139,7 +236,7 @@ services:
   # byte, schema id, message indexes, payload. Its storage is a database of its own inside
   # the lab Postgres, so a registered schema survives a restart — exp-12 needs the history.
   apicurio:
-    image: apicurio/apicurio-registry:3.0.9
+    image: apicurio/apicurio-registry:3.0.9@sha256:51bd0274264269c5431ee14f9882abce308affe53a8f3846eba3d93226d5e125
     hostname: apicurio
     container_name: kafka-lab-apicurio
     restart: "no"
@@ -154,7 +251,16 @@ services:
       APICURIO_DATASOURCE_URL: jdbc:postgresql://postgres:5432/apicurio
       APICURIO_DATASOURCE_USERNAME: ${POSTGRES_LAB_USER:-lab}
       APICURIO_DATASOURCE_PASSWORD: ${POSTGRES_LAB_PASSWORD:-lab}
+      # The image's pool grows to 100 connections — Postgres's whole max_connections — and
+      # `make test-integration`, which opens pools of its own beside it, met "too many clients"
+      # on 28.09. Fixed at 20, as on the Kubernetes stand (deploy/k8s/platform/apicurio.yaml).
+      APICURIO_DATASOURCE_JDBC_MAX_SIZE: "20"
+      # The registry's web UI calls its own API from the browser; the port is bound to
+      # loopback, so "*" opens it to pages on this machine only.
       QUARKUS_HTTP_CORS_ORIGINS: "*"
+    # A JVM with its default heap share; the Kubernetes stand runs it in 512Mi (heap 50%) and
+    # measured 206–228Mi over the drills, so this is generous by design on the stand that runs
+    # experiments.
     deploy:
       resources:
         limits:
@@ -166,12 +272,14 @@ services:
       start_interval: 2s
       timeout: 5s
       retries: 5
+      # Quarkus is up in 5–9 s once its database is; the rest covers a cold Postgres and the
+      # registry's first schema migration.
       start_period: 90s
 
   # Reads the cluster rather than the services: a consumer that has stopped cannot report
   # its own lag, and that is exactly when the number is worth having.
   kafka-exporter:
-    image: danielqsj/kafka-exporter:v1.9.0
+    image: danielqsj/kafka-exporter:v1.9.0@sha256:4150e46b2e9697ac30e4be8de03ec1704b4bdc7037577b83b8d35a32be298c16
     hostname: kafka-exporter
     container_name: kafka-lab-kafka-exporter
     restart: "no"
@@ -179,6 +287,10 @@ services:
       - --kafka.server=kafka1:9092
       - --kafka.server=kafka2:9092
       - --kafka.server=kafka3:9092
+      # The protocol version the exporter's client assumes (default 2.0.0). Checked by hand on
+      # 27.09.2026 against the 4.3.1 brokers: 2.0.0, 4.0.0 and 4.3.1 all connect and report
+      # brokers and consumer-group lag, so the value is not load-bearing; 4.0.0 names the
+      # release line the brokers belong to.
       - --kafka.version=4.0.0
     depends_on:
       kafka1:
@@ -190,12 +302,15 @@ services:
   # seconds after a broker dies, and the default 15 s would draw a recovery as a straight
   # line between two samples.
   prometheus:
-    image: prom/prometheus:v3.6.0
+    image: prom/prometheus:v3.6.0@sha256:76947e7ef22f8a698fc638f706685909be425dbe09bd7a2cd7aca849f79b5f64
     hostname: prometheus
     container_name: kafka-lab-prometheus
     restart: "no"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
+      # Six hours on a named volume: an experiment's graphs are read right after it runs, and
+      # its numbers are written to the experiment's own log, not kept here. (The Kubernetes
+      # stand keeps 24 h, because its resource figures are read back from Prometheus.)
       - --storage.tsdb.retention.time=6h
       - --web.enable-lifecycle
     volumes:
@@ -207,18 +322,40 @@ services:
       # The three services run on the host so that an experiment can kill and restart them.
       - "host.docker.internal:host-gateway"
 
-  # Anonymous admin, no sign-in: a dashboard on loopback that asks for a password is a
-  # dashboard nobody opens during the incident it was built for.
+  # Traces: one payment from the HTTP request through its outbox row, the topic and the
+  # consumer to the statement that counted it. Local disk, six hours (tempo.yaml). 4318 is
+  # published for the services run on the host; 3200 is Grafana's way in and the API's.
+  tempo:
+    image: grafana/tempo:2.10.8@sha256:f0561deb1c68ec44d6e6e7e4487f30106c4e5e768642077695b37958b105812a
+    hostname: tempo
+    container_name: kafka-lab-tempo
+    restart: "no"
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:3200:3200"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Anonymous, no sign-in: a dashboard on loopback that asks for a password is a dashboard
+  # nobody opens during the incident it was built for. Editor, the least role Explore needs.
   grafana:
-    image: grafana/grafana:12.2.0
+    # 12.2 here, 13.2 in the kube-prometheus-stack chart: the same dashboard file loads in both.
+    image: grafana/grafana:12.2.0@sha256:74144189b38447facf737dfd0f3906e42e0776212bf575dc3334c3609183adf7
     hostname: grafana
     container_name: kafka-lab-grafana
     restart: "no"
     depends_on:
       - prometheus
+      - tempo
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Editor
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
       GF_USERS_DEFAULT_THEME: light
     volumes:
@@ -235,3 +372,4 @@ volumes:
   postgres-data:
   prometheus-data:
   grafana-data:
+  tempo-data:

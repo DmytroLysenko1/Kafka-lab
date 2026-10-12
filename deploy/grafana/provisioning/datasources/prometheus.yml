@@ -7,3 +7,12 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     editable: false
+
+  # Traces of the payments services (pkg/telemetry). The API answers every request with
+  # X-Trace-Id, and that id is what Explore searches here.
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false

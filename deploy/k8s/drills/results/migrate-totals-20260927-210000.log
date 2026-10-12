@@ -1,0 +1,6 @@
+migrate totals started 2026-09-27T18:00:00Z, rolling to e628bfc-dirty-3dc1f9db
+old table before: 10 merchants, 1741999 minor units
+stopping the consumer 2026-09-27T18:00:00Z
+Error: UPGRADE FAILED: payments/templates/prune-cronjob.yaml:12:22
+  executing "payments/templates/prune-cronjob.yaml" at <.Values.prune.schedule>:
+    nil pointer evaluating interface {}.schedule

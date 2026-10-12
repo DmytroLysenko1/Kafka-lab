@@ -17,7 +17,10 @@ sink that refuses, which is what a service without the route configured amounts 
 
 Each cell gets its own topic, its own consumer group, its own merchant and its own range of
 event ids. The last part matters: the inbox deduplicates by event id, so overlapping ranges
-would make one cell's records look like duplicates of the other's.
+would make one cell's records look like duplicates of the other's. The ranges start at
+9.11e15 (`run.sh`), far past any outbox row id, because the inbox is shared with the service
+itself; the runs below used 110000 and 120000, before that was fixed, and read the older
+single-currency `merchant_totals` table — neither changes what they measured.
 
 A restart is a new client. franz-go keeps its own fetch position, so calling `Run` again on
 the same client walks past the record that killed it — which measures the harness rather

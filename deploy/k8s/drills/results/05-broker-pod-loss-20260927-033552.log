@@ -1,0 +1,20 @@
+drill 05 started 2026-09-27T00:35:53Z, killing kafka-lab-dual-1 under 20 payments/s
+t=0 kafka-lab-dual-1 deleted (no grace period)
+t=0s pod_ready=false under_replicated=33
+t=4s pod_ready=false under_replicated=33
+t=8s pod_ready=false under_replicated=33
+t=11s pod_ready=false under_replicated=0
+t=15s pod_ready=false under_replicated=0
+t=18s pod_ready=false under_replicated=0
+t=22s pod_ready=true under_replicated=0
+pod ready after 22s, no under-replicated partition after 11s
+Requests      [total, rate, throughput]         2400, 20.01, 20.01
+Duration      [total, attack, wait]             2m0s, 2m0s, 3.8ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  2.064ms, 3.707ms, 3.241ms, 5.404ms, 6.393ms, 9.318ms, 38.969ms
+Bytes In      [total, mean]                     129600, 54.00
+Bytes Out     [total, mean]                     180000, 75.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      201:2400  
+Error Set:
+merchant total for the run: {"merchant_id":"m-drill-05-1790469352","authorized_minor":240000}
+payments accepted (2xx): 2400

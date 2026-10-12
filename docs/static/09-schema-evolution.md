@@ -35,7 +35,7 @@ sequenceDiagram
         Note over P,C1: v2 bytes now meet v1 readers, with the registry's<br/>strictest verdict already given and never revisited
         P->>T: produce: magic 0x00 + id N + payload without merchant_ref
         T-->>C1: those bytes
-        C1->>SR: GET schema N, cached after the first call
+        C1->>SR: GET schema N, cached after the first call<br/>(a registry-aware client — this repo's consumer skips it)
         Note over T,C1: Avro: v1 declares merchant_ref with no default,<br/>so resolution fails and the consumer stops — loudly.<br/>proto3: there is no "required", so merchant_ref decodes<br/>as "" and the handler carries on with an empty merchant
     end
 ```
@@ -118,7 +118,7 @@ means the same thing for every format:
 
 | Mode | Guarantee | Deploy order |
 |---|---|---|
-| `BACKWARD` (default) | a **new** schema can read data written with the **previous** one | **consumers first** |
+| `BACKWARD` (Confluent's default; Apicurio starts a subject at `NONE`, so the relay sets it) | a **new** schema can read data written with the **previous** one | **consumers first** |
 | `FORWARD` | the **previous** schema can read data written with the **new** one | **producers first** |
 | `FULL` | both directions against the previous version | either order |
 | `*_TRANSITIVE` | the same, checked against **all** previous versions, not only the last | as above |

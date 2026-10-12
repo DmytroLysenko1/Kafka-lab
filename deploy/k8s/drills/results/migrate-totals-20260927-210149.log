@@ -1,0 +1,9 @@
+migrate totals started 2026-09-27T18:01:49Z, rolling to e628bfc-dirty-ca27b35b
+old table before: 10 merchants, 1741999 minor units
+stopping the consumer 2026-09-27T18:01:49Z
+rolling forward, the migration runs as the hook 2026-09-27T18:01:55Z
+new table: 10 merchants, 10 merchant-currency rows, 1741999 minor units
+merchants whose old total differs from the sum of their new ones (expected: none):
+  (end of list)
+starting the consumer 2026-09-27T18:02:03Z
+done 2026-09-27T18:02:09Z

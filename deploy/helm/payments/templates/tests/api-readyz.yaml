@@ -1,0 +1,26 @@
+# helm test payments: the API is ready (it reaches Postgres) and answers through its
+# Service from inside the cluster.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: payments-api-readyz
+  labels:
+    app.kubernetes.io/part-of: payments
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: wget
+      image: busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+      command: [wget, -q, -O-, "http://payments-api:{{ (index .Values.components "payments-api").httpPort }}/readyz"]
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      # One wget, a few megabytes; not measured.
+      resources:
+        requests: { cpu: 10m, memory: 8Mi }
+        limits: { memory: 16Mi }

@@ -74,6 +74,22 @@ func (r *Reader) PositiveInt(name string, fallback int) int {
 	return value
 }
 
+// PositiveInt32 is PositiveInt for a value a library takes as int32 — a connection-pool
+// size — parsed at that width, so a number too large for it is refused here instead of
+// wrapping round on a conversion.
+func (r *Reader) PositiveInt32(name string, fallback int32) int32 {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || value <= 0 {
+		r.invalid(name, raw, "a positive whole number below 2^31")
+		return 0
+	}
+	return int32(value)
+}
+
 // PositiveDuration is the variable as a duration above zero, or the fallback when unset.
 func (r *Reader) PositiveDuration(name string, fallback time.Duration) time.Duration {
 	raw := os.Getenv(name)

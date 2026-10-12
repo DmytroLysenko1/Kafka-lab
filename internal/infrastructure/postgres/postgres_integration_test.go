@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/application/payments"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/payment"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
@@ -119,7 +120,7 @@ func TestCreateOrGetStoresThePaymentAndTheEventItWillPublish(t *testing.T) {
 	)
 	err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
 		var err error
-		stored, created, err = store.CreateOrGet(ctx, authorized, "key-1")
+		stored, created, err = store.CreateOrGet(ctx, authorized, key(t, "key-1"))
 		return err
 	})
 	if err != nil {
@@ -183,7 +184,7 @@ func TestCreateOrGetWhenTheTransactionFailsLeavesNeitherPaymentNorEvent(t *testi
 	failure := errors.New("the rest of the use case failed")
 
 	err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
-		if _, _, err := store.CreateOrGet(ctx, authorize(t, 1999), "key-1"); err != nil {
+		if _, _, err := store.CreateOrGet(ctx, authorize(t, 1999), key(t, "key-1")); err != nil {
 			return err
 		}
 		return failure
@@ -212,7 +213,7 @@ func TestCreateOrGetReplayedWithTheSameKeyChargesTheMerchantOnce(t *testing.T) {
 		)
 		err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
 			var err error
-			stored, created, err = store.CreateOrGet(ctx, authorize(t, amount), "key-1")
+			stored, created, err = store.CreateOrGet(ctx, authorize(t, amount), key(t, "key-1"))
 			return err
 		})
 		if err != nil {
@@ -250,7 +251,7 @@ func TestAKeyAlreadyUsedReturnsThePaymentItBoughtAndChangesNothing(t *testing.T)
 	var first *payment.Payment
 	if err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
 		var err error
-		first, _, err = store.CreateOrGet(ctx, authorize(t, 1999), "key-1")
+		first, _, err = store.CreateOrGet(ctx, authorize(t, 1999), key(t, "key-1"))
 		return err
 	}); err != nil {
 		t.Fatalf("first authorize: %v", err)
@@ -262,7 +263,7 @@ func TestAKeyAlreadyUsedReturnsThePaymentItBoughtAndChangesNothing(t *testing.T)
 	)
 	if err := storage.WithinTx(t.Context(), func(ctx context.Context) error {
 		var err error
-		stored, created, err = store.CreateOrGet(ctx, authorize(t, 500_000), "key-1")
+		stored, created, err = store.CreateOrGet(ctx, authorize(t, 500_000), key(t, "key-1"))
 		return err
 	}); err != nil {
 		t.Fatalf("replay: %v", err)
@@ -276,8 +277,8 @@ func TestAKeyAlreadyUsedReturnsThePaymentItBoughtAndChangesNothing(t *testing.T)
 		Minor                          int64
 		AuthorizedAt                   time.Time
 	}
-	want := view{ID: first.ID().String(), Merchant: merchantUnderTest, Currency: "EUR", Status: "authorized", Minor: 1999, AuthorizedAt: first.AuthorizedAt()}
-	got := view{ID: stored.ID().String(), Merchant: stored.Merchant().String(), Currency: stored.Amount().Currency().String(), Status: stored.Status().String(), Minor: stored.Amount().Minor(), AuthorizedAt: stored.AuthorizedAt()}
+	want := view{ID: first.ID().String(), Merchant: merchantUnderTest, Currency: "EUR", Status: "authorized", Minor: 1999, AuthorizedAt: first.History().AuthorizedAt()}
+	got := view{ID: stored.ID().String(), Merchant: stored.Merchant().String(), Currency: stored.Amount().Currency().String(), Status: stored.Status().String(), Minor: stored.Amount().Minor(), AuthorizedAt: stored.History().AuthorizedAt()}
 	if diff := cmp.Diff(want, got, cmpopts.EquateApproxTime(time.Microsecond)); diff != "" {
 		t.Errorf("the payment handed back is not the one stored (-want +got):\n%s", diff)
 	}
@@ -309,7 +310,7 @@ func TestConcurrentAuthorisationsWithTheSameKeyStoreOnePayment(t *testing.T) {
 	for racer := range racers {
 		group.Go(func() error {
 			return storage.WithinTx(ctx, func(ctx context.Context) error {
-				stored, created, err := store.CreateOrGet(ctx, authorize(t, 1999), "key-1")
+				stored, created, err := store.CreateOrGet(ctx, authorize(t, 1999), key(t, "key-1"))
 				if err != nil {
 					return err
 				}
@@ -344,9 +345,10 @@ func TestConcurrentAuthorisationsWithTheSameKeyStoreOnePayment(t *testing.T) {
 	}
 }
 
-// The constraint is the last line of defence: a bug in the domain must not be able to park
-// a zero or negative authorisation in the table.
-func TestSchemaRefusesAnAmountThatReservesNothing(t *testing.T) {
+// The constraints are the last line of defence: a bug in the domain must not be able to
+// park a zero or negative authorisation in the table, nor one larger than the totals the
+// consumer keeps can take (2^50, payment.maxAuthorizedMinor).
+func TestSchemaRefusesAnAmountNoAuthorisationMayBe(t *testing.T) {
 	_, pool := freshStorage(t)
 
 	tests := []struct {
@@ -355,6 +357,7 @@ func TestSchemaRefusesAnAmountThatReservesNothing(t *testing.T) {
 	}{
 		{name: "zero", minor: 0},
 		{name: "negative", minor: -1},
+		{name: "one past the limit", minor: 1<<50 + 1},
 	}
 
 	for _, tt := range tests {
@@ -456,7 +459,7 @@ func TestCreateOrGetOutsideATransactionIsRefused(t *testing.T) {
 	storage, pool := freshStorage(t)
 	store := postgres.NewPaymentStore(storage)
 
-	_, _, err := store.CreateOrGet(t.Context(), authorize(t, 1999), "key-1")
+	_, _, err := store.CreateOrGet(t.Context(), authorize(t, 1999), key(t, "key-1"))
 	if !errors.Is(err, postgres.ErrOutsideTransaction) {
 		t.Fatalf("err = %v, want %v", err, postgres.ErrOutsideTransaction)
 	}
@@ -545,4 +548,119 @@ func TestMarkPublishedTwiceKeepsTheFirstPublicationTime(t *testing.T) {
 	if diff := cmp.Diff(0, unpublished); diff != "" {
 		t.Errorf("records still waiting to be published (-want +got):\n%s", diff)
 	}
+}
+
+// Readiness asks whether the database answers, not whether this pod has a connection to
+// spare. With every connection of the working pool held by a transaction — a pod busy, not
+// broken — Ping must still answer inside the probe's deadline; through the working pool it
+// would wait for a connection, and every busy pod would drop out of its Service at once.
+func TestPingAnswersWhileEveryWorkingConnectionIsHeld(t *testing.T) {
+	storage, err := postgres.New(t.Context(), databaseURL(t), postgres.MaxConns(1))
+	if err != nil {
+		t.Fatalf("storage: %v", err)
+	}
+	t.Cleanup(storage.Close)
+
+	holding := make(chan struct{})
+	release := make(chan struct{})
+	var group errgroup.Group
+	group.Go(func() error {
+		return storage.WithinTx(t.Context(), func(context.Context) error {
+			close(holding)
+			<-release
+			return nil
+		})
+	})
+	<-holding
+
+	probing, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	pingErr := storage.Ping(probing)
+
+	close(release)
+	if err := group.Wait(); err != nil {
+		t.Fatalf("holding transaction: %v", err)
+	}
+	if pingErr != nil {
+		t.Errorf("ping with the working pool exhausted: %v", pingErr)
+	}
+}
+
+// The outbox rows prune may take are the published ones past the horizon, a batch at a time.
+// An unpublished row is an event still owed to Kafka: it stays however old it is, which only
+// the real `published_at < $1` against a NULL can show.
+func TestPruneTakesPublishedOutboxRowsPastTheHorizonAndNeverAnUnpublishedOne(t *testing.T) {
+	storage, pool := freshStorage(t)
+	longAgo := time.Now().Add(-30 * 24 * time.Hour).UTC()
+	recently := time.Now().Add(-time.Hour).UTC()
+	insert := func(occurred time.Time, published *time.Time) {
+		t.Helper()
+		_, err := pool.Exec(t.Context(),
+			"INSERT INTO outbox (aggregate_id, event_type, payload, occurred_at, published_at) VALUES ($1, $2, $3, $4, $5)",
+			uuid.New().String(), "payment.authorized", []byte(`{"amount_minor":1}`), occurred, published)
+		if err != nil {
+			t.Fatalf("seed outbox: %v", err)
+		}
+	}
+	for range 3 {
+		insert(longAgo, new(longAgo))
+	}
+	insert(recently, new(recently))
+	insert(longAgo, nil)
+
+	store := postgres.NewPruneStore(storage)
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	first, err := store.PruneOutbox(t.Context(), cutoff, 2)
+	if err != nil {
+		t.Fatalf("first batch: %v", err)
+	}
+	second, err := store.PruneOutbox(t.Context(), cutoff, 2)
+	if err != nil {
+		t.Fatalf("second batch: %v", err)
+	}
+
+	if diff := cmp.Diff([]int{2, 1}, []int{first, second}); diff != "" {
+		t.Errorf("rows per batch (-want +got):\n%s", diff)
+	}
+	var unpublished, kept int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FILTER (WHERE published_at IS NULL), count(*) FROM outbox").Scan(&unpublished, &kept); err != nil {
+		t.Fatalf("count outbox: %v", err)
+	}
+	if diff := cmp.Diff([]int{1, 2}, []int{unpublished, kept}); diff != "" {
+		t.Errorf("unpublished rows, rows left (-want +got):\n%s", diff)
+	}
+}
+
+// The inbox belongs to the consumer's integration tests, which truncate it while these run in
+// parallel; this only asserts what a truncate cannot fake — that an id past the horizon is
+// gone. That a younger one stays is the same statement shape as the outbox test above, and the
+// horizon rule itself is covered in internal/application/housekeeping.
+func TestPruneForgetsAnInboxIDPastTheHorizon(t *testing.T) {
+	storage, pool := freshStorage(t)
+	eventID := "prune-test-" + uuid.New().String()
+	if _, err := pool.Exec(t.Context(), "INSERT INTO inbox (event_id, consumed_at) VALUES ($1, $2)",
+		eventID, time.Now().Add(-60*24*time.Hour).UTC()); err != nil {
+		t.Fatalf("seed inbox: %v", err)
+	}
+
+	if _, err := postgres.NewPruneStore(storage).PruneInbox(t.Context(), time.Now().Add(-40*24*time.Hour), 5000); err != nil {
+		t.Fatalf("prune inbox: %v", err)
+	}
+
+	var left int
+	if err := pool.QueryRow(t.Context(), "SELECT count(*) FROM inbox WHERE event_id = $1", eventID).Scan(&left); err != nil {
+		t.Fatalf("count inbox: %v", err)
+	}
+	if diff := cmp.Diff(0, left); diff != "" {
+		t.Errorf("rows left for the old event id (-want +got):\n%s", diff)
+	}
+}
+
+func key(t *testing.T, raw string) payments.IdempotencyKey {
+	t.Helper()
+	parsed, err := payments.ParseIdempotencyKey(raw)
+	if err != nil {
+		t.Fatalf("parse idempotency key %q: %v", raw, err)
+	}
+	return parsed
 }

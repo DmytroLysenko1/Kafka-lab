@@ -1,0 +1,14 @@
+# The operator watches the one namespace the lab workloads live in, not the whole cluster.
+
+# One replica has nobody to hand leadership to. With election on, every time the Mac slept
+# long enough for the lease to lapse the operator logged "Stopped being a leader => exiting"
+# and restarted — 18 restarts that buried the RESTARTS column the runbook asks you to watch.
+leaderElection:
+  enable: false
+watchNamespaces: [lab]
+# Figures: deploy/k8s/drills/results/resources-20260927-175351.log. The chart's default CPU
+# limit of 1 core is dropped (null) like everywhere else on the stand: it throttled the
+# operator 405 times in its first 6 h while the node had idle cores (session observation).
+resources:
+  requests: { cpu: 50m, memory: 320Mi }
+  limits: { memory: 448Mi, cpu: null }

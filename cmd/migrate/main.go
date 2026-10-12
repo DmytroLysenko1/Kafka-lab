@@ -2,14 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"os"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
+	"github.com/DmytroLysenko1/Kafka-lab/pkg/env"
 )
 
-var errNoDatabaseURL = errors.New("migrate: DATABASE_URL is empty")
+const migrateConns = 2
 
 // Migrations are applied by a command of their own, not by the services on start: two
 // replicas coming up together would otherwise race each other through the same schema
@@ -26,12 +26,15 @@ func main() {
 }
 
 func migrate(ctx context.Context) error {
-	url := os.Getenv("DATABASE_URL")
-	if url == "" {
-		return errNoDatabaseURL
+	var read env.Reader
+	url := read.Required("DATABASE_URL")
+	if err := read.Err(); err != nil {
+		return err
 	}
 
-	storage, err := postgres.New(ctx, url)
+	// Migrations run statement by statement on one connection; the second is headroom, and
+	// two is what the connection budget in deploy/helm/payments/values.yaml counts for this.
+	storage, err := postgres.New(ctx, url, postgres.MaxConns(migrateConns))
 	if err != nil {
 		return err
 	}

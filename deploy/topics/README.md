@@ -22,6 +22,14 @@ three combined broker/controller nodes dead, and that takes the KRaft quorum wit
 
 ## Why these numbers
 
+**Retry delays of 5 s, 1 min and 10 min.** Each record in a tier has already waited out a 2 s
+lock wait on a merchant row someone else holds. Five seconds catches a transaction that was
+merely finishing; a minute, a batch job's statement; ten minutes, a long report or
+reconciliation. Roughly ×10 a step keeps the attempts few — four in eleven minutes — so a
+recovering row is not hammered. A lock that outlasts all of it is not one record's problem but
+the system's, which stops the consumer or needs a breaker, not a longer chain
+([07](../../docs/static/07-retry-dlq.md)).
+
 **Six partitions on `payments.main`.** It is the smallest count that does three jobs at
 once. It is a multiple of the three brokers, so each broker leads two partitions and a dead
 broker moves exactly two leaderships per topic — what exp-04 and exp-13 read off the
@@ -34,7 +42,11 @@ partitions can only be added, and adding them moves existing keys to other parti
 
 **Six partitions on the retry tiers and the DLQ.** Not for capacity: in normal operation the
 retry flow is a small fraction of main, and a systemic outage is not meant to reach the
-chain at all — a circuit breaker pauses the main consumer instead ([07](../../docs/static/07-retry-dlq.md)).
+chain at all: only a record whose merchant row is locked takes a detour, and a database that
+is down stops the consumer instead — it exits on the first record it cannot count and is
+restarted, its offset unmoved
+([docs/k8s/decisions.md](../../docs/k8s/decisions.md)); a circuit breaker that pauses it is
+the recommended alternative ([07](../../docs/static/07-retry-dlq.md)), not built here.
 Ordering does not need it either: the key survives every hop, so one payment's events stay
 in one partition of a tier whatever the count. The same count keeps partition numbers
 aligned — p3 of main retries into p3 of each tier — which makes a failure easy to follow
@@ -54,10 +66,15 @@ is exp-08's lesson and deliberately not the catalog's setting.
   ten-minute outage of that consumer into lost payments.
 - DLQ, 30 days: the window for fix, release and replay. No `retention.bytes`: a storm of
   poison records must not push payments out by size. The alert that matters is the age of
-  the oldest unreplayed letter.
+  the oldest unreplayed letter — named here, not yet built: the dashboard shows dead-letter
+  counts, not their age.
 
 Every topic has a finite, stated retention, which is the catalog's answer to *unbounded
-retention*: nothing here grows forever by accident. The one legitimately unbounded shape,
+retention*: nothing here grows forever by accident. The same holds for the service's own
+bookkeeping tables, whose horizons are derived from these retentions: the outbox keeps a
+published row for `payments.main`'s 7 days, and the inbox keeps an event id for 40 — at least
+the 30+1 days a letter can live in the DLQ plus the 7+1 of a retry tier a late replay lands in
+(`internal/domain/retention`, `cmd/prune`). The one legitimately unbounded shape,
 a compacted state topic, is bounded by its number of keys — and a compacted per-payment
 state topic without tombstones after the terminal status would be exactly the anti-pattern.
 
@@ -65,8 +82,12 @@ state topic without tombstones after the terminal status would be exactly the an
 forwards the record it received, and a forwarded record keeps the original event's
 timestamp; on `CreateTime` the delay would already be over on arrival. On the DLQ the same
 setting makes retention count from the letter's death instead of the event's birth. The
-original event time travels in a header. `payments.main` is pinned to `CreateTime` so the
-event time is the producer's.
+event's own time is business data and travels in the payload (`occurred_at`); the headers
+carry when a record first failed and when it was archived (`retry_first_failed_at`,
+`dlq_archived_at`). `payments.main` is pinned to `CreateTime`, the default, written out: the
+timestamp is the one the relay's producer stamps at publication, which is what retention and
+seeking should count from — deliberately not the authorisation time (see the comment in
+`internal/infrastructure/kafka/publisher.go`).
 
 ## Declared, and deliberately left at the default
 
@@ -77,7 +98,8 @@ event time is the producer's.
 | `compression.type` | default, `producer` | a topic-level codec makes the broker recompress every batch whose codec differs, which would distort exp-17's throughput and CPU numbers |
 | `cleanup.policy` | default, `delete` | none of these topics is state; compaction belongs to exp-03 |
 | `max.message.bytes` | default, ~1 MiB | a dead letter is the original record plus headers; error text is truncated to a kilobyte instead of raising the limit |
-| segment settings | default | only exp-03 needs small segments, on its own topic |
+| `segment.ms` | 1 day on the retry tiers and the DLQ, default (7 days) on `payments.main` | retention deletes whole segments, so a record lives up to retention + `segment.ms`; with the default a letter would outlive its 30 days by a week, past the inbox horizon, and a payment replayed that late would be counted twice. `payments.main` is outside that chain |
+| `segment.bytes` | default, 1 GiB | a lab topic never fills a segment before a day is up |
 
 ## Naming
 
@@ -92,7 +114,8 @@ event time is the producer's.
 ## Experiments and their topics
 
 An experiment that reshapes a topic, or fills it with test traffic, gets its own YAML in
-`experiments/<exp>/topics/`, applied with `make exp-topics EXP=<exp>`. The catalog stays
+`experiments/<group>/<exp>/topics/`, applied with `make exp-topics EXP=<group>/<exp>` — for
+example `EXP=transaction_guarantee/exp-08-acks`. The catalog stays
 the shape the service runs on, and `make check` keeps checking only that.
 
 | Experiment | Topic | Why not the catalog |
@@ -104,11 +127,17 @@ the shape the service runs on, and `make check` keeps checking only that.
 | exp-05…07 delivery semantics | own | counted duplicates and losses must not mix with any other traffic |
 | exp-08 acks and min.insync | own, `min.insync.replicas=3` | one dead broker has to drop the ISR below the threshold without losing the KRaft quorum ([04](../../docs/static/04-isr-leader-election.md)) |
 | exp-09 producer idempotence | own | runs a deliberately unsafe producer |
-| exp-10 transactions | own input plus `payments.enriched` | the EOS stage is group `payments-enricher`, not part of the service |
+| exp-10a–d transactions | own input and output per cell (`exp10a.*` … `exp10d.stream`) | a crashed transaction, a database boundary, read-uncommitted and a hanging transaction each need a log nobody else writes to |
 | exp-12 schema evolution | own | deliberately incompatible versions would stay in the history of `payments.main-value` |
 | exp-15 partition reassignment | own | changes replica placement and the replication factor |
 | exp-17 batching and compression | own | a load sweep, not payment traffic |
-| exp-11, 13, 14, 16 | the catalog | they measure the service on the topics it actually runs on: poison into the DLQ, a broker killed under load, a rebalance, a lag spike |
+| exp-11 poison pill | own, one blocked and one archived cell with its own DLQ | a poison record in `payments.main` would stop the service's own consumer |
+| exp-13 broker outage | own, `exp13.payments` | brokers are killed under it; the service's relay publishes into it through the service's own code |
+| exp-14, exp-16 rebalance and lag | own, `exp14.payments`, `exp16.payments` | group churn and deliberate lag measured apart from the service's group |
+| exp-18 retry chain | own main, tiers and DLQ per cell (`exp18.*`), tier delays 3/6/12 s | the service's 5 s/1 m/10 m tiers take eleven minutes to exhaust one record; 3/6/12 s keep a run to minutes |
+
+Every experiment runs the service's code — the publisher, the consumer, the retry chain —
+against topics of its own, so no test traffic ever reaches the catalog.
 
 ## Changing the catalog
 

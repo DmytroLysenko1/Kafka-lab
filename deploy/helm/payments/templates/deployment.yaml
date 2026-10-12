@@ -1,0 +1,121 @@
+{{- range $name, $component := .Values.components }}
+{{- $scope := dict "root" $ "name" $name "command" $component.command }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "payments.labels" $scope | nindent 4 }}
+spec:
+  {{- if not $component.autoscaling }}
+  replicas: {{ $component.replicas }}
+  {{- end }}
+  # Old ReplicaSets kept for `kubectl rollout undo`: five, not the default ten. The rollback
+  # path is `helm rollback`, which keeps its own history; an undo is for the last release or
+  # two in an emergency, and each kept ReplicaSet is one more object in every listing.
+  revisionHistoryLimit: 5
+  # RollingUpdate, the default: a new pod has to be ready before an old one goes, so
+  # capacity never drops during a rollout, and a new version that never becomes ready
+  # stalls the rollout instead of replacing the pods that work. Recreate for a component
+  # that must never run twice (the relay, see values.yaml).
+  strategy:
+    {{- if eq ($component.strategy | default "RollingUpdate") "Recreate" }}
+    type: Recreate
+    {{- else }}
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    {{- end }}
+  selector:
+    matchLabels:
+      {{- include "payments.selector" $scope | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "payments.labels" $scope | nindent 8 }}
+      annotations:
+        # The pods read the ConfigMap only at start: a changed value rolls them.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+    spec:
+      # Nothing in the service talks to the Kubernetes API, so no token is mounted for anyone
+      # who gets into the container to use.
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $component.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      # matchLabelKeys counts only the pods of this pod's own ReplicaSet. Without it the
+      # selector also counts the old ReplicaSet's pods during a rollout: the surge pod is
+      # placed to balance old and new together, the old pods then go, and the new ones can be
+      # left on one node — both consumers on one worker after a rollout on 27.09, which a lost
+      # node would take together. ScheduleAnyway, because the API's HPA can ask for five pods
+      # on two workers, and an unschedulable replica is worse than an uneven one.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "payments.selector" $scope | nindent 14 }}
+          matchLabelKeys:
+            - pod-template-hash
+      containers:
+        - name: {{ $name }}
+          image: {{ include "payments.image" $scope }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
+          ports:
+            {{- if $component.httpPort }}
+            - name: http
+              containerPort: {{ $component.httpPort }}
+            {{- end }}
+            - name: metrics
+              containerPort: {{ $component.metricsPort }}
+          envFrom:
+            - configMapRef:
+                name: payments-config
+          env:
+            {{- include "payments.databaseURL" $ | nindent 12 }}
+            {{- if $component.apiKey }}
+            - name: PAYMENTS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secrets.apiKey.name }}
+                  key: {{ $.Values.secrets.apiKey.key }}
+            {{- end }}
+            {{- range $key, $value := $component.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          # Liveness answers "is the process serving at all" on the metrics listener, which
+          # every component has and which never touches a dependency: a liveness probe that
+          # pinged Kafka or Postgres would restart every pod at once during their outage.
+          startupProbe:
+            httpGet: { path: /healthz, port: metrics }
+            periodSeconds: {{ $.Values.startupProbe.periodSeconds }}
+            failureThreshold: {{ $.Values.startupProbe.failureThreshold }}
+          # A process that stops answering is restarted after 3 × 10 s: long enough that a GC
+          # pause or a slow node never trips it, short enough to be under a minute.
+          livenessProbe:
+            httpGet: { path: /healthz, port: metrics }
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          {{- if $component.readiness }}
+          # /readyz pings Postgres with a 2 s deadline of its own, inside the 3 s probe. Out of
+          # the endpoints after 2 failures 5 s apart: ~10 s from database loss to no traffic.
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ $.Values.preStopSleepSeconds }}
+          {{- end }}
+          resources:
+            {{- toYaml $component.resources | nindent 12 }}
+{{- end }}

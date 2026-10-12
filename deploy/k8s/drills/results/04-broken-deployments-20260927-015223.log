@@ -1,0 +1,13 @@
+
+==== a1. A tag that was never built, through helm — stopped at the migration hook — 2026-09-26T22:52:23Z
+level=WARN msg="upgrade failed" name=payments error="pre-upgrade hooks failed: resource Job/lab/migrate not ready. status: InProgress, message: Job in progress\ncontext deadline exceeded"
+POD             WAITING
+migrate-96rtt   ErrImagePull
+POD                            READY   STATE                                              RESTARTS   PHASE
+payments-api-9d4c88d6c-72c9m   true    map[running:map[startedAt:2026-09-26T22:24:37Z]]   0          Running
+payments-api-9d4c88d6c-bj4rr   true    map[running:map[startedAt:2026-09-26T22:36:25Z]]   0          Running
+API through the ingress while broken: 200
+Error: release payments failed: resource Deployment/lab/outbox-relay not ready. status: InProgress, message: Pending termination: 1
+resource Deployment/lab/payments-api not ready. status: InProgress, message: Updated: 1/2
+resource Deployment/lab/payments-consumer not ready. status: InProgress, message: Updated: 1/2
+context deadline exceeded

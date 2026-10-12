@@ -1,0 +1,87 @@
+# The topic catalog of deploy/topics/*.yaml as KafkaTopic objects, field for field. In the
+# compose stand topicctl applies those files; here the Topic Operator owns the topics, and a
+# change goes into both places or the two stands stop measuring the same thing.
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: payments.main
+  namespace: lab
+  labels:
+    strimzi.io/cluster: kafka-lab
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    min.insync.replicas: 2
+    retention.ms: 604800000
+    message.timestamp.type: CreateTime
+    unclean.leader.election.enable: false
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: payments-consumer.retry.5s
+  namespace: lab
+  labels:
+    strimzi.io/cluster: kafka-lab
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    min.insync.replicas: 2
+    retention.ms: 604800000
+    segment.ms: 86400000
+    message.timestamp.type: LogAppendTime
+    unclean.leader.election.enable: false
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: payments-consumer.retry.1m
+  namespace: lab
+  labels:
+    strimzi.io/cluster: kafka-lab
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    min.insync.replicas: 2
+    retention.ms: 604800000
+    segment.ms: 86400000
+    message.timestamp.type: LogAppendTime
+    unclean.leader.election.enable: false
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: payments-consumer.retry.10m
+  namespace: lab
+  labels:
+    strimzi.io/cluster: kafka-lab
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    min.insync.replicas: 2
+    retention.ms: 604800000
+    segment.ms: 86400000
+    message.timestamp.type: LogAppendTime
+    unclean.leader.election.enable: false
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: payments-consumer.dlq
+  namespace: lab
+  labels:
+    strimzi.io/cluster: kafka-lab
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    min.insync.replicas: 2
+    retention.ms: 2592000000
+    segment.ms: 86400000
+    message.timestamp.type: LogAppendTime
+    unclean.leader.election.enable: false

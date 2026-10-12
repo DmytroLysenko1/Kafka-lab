@@ -1,0 +1,113 @@
+# The compose stand's cluster, run by Strimzi: three KRaft nodes that are broker and
+# controller at once, Kafka 4.3.1, and the same pinned broker settings as
+# deploy/docker-compose.yml — each of them was pinned there because its default decided an
+# experiment's outcome, and a stand that differs from the one the numbers came from would
+# make the numbers meaningless.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: dual
+  namespace: lab
+  labels:
+    strimzi.io/cluster: kafka-lab
+spec:
+  replicas: 3
+  roles: [controller, broker]
+  # local-path enforces no size, so 5Gi is a claim, not a quota. deleteClaim: deleting the
+  # Kafka resource deletes the logs too — a stand is torn down and rebuilt, never migrated.
+  storage:
+    type: persistent-claim
+    size: 5Gi
+    deleteClaim: true
+    kraftMetadata: shared
+  # Heap 512m, not the image's 1g of the compose stand: three brokers plus the platform have to
+  # fit an 8 GB Docker VM. With it a broker settles at ~800Mi (heap + ~280Mi off-heap); the
+  # request is that, the limit ~1.7× it. Figures: deploy/k8s/drills/results/resources-20260927-175351.log
+  # (the first pass after the resize). The first 1Gi limit left 1.11× over a 918Mi peak that drill 05 caused by
+  # running a second JVM in the broker container (session observation); the drill now gives
+  # its admin tool a heap of its own.
+  jvmOptions:
+    -Xms: 512m
+    -Xmx: 512m
+  resources:
+    # CPU p95 across the three brokers: 85–186m over one drill session
+    # (resources-20260927-175351.log), 233–325m over the latest (…-214046.log). The request is
+    # the low end, a scheduling hint rather than a cap (no CPU limit): the brokers are busy
+    # only while a drill loads them.
+    requests: { cpu: 100m, memory: 800Mi }
+    # resources-20260927-214046.log: 895Mi peak on dual-0 over that 41-minute drill session
+    # (drill 05's own samples of its witness broker read 785Mi); 1280Mi was 1.43× that peak.
+    # resources-20260928-043718.log, the next session (drills 01–06; which one peaked the log
+    # does not say): 919Mi on dual-0 — 1360Mi was 1.48× it, 1400Mi is 1.52×.
+    limits: { memory: 1400Mi }
+  # Preferred, not required: three brokers on two schedulable workers cannot all be apart,
+  # and a required rule would leave the third one Pending (deploy/k8s/kind.yaml). The cost:
+  # two of the three KRaft controllers share a worker, and losing that worker loses the
+  # quorum — lab-only, see docs/k8s/decisions.md ("Lab, not production").
+  template:
+    pod:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    strimzi.io/pool-name: dual
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: kafka-lab
+  namespace: lab
+spec:
+  kafka:
+    version: 4.3.1
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      offsets.topic.replication.factor: 3
+      offsets.topic.num.partitions: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      transaction.state.log.num.partitions: 3
+      share.coordinator.state.topic.replication.factor: 3
+      share.coordinator.state.topic.min.isr: 2
+      share.coordinator.state.topic.num.partitions: 3
+      auto.leader.rebalance.enable: false
+      log.retention.check.interval.ms: 5000
+      log.cleaner.backoff.ms: 5000
+      auto.create.topics.enable: false
+      default.replication.factor: 3
+      min.insync.replicas: 2
+      # 0 instead of 3 s, for the reason given in deploy/docker-compose.yml: rebalance timings
+      # are measured here, and the default wait would be part of every one of them.
+      group.initial.rebalance.delay.ms: 0
+      # The default, written out because the compose stand writes it out: exp-04c changes it
+      # there, and a reader comparing the two stands should not have to know the default.
+      broker.session.timeout.ms: 9000
+    # No broker-side metrics: nothing on the dashboard reads them — lag, under-replicated
+    # partitions and broker count come from the exporter below, as in the compose stand —
+    # and scraping series nobody reads is what the Postgres PodMonitor is left off for too.
+  # Topics are declared as KafkaTopic objects (topics.yaml) and the operator owns them: a
+  # change made by hand with kafka-configs is reverted on its next reconcile.
+  entityOperator:
+    # Figures: deploy/k8s/drills/results/resources-20260927-175351.log.
+    topicOperator:
+      resources:
+        requests: { cpu: 20m, memory: 192Mi }
+        limits: { memory: 320Mi }
+  # Strimzi ships the same exporter project the compose stand runs (danielqsj/kafka_exporter)
+  # inside its own image (quay.io/strimzi/kafka), so the dashboard's lag and
+  # under-replicated panels read the same metric names — the same metrics, not the same image.
+  # Figures: deploy/k8s/drills/results/resources-20260927-175351.log.
+  kafkaExporter:
+    groupRegex: ".*"
+    topicRegex: ".*"
+    resources:
+      requests: { cpu: 10m, memory: 24Mi }
+      limits: { memory: 64Mi }

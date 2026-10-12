@@ -18,5 +18,6 @@ spec:
   settings:
     min.insync.replicas: 2
     retention.ms: 2592000000
+    segment.ms: 86400000
     message.timestamp.type: LogAppendTime
     unclean.leader.election.enable: false

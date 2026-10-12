@@ -5,6 +5,7 @@ package kafka_test
 import (
 	"context"
 	"log/slog"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -20,6 +22,7 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/outboxwire"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
 
@@ -44,7 +47,7 @@ func consumerStorage(t *testing.T) (*postgres.Storage, *pgxpool.Pool) {
 		t.Fatalf("open the inspecting pool: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(t.Context(), "TRUNCATE inbox, merchant_totals"); err != nil {
+	if _, err := pool.Exec(t.Context(), "TRUNCATE inbox, merchant_currency_totals"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return storage, pool
@@ -60,10 +63,10 @@ func stageOn(topic string) kafka.Stage {
 func runConsumer(t *testing.T, storage *postgres.Storage, stage kafka.Stage, dlqTopic string) {
 	t.Helper()
 
-	record := merchants.NewRecordAuthorized(
+	record := merchants.NewRecordMovement(
 		postgres.NewInboxStore(storage),
 		postgres.NewTotalsStore(storage),
-		storage,
+		postgres.NewMerchantTransactions(storage),
 		time.Now,
 	)
 	detours, err := kafka.NewDetours(brokers(t), dlqTopic, metrics.Discard{})
@@ -121,11 +124,12 @@ func waitCommitted(t *testing.T, group, topic string) {
 	})
 }
 
+// merchantTotal is the merchant's EUR total: every payment these tests publish is in EUR.
 func merchantTotal(t *testing.T, pool *pgxpool.Pool, merchantID string) int64 {
 	t.Helper()
 	var total int64
 	err := pool.QueryRow(t.Context(),
-		"SELECT coalesce((SELECT authorized_minor FROM merchant_totals WHERE merchant_id = $1), 0)", merchantID).Scan(&total)
+		"SELECT coalesce((SELECT authorized_minor FROM merchant_currency_totals WHERE merchant_id = $1 AND currency = 'EUR'), 0)", merchantID).Scan(&total)
 	if err != nil {
 		t.Fatalf("read the total: %v", err)
 	}
@@ -206,7 +210,7 @@ func TestARecordNobodyCanDecodeGoesToTheDeadLetterTopicAndTheGroupMovesOn(t *tes
 		Value: []byte("this was never protobuf"),
 		Headers: []kgo.RecordHeader{
 			{Key: "event_id", Value: []byte("poison-1")},
-			{Key: "event_type", Value: []byte(outbox.EventTypeAuthorized)},
+			{Key: "event_type", Value: []byte(outboxwire.EventTypeAuthorized)},
 		},
 	}).FirstErr(); err != nil {
 		t.Fatalf("produce the poison record: %v", err)
@@ -256,7 +260,7 @@ func TestTheSchemaRefusesAnIdentifierNoRealMerchantWouldHave(t *testing.T) {
 	}
 
 	_, err = pool.Exec(t.Context(),
-		"INSERT INTO merchant_totals (merchant_id, authorized_minor, updated_at) VALUES ($1, $2, $3)",
+		"INSERT INTO merchant_currency_totals (merchant_id, currency, authorized_minor, updated_at) VALUES ($1, 'EUR', $2, $3)",
 		strings.Repeat("m", 65), 1, time.Now().UTC())
 	if err == nil {
 		t.Error("the schema accepted a merchant id of 65 characters")
@@ -296,5 +300,64 @@ func TestAnEventTheConsumerRefusesIsArchivedRatherThanRetriedForever(t *testing.
 	}
 	if diff := cmp.Diff(int64(0), merchantTotal(t, pool, "m-42")); diff != "" {
 		t.Errorf("a refused event still moved the total (-want +got):\n%s", diff)
+	}
+}
+
+// A total the database cannot hold — here the running EUR total one authorisation short of
+// bigint's range — fails the same way on every delivery. Treated as a database outage it
+// would restart the consumer on that record forever and every payment behind it would wait;
+// treated as what it is, the record is refused into the dead letter topic, the transaction
+// that tried it leaves no inbox row behind, and the next payment is counted.
+func TestATotalTheDatabaseCannotHoldIsArchivedAndThePaymentsBehindItAreCounted(t *testing.T) {
+	topic := freshTopic(t)
+	dlqTopic := freshTopic(t)
+	storage, pool := consumerStorage(t)
+
+	const nearlyFull = math.MaxInt64 - 1<<50 + 1
+	if _, err := pool.Exec(t.Context(),
+		"INSERT INTO merchant_currency_totals (merchant_id, currency, authorized_minor, updated_at) VALUES ('m-42', 'EUR', $1, now())",
+		int64(nearlyFull)); err != nil {
+		t.Fatalf("seed the total: %v", err)
+	}
+
+	publisher, err := kafka.NewPublisher(t.Context(), brokers(t), topic, registryURL(t))
+	if err != nil {
+		t.Fatalf("publisher: %v", err)
+	}
+	t.Cleanup(publisher.Close)
+
+	overflowing := record(t, uuid.New().String(), 1<<50)
+	overflowing.ID = 1
+	behind := record(t, uuid.New().String(), 1)
+	behind.ID = 2
+	if err := publisher.Publish(t.Context(), []outbox.Record{overflowing, behind}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	runConsumer(t, storage, stageOn(topic), dlqTopic)
+
+	waitFor(t, "the payment behind the refused one to be counted", func() bool {
+		return merchantTotal(t, pool, "m-42") == nearlyFull+1
+	})
+	archived := readBack(t, dlqTopic, 1)
+	class := ""
+	for _, header := range archived[0].Headers {
+		if header.Key == "dlq_class" {
+			class = string(header.Value)
+		}
+	}
+	if diff := cmp.Diff("refused", class); diff != "" {
+		t.Errorf("dead letter class (-want +got):\n%s", diff)
+	}
+	rows, err := pool.Query(t.Context(), "SELECT event_id FROM inbox ORDER BY event_id")
+	if err != nil {
+		t.Fatalf("read the inbox: %v", err)
+	}
+	claimed, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("read the inbox: %v", err)
+	}
+	if diff := cmp.Diff([]string{"2"}, claimed); diff != "" {
+		t.Errorf("inbox rows (-want +got):\n%s", diff)
 	}
 }

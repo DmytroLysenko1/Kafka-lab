@@ -24,6 +24,7 @@ import (
 	paymentv1 "github.com/DmytroLysenko1/Kafka-lab/gen/payment/v1"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/outboxwire"
 	schemas "github.com/DmytroLysenko1/Kafka-lab/proto"
 )
 
@@ -69,14 +70,18 @@ func freshTopic(t *testing.T) string {
 	return topic
 }
 
+// record is an authorisation made an hour ago: recent enough for the consumer to count — it
+// refuses one older than the inbox can deduplicate (retention.CanBeDeduplicated) — and clearly
+// apart from the time the broker stamps on the record.
 func record(t *testing.T, paymentID string, minor int64) outbox.Record {
 	t.Helper()
-	payload, err := json.Marshal(outbox.AuthorizedPayload{
+	occurred := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	payload, err := json.Marshal(outboxwire.Payload{
 		PaymentID:   paymentID,
 		MerchantID:  "m-42",
 		AmountMinor: minor,
 		Currency:    "EUR",
-		OccurredAt:  time.Date(2026, time.September, 25, 9, 0, 0, 0, time.UTC),
+		OccurredAt:  occurred,
 	})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -84,9 +89,9 @@ func record(t *testing.T, paymentID string, minor int64) outbox.Record {
 	return outbox.Record{
 		ID:          minor,
 		AggregateID: paymentID,
-		EventType:   outbox.EventTypeAuthorized,
+		EventType:   outboxwire.EventTypeAuthorized,
 		Payload:     payload,
-		OccurredAt:  time.Date(2026, time.September, 25, 9, 0, 0, 0, time.UTC),
+		OccurredAt:  occurred,
 	}
 }
 
@@ -155,7 +160,8 @@ func TestPublishedRecordsCanBeReadBackThroughTheRegistry(t *testing.T) {
 	t.Cleanup(publisher.Close)
 
 	paymentID := uuid.New().String()
-	if err := publisher.Publish(t.Context(), []outbox.Record{record(t, paymentID, 1999)}); err != nil {
+	sent := record(t, paymentID, 1999)
+	if err := publisher.Publish(t.Context(), []outbox.Record{sent}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 
@@ -182,7 +188,7 @@ func TestPublishedRecordsCanBeReadBackThroughTheRegistry(t *testing.T) {
 	for _, header := range read[0].Headers {
 		headers[header.Key] = string(header.Value)
 	}
-	wantHeaders := map[string]string{"event_id": strconv.FormatInt(1999, 10), "event_type": outbox.EventTypeAuthorized}
+	wantHeaders := map[string]string{"event_id": strconv.FormatInt(1999, 10), "event_type": outboxwire.EventTypeAuthorized}
 	if diff := cmp.Diff(wantHeaders, headers); diff != "" {
 		t.Errorf("headers mismatch (-want +got):\n%s", diff)
 	}
@@ -191,9 +197,8 @@ func TestPublishedRecordsCanBeReadBackThroughTheRegistry(t *testing.T) {
 	// more than log.message.timestamp.after.max.ms — an hour here — into the future, so the
 	// log's clock must stay the log's: an event dated by a skewed clock would otherwise
 	// block every record queued behind it.
-	occurred := time.Date(2026, time.September, 25, 9, 0, 0, 0, time.UTC)
-	if !got.GetOccurredAt().AsTime().Equal(occurred) {
-		t.Errorf("payload occurred_at = %s, want the business time %s", got.GetOccurredAt().AsTime(), occurred)
+	if !got.GetOccurredAt().AsTime().Equal(sent.OccurredAt) {
+		t.Errorf("payload occurred_at = %s, want the business time %s", got.GetOccurredAt().AsTime(), sent.OccurredAt)
 	}
 	if since := time.Since(read[0].Timestamp).Abs(); since > time.Minute {
 		t.Errorf("the record was stamped %s away from now; the log's timestamp must be the publication time", since)
@@ -268,6 +273,31 @@ func TestRepublishingUsesTheSchemaAlreadyRegistered(t *testing.T) {
 		if diff := cmp.Diff(paymentID, got.GetPaymentId()); diff != "" {
 			t.Errorf("decoded payment id mismatch (-want +got):\n%s", diff)
 		}
+	}
+}
+
+// A registry left at its default would accept any next version of the schema — Apicurio's
+// default is NONE — so the publisher declares BACKWARD for its subject before registering.
+// An incompatible change then fails at registration, at the publisher's start, instead of
+// reaching consumers that cannot read it.
+func TestThePublisherHoldsItsSubjectToBackwardCompatibility(t *testing.T) {
+	topic := freshTopic(t)
+	publisher, err := kafka.NewPublisher(t.Context(), brokers(t), topic, registryURL(t))
+	if err != nil {
+		t.Fatalf("new publisher: %v", err)
+	}
+	t.Cleanup(publisher.Close)
+
+	registry, err := sr.NewClient(sr.URLs(registryURL(t)))
+	if err != nil {
+		t.Fatalf("registry client: %v", err)
+	}
+	got := registry.Compatibility(t.Context(), topic+"-value")
+	if got[0].Err != nil {
+		t.Fatalf("read compatibility: %v", got[0].Err)
+	}
+	if diff := cmp.Diff(sr.CompatBackward, got[0].Level); diff != "" {
+		t.Errorf("subject compatibility mismatch (-want +got):\n%s", diff)
 	}
 }
 

@@ -1,0 +1,5 @@
+
+==== a. ImagePullBackOff — a tag that was never built — 2026-09-26T22:46:39Z
+level=WARN msg="upgrade failed" name=payments error="pre-upgrade hooks failed: resource Job/lab/migrate not ready. status: InProgress, message: Job in progress\ncontext deadline exceeded"
+Error: UPGRADE FAILED: pre-upgrade hooks failed: resource Job/lab/migrate not ready. status: InProgress, message: Job in progress
+context deadline exceeded

@@ -1,0 +1,49 @@
+# One binary, one replica, the filesystem as the object store: the smallest Loki that keeps
+# a day of pod logs queryable from Grafana. No auth — one tenant, reachable only in-cluster.
+deploymentMode: SingleBinary
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2026-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  limits_config:
+    retention_period: 24h
+  # Without the compactor's retention, retention_period deletes nothing and the logs grow
+  # until the Docker VM's disk is full — local-path does not enforce the 2Gi below (the first
+  # render of this file had no retention_enabled at all).
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+singleBinary:
+  replicas: 1
+  persistence:
+    size: 2Gi
+  # resources-20260927-175351.log: 162Mi typical, 222Mi peak — the request had been below
+  # typical use; the limit stays at 1.7× the peak.
+  resources:
+    requests: { cpu: 20m, memory: 160Mi }
+    limits: { memory: 384Mi }
+read: { replicas: 0 }
+write: { replicas: 0 }
+backend: { replicas: 0 }
+gateway: { enabled: false }
+chunksCache: { enabled: false }
+resultsCache: { enabled: false }
+lokiCanary: { enabled: false }
+test: { enabled: false }
+minio: { enabled: false }
+# No alerting or recording rules are loaded, so the rules sidecar (77Mi measured, no
+# resources) had nothing to do.
+sidecar:
+  rules:
+    enabled: false

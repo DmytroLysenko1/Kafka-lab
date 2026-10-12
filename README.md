@@ -1,37 +1,49 @@
 # Kafka-lab
 
-A lab for **Apache Kafka in depth**: internals, delivery guarantees, and the operational
-behaviour of a payments service built on them. Every claim in this repository is either
-backed by a reproducible experiment (`make exp-NN`) with its numbers committed, or
-marked `TBD` until that experiment has run.
+A lab for **Apache Kafka in depth** and for **running the same service on Kubernetes**:
+Kafka's internals and delivery guarantees, a payments service built on them, and its
+operation in containers. Every claim in this repository is backed by a run whose output is
+committed — an experiment (`make exp-NN`) or a Kubernetes drill (`make k8s-drill-NN`) — or it
+says it is not: `TBD` until the experiment has run, "not logged" or "not measured" where a
+number comes from watching a session rather than from a log.
 
-**Status.** The diagrams and the internals documentation are in place, and so is the
-cluster they describe: `make up` brings up three KRaft brokers, and the topics are
-declared as YAML in [`deploy/topics/`](deploy/topics/) and applied with
-[topicctl](https://github.com/segmentio/topicctl). The payments service described below has
-started: the domain, the authorise use case, the Postgres side of it — schema, unit of work,
-idempotent insert and the outbox — the outbox relay that publishes those events to Kafka as
-Protobuf through the schema registry, and the consumer that reads them back, deduplicates
-them through an inbox and keeps a per-merchant projection. The HTTP layer is in front of it
-now, so the whole path runs end to end: a POST creates a payment, the relay publishes it,
-the consumer counts it, and a GET reads the total back. A payment whose merchant row another
-transaction holds no longer holds the partition behind it: it moves through the retry tiers
-and, if the lock outlasts all of them, into the dead letter topic, from which
-`cmd/dlq-replayer` sends it back once the row is free.
+**What is here.** A payments service, end to end: `POST /payments` stores the payment and an
+outbox row in one transaction; a relay publishes the outbox to Kafka as Protobuf through a
+schema registry; a consumer counts each payment into its merchant's total per currency,
+exactly once through an inbox — for as long as an event comes back within the topics'
+retention and the inbox's 40 days, the limits listed in
+[docs/k8s/decisions.md](docs/k8s/decisions.md#lab-not-production); a payment whose merchant row is locked moves through three
+retry topics and, past the last, into a dead letter topic that `cmd/dlq-replayer` replays.
+Around it: three KRaft brokers and the topic catalog as YAML ([`deploy/topics/`](deploy/topics/),
+applied with [topicctl](https://github.com/segmentio/topicctl)), the experiments behind each
+claim, a Grafana dashboard, a failure report and a runbook. The same service runs on kind with
+Kafka on Strimzi, deployed by a Helm chart and exercised by scripted drills —
+[`docs/k8s/`](docs/k8s/). It is a lab, and what it leaves out on purpose — backups, TLS,
+separate database roles, alerting — is listed in
+[docs/k8s/decisions.md](docs/k8s/decisions.md#lab-not-production).
+
+**Terms used before they are explained.** *KRaft* — Kafka's own consensus for cluster
+metadata, which replaced ZooKeeper; *ISR* — the in-sync replicas, the copies of a partition a
+write must reach before `acks=all` succeeds ([04](docs/static/04-isr-leader-election.md));
+*outbox* — the table the API writes an event into in the same transaction as the payment,
+for a relay to publish ([06](docs/static/06-transactional-outbox.md)); *inbox* — the table of
+event ids the consumer has counted, so a redelivered event counts once; *DLQ* — the dead letter
+topic, where a record goes that cannot be processed, to be replayed by hand
+([07](docs/static/07-retry-dlq.md)).
 
 | KR (PDP) | Deliverable | Where it lives | State |
 |---|---|---|---|
-| Fundamentals and internals | cheat sheet with write and read path diagrams | [`docs/static/`](docs/static/) — index plus cases 01–04 | diagrams done; exp-01…04 measured — a key is worth 6 827 – 8 721 ordering violations per 10 000 events over seven runs; a skewed key leaves seven consumers no faster than one by more than run-to-run variance, the seventh idle; compaction turned 2 010 records into 50; a killed broker is noticed within 10.1–10.6 s, 15.3 s when it was also the KRaft controller, every acknowledged write is still readable afterwards (600 of 600), leadership stays with the replacements until someone asks (auto leader rebalance is off on this stand), and raising `broker.session.timeout.ms` to 20 s moves that to 20.3 s while the lag timer everyone quotes stays put. Cases 01 and 03 are filled in; `TBD` rows remain in case 02 (exp-03b/c/d), and case 09's matrix is measured except for the two field-reuse cells, case 02 lists three things exp-03 did not show, and case 04 lists exp-04b as blocked on this stand |
+| Fundamentals and internals | cheat sheet with write and read path diagrams | [`docs/static/`](docs/static/) — index plus cases 01–04 | diagrams done; exp-01…04 measured — a key is worth 6 827 – 8 721 ordering violations per 10 000 events over seven runs; a skewed key caps any consumer group at 1.17× one consumer — every group from two members up sat at that ceiling, the seventh member idle; compaction turned 2 010 records into 50; a killed broker is noticed within 10.1–10.6 s, 15.3 s when it was also the KRaft controller, every acknowledged write is still readable afterwards (600 of 600), leadership stays with the replacements until someone asks (auto leader rebalance is off on this stand), and raising `broker.session.timeout.ms` to 20 s moves that to 20.3 s while the lag timer everyone quotes stays put. Cases 01 and 03 are filled in; `TBD` rows remain in case 02 (exp-03b/d), and case 09's matrix is measured except for the two field-reuse cells, case 02 lists three things exp-03 did not show, and case 04 lists exp-04b as blocked on this stand |
 | Delivery guarantees and tuning | notes on semantics plus a tuning checklist | cases 05, 08, 10; [`docs/tuning-checklist.md`](docs/tuning-checklist.md) | mechanics and checklist written; exp-05/06/07 measured — the same crash loses 49 payments, charges 50 twice, or costs nothing, depending on where one line sits; exp-08 measured — `acks=all` with `min.insync.replicas=3` refused all 2 000 writes once a broker died, while `acks=1`, with the followers paused to hold the replication window open, lost all 2 000 records it had acknowledged, while `acks=all` under the identical failure acknowledged none and so lost none; exp-09 measured — with idempotence off franz-go reordered nothing in five runs, so the reordering it was built to show never happened on this client, and duplicated 80–291 events; in each of the three runs that counted retries the duplicates were exactly the records the leader appended before answering `REQUEST_TIMED_OUT` (80, 80, 191), which the idempotent producer's broker dropped; exp-10 measured — a Kafka transaction rolled a crashed batch back exactly, left 50 Postgres rows duplicated beside it, and one stuck transaction hid an unrelated producer's records for 23.2–27.3 s over two runs; exp-05b/06b measured — franz-go's default autocommit is at-least-once and its greedy flavour loses the unwritten rest of a batch; exp-14 measured over four runs — eager revoked every partition and no gap outgrew the baseline poll cycle, cooperative stopped only the three that moved, for 0.51–0.68 s, and KIP-848 for 4.9–6.5 s, around its 5 s heartbeat; exp-16 measured — through a dependency outage lag is the same whatever the handler does, but retrying inline got the member removed and its stale commit rewound the group, while pausing fetches kept it whole; exp-17 measured — batching roughly doubles what any codec compresses (zstd 2.9× → 5.65×), and at equal batching zstd still compresses ≈1.7× better than snappy, and Java's `linger.ms` default is 5 ms since Kafka 4.0, not the 0 every guide quotes; exp-17b measured — flat out, compression raised throughput 1.1–4.7×, most likely because bytes rather than producer CPU were the ceiling on this stand (inferred, not isolated). `acks=all` at `min.insync.replicas=1` cannot be staged on three combined nodes |
 | Production-shaped Go app | working repo, README, architecture diagram | [`internal/`](internal/), [`cmd/`](cmd/), [`proto/`](proto/), this file | domain, authorise use case, Postgres adapter (goose migrations, `WithinTx` as a closure, `CreateOrGet` deciding insert-or-replay inside one `INSERT … ON CONFLICT`, outbox claimed with `FOR UPDATE SKIP LOCKED`) and the outbox relay: Protobuf registered with Apicurio, records keyed by `payment_id`, published with `acks=all` and marked published only after the ack. Proven by `make test-integration` against the real stand: eight concurrent authorisations with one idempotency key store one payment and one event, a rollback takes the event with it, two relays never claim the same row, the schema refuses an amount of zero, and a consumer decodes what the publisher wrote by the schema id inside the record. The consumer side is written too: an inbox keyed by `event_id` makes a redelivered event count once, the merchant projection is added to by the database rather than read-modify-written in Go, and a record nobody can decode — or one the consumer refuses — is archived to the dead letter topic with its bytes and the reason, so the partition behind it keeps moving. The HTTP layer closes the loop: `POST /payments` behind a required API key with constant-time comparison, a bounded body, `Idempotency-Key` mandatory, and one table that turns every domain refusal into a status a caller can act on without learning anything about the inside. Exercised end to end on the stand by hand — the one result here with no `make exp-NN` behind it, recorded in [the journal](docs/00-journal.md) rather than in a `results/` log: 201, then 200 on the retry, 409 on the key reused for another amount, 401 without the key, and `GET /merchants/m-e2e/total` returning 1999 after the relay and the consumer had done their work. The retry chain closes the deliverable: a payment whose merchant row another transaction holds (`lock_timeout` 2 s, SQLSTATE `55P03` translated to `merchants.ErrContended` in the repository) moves through `payments-consumer.retry.5s → 1m → 10m`, each tier a consumer group of its own that pauses only the partition it is waiting on; past the last tier it is archived as `exhausted`, and `cmd/dlq-replayer` sends one class of letters back to the first tier. exp-18 measured it with one merchant locked for 30 s under 600 payments: without the chain every payment behind a contended one waited out the lock (+30.5 s, 13 restarts); with it all 594 healthy payments were counted while the row was still locked, and every payment was counted once, including the six replayed from the dead letter topic. `make test-integration` covers the rest: the tier's delay, a copy the tier cannot store keeping its offset, the batch budget that keeps a partition of one locked merchant from holding the rebalance past its timeout, a due backlog not held behind a fresh record, and a replay repeated under a new group counting nothing twice |
-| Operate, observe, stress | Compose, Grafana dashboard, failure report, runbook | [`deploy/`](deploy/), [`docs/failure-report.md`](docs/failure-report.md), [`docs/runbook.md`](docs/runbook.md) | three-broker Compose runs; exp-14 and exp-16 are measured under KR2; the metrics stack runs — Prometheus, Grafana with a provisioned dashboard, kafka-exporter, and the three services publishing backlog, sweep outcomes, handled-against-duplicate, dead letters by class and requests by route; exp-13 measured — at 10 payments/s not one was refused while brokers died underneath the relay, one broker down cost 88–133 records of backlog and two cost 468–523 at the peak with an 18–24 s catch-up, and the cluster reported itself perfectly healthy throughout because two dead controllers leave no quorum to update the metadata — and so, it turned out, did this stand's own backlog panel, until the relay was fixed to count it on its own clock. exp-15 measured, in three runs — a 60 MiB replication-factor change took 2.2–2.3 s unthrottled and 24.8–25.9 s at 1 MiB/s (a per-broker limit, not a cluster one, so the ~24 MiB landing on each broker is what sets the duration), with no measurable cost to producer latency either way on a stand this small; topicctl does not change a replication factor, and `--verify` is what removes the throttle. The failure report and the runbook are written, and every line of both points at a run: which failures were produced on this stand and what each cost, what to check first during an incident and in what order, and which number lies — a green under-replicated panel is not a health check for a cluster that has lost its quorum |
+| Operate, observe, stress | Compose, Grafana dashboard, failure report, runbook | [`deploy/`](deploy/), [`docs/failure-report.md`](docs/failure-report.md), [`docs/runbook.md`](docs/runbook.md) | three-broker Compose runs; exp-14 and exp-16 are measured under KR2; the metrics stack runs — Prometheus, Grafana with a provisioned dashboard, kafka-exporter, and the three services publishing backlog, sweep outcomes, handled-against-duplicate, dead letters by class and requests by route; exp-13 measured — at 10 payments/s not one was refused while brokers died underneath the relay, one broker down cost 88–133 records of backlog and two cost 458–523 at the peak with a 17.3–24.2 s catch-up over four runs, and the cluster reported itself perfectly healthy throughout because two dead controllers leave no quorum to update the metadata — and so, it turned out, did this stand's own backlog panel, until the relay was fixed to count it on its own clock. exp-15 measured, in three runs — a 60 MiB replication-factor change took 2.2–2.3 s unthrottled and 24.8–25.9 s at 1 MiB/s (a per-broker limit, not a cluster one, so the ~24 MiB landing on each broker is what sets the duration), with no measurable cost to producer latency either way on a stand this small; topicctl does not change a replication factor, and `--verify` is what removes the throttle. The failure report and the runbook are written, and every line of both points at a run: which failures were produced on this stand and what each cost, what to check first during an incident and in what order, and which number lies — a green under-replicated panel is not a health check for a cluster that has lost its quorum |
 | Patterns and anti-patterns | recommendations doc | [`docs/patterns.md`](docs/patterns.md) | written: every pattern points at a case file, every anti-pattern at the run where the damage is a number — ordering assumptions, hot partitions, retention, commit order, `acks=1`, idempotence off, blocking retries, open transactions, and now the poison pill: without a dead letter route exp-11 left 10 of 100 payments counted and 91 records unread behind one unreadable record, against all 100 in 207–322 ms with one. The retry chain is measured too (exp-18): told apart from any other database failure, a locked merchant stops costing the payments behind it anything beyond the lock wait. CDC and stream enrichment remain reasoned rather than measured; schema evolution no longer does — exp-12 found a new subject accepts every one of these breaking changes until a level is set on it, `FULL` accepts a field deletion that `BACKWARD` refuses, and a removed or retyped amount reaches the consumer as zero without any decoding error |
-| Share findings | write-up or tech talk | [`docs/talk.md`](docs/talk.md), and the walkthroughs in [`docs/dynamic/`](docs/dynamic/) | written: seven claims everyone repeats, each against the number this stand produced when asked — a key is worth 6 827–8 721 ordering violations, one crash is 49 lost or 50 duplicated depending on one line, `acks=all` refuses 2 000 writes where `acks=1` loses them, the outbox accepted 303 payments while the cluster took none, a new subject checks nothing until it is configured, and one unreadable record left 90 payments unread behind it. Plus the part that is not about Kafka: four of those runs were wrong the first time, all in the same way |
+| Share findings | write-up or tech talk | [`docs/talk.md`](docs/talk.md), and the walkthroughs in [`docs/dynamic/`](docs/dynamic/) | written: eight claims everyone repeats, each against the number this stand produced when asked — a key is worth 6 827–8 721 ordering violations, one crash is 49 lost or 50 duplicated depending on one line, `acks=all` refuses 2 000 writes where `acks=1` loses them, the outbox accepted 303 payments while the cluster took none, a new subject checks nothing until it is configured, one unreadable record left 90 payments unread behind it, and retrying by classification counted 594 of 600 payments while their merchant's row was still locked. Plus the part that is not about Kafka: four of those runs were wrong the first time, all in the same way |
 
 ## Running the cluster
 
 ```
-make up                          # brokers, Postgres, registry, and the metrics stack
+make up                          # brokers, Postgres, the Apicurio registry, and the metrics stack
 make topics                      # create or update the catalog in deploy/topics
 make check                       # non-zero exit on drift or on a cluster unfit to measure on
 make describe TOPICS=payments.main
@@ -91,18 +103,36 @@ run on 300 s timers that would otherwise decide an experiment's outcome instead 
 
 ## Running the service
 
+What the host needs: Go 1.26.4 (`go.mod`), Docker with Compose v2, golangci-lint v2 for
+`make verify` (`.golangci.yml` is a v2 config), and for `make proto` buf (1.70.0 here) with
+`protoc-gen-go` v1.36.11, the version `gen/` was generated with
+(`go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11`). topicctl is not
+installed: the Makefile runs a pinned version with `go run`. The Kubernetes stand needs more,
+listed in [docs/k8s/README.md](docs/k8s/README.md#tools-as-the-evidence-was-produced-with-them).
+
+The services read their configuration from the environment. `make` targets set it; a
+`go run` from a plain shell needs it exported first — these are the compose stand's
+addresses:
+
 ```
-make up                          # brokers, Postgres, and the Apicurio schema registry
+export DATABASE_URL='postgres://lab:lab@localhost:5432/lab?sslmode=disable'
+export KAFKA_BROKERS=localhost:19092,localhost:29092,localhost:39092
+export SCHEMA_REGISTRY_URL=http://localhost:8080/apis/ccompat/v7
+```
+
+```
+make up                          # brokers, Postgres, the Apicurio registry, and the metrics stack
 make migrate                     # apply the schema; services never migrate on boot
 make proto                       # regenerate gen/ from proto/ after changing a schema
 go run ./cmd/outbox-relay        # publish what the outbox holds, until SIGTERM
 go run ./cmd/payments-consumer   # read the topic and the retry tiers, deduplicate, keep merchant totals
 go run ./cmd/dlq-replayer        # send exhausted dead letters back to the first tier, then exit
-PAYMENTS_API_KEY=... go run ./cmd/payments-api   # POST /payments, GET /merchants/{id}/total
+PAYMENTS_API_KEY=... go run ./cmd/payments-api   # authorise, capture, refund; GET /merchants/{id}/total
 ```
 
 `make up` also brings up Prometheus on `localhost:9090`, Grafana on `localhost:3000` with
-the dashboard already provisioned, and a kafka-exporter on `9308` that reads consumer group
+the dashboard already provisioned, Tempo on `localhost:3200` (a Grafana datasource, fed over
+OTLP on `4318`), and a kafka-exporter on `9308` that reads consumer group
 lag and partition health from the cluster rather than from the services — a consumer that
 has stopped cannot report its own lag, and that is exactly when the number matters. Grafana
 has no login on purpose: a dashboard on loopback that asks for a password is a dashboard
@@ -140,12 +170,42 @@ for a network anyone else is on.
 curl -X POST localhost:8081/payments -H "X-API-Key: $PAYMENTS_API_KEY" \
      -H 'Idempotency-Key: demo-1' -H 'Content-Type: application/json' \
      -d '{"merchant_id":"m-42","amount_minor":1999,"currency":"EUR"}'
+curl -X POST localhost:8081/merchants/m-42/payments/$PAYMENT_ID/capture -H "X-API-Key: $PAYMENTS_API_KEY"
+curl -X POST localhost:8081/merchants/m-42/payments/$PAYMENT_ID/refund  -H "X-API-Key: $PAYMENTS_API_KEY"
 curl localhost:8081/merchants/m-42/total -H "X-API-Key: $PAYMENTS_API_KEY"
 ```
 
 The first POST answers 201, the same request again answers 200 with the same payment id,
 and the same key with a different amount answers 409 rather than quietly returning the
-earlier payment.
+earlier payment. A payment moves `authorized → captured → refunded`, whole amount each time:
+capture and refund answer 200 with the status the payment is in, and a repeat of a move that
+already happened answers 200 again and changes nothing — safe to retry without a key of its
+own. Refunding what was never captured, or capturing what was refunded, answers 409
+`invalid_transition`; another merchant's payment answers 404, the same as one that does not
+exist. The total comes back per currency, each kind of movement apart —
+`{"merchant_id":"m-42","totals":[{"currency":"EUR","authorized_minor":1999,"captured_minor":1999,"refunded_minor":1999}]}`
+— because amounts in different currencies are never added into one number, and money
+authorised, taken and given back are three different questions; a merchant nobody has paid
+has `"totals":[]`. Why those sums survive the retry tiers delivering a refund before its
+capture is in [`docs/static/07-retry-dlq.md`](docs/static/07-retry-dlq.md#retries-reorder-events-by-design).
+
+Every answer carries `X-Trace-Id`. Searched in Grafana's Explore against Tempo, it shows that
+request end to end: the HTTP span, the use case, each SQL statement, the record the relay
+published from the outbox row — the row keeps the trace it was written in (`outbox.trace_context`)
+— and the consumer that counted it, down to its own statements. Logs carry the same
+`trace_id`, and a dead letter carries it in `dlq_trace_id`.
+
+Two bookkeeping tables would otherwise grow forever: the inbox (every event id the consumer
+has counted) and the outbox (every event ever published). `make prune` (`cmd/prune`, an hourly
+CronJob on Kubernetes) deletes outbox rows published more than 7 days ago — the life of
+`payments.main`'s retention — and inbox rows counted more than 40 days ago. The inbox horizon is not a
+tuning knob: an event can come back up to 39 days after it was counted (30 days in the DLQ and
+7 more in a retry tier after a late replay, each plus the one-day segment Kafka deletes as a
+whole), and an inbox that forgot it sooner would count the
+payment twice, so `internal/domain/retention` refuses anything under 40 — the 39 days and one
+more for the API's, the consumer's and prune's clocks not agreeing. The consumer, for its part,
+refuses to count an event more than 39 days old: past that the inbox may no longer remember it. Unpublished outbox
+rows are never deleted, however old.
 
 `go run` does not pass a signal on to the program it built, so stopping either of these with
 `kill` on the `go run` process leaves the real one running — building first (`go build -o
@@ -174,7 +234,8 @@ never happened, and the relay's own tests run the ticker inside `testing/synctes
 `goleak` watching for a goroutine that outlived its context. What a fake cannot prove goes
 to `make test-integration`, which talks to the compose stand and is skipped by a plain
 `go test` through the `integration` build tag: `ON CONFLICT` under eight concurrent
-authorisations of one idempotency key, the `CHECK` constraints as the last line of defence
+authorisations of one idempotency key, eight concurrent captures of one payment announcing one
+capture, a refund racing its capture never refunding what was not captured, the `CHECK` constraints as the last line of defence
 under the domain, `FOR UPDATE SKIP LOCKED` handing each outbox row to exactly one relay,
 and a consumer decoding a published record through the registry — key, headers and all.
 Each of those runs against a topic of its own, created and deleted by the test, so nothing
@@ -184,12 +245,12 @@ lands in the topics the experiments count.
 
 | Where | What lives there | Imports |
 |---|---|---|
-| `internal/domain/payment`, `internal/domain/merchant` | the rules: a payment is authorised for a positive amount; an authorisation the consumer counts carries an event id, a merchant and an amount the total can take. Values that break a rule cannot be made | nothing internal |
-| `internal/application/*` | use cases — authorise a payment, record an authorisation once, read a total, publish the outbox — and the small interfaces each one needs | the domain |
+| `internal/domain/payment`, `internal/domain/merchant` | the rules: a payment is authorised for a positive amount and moves only forward, `authorized → captured → refunded`; a movement the consumer counts carries an event id, a kind, a merchant and an amount the total can take. Values that break a rule cannot be made | nothing internal |
+| `internal/application/*` | use cases — authorise, capture and refund a payment, record a movement once, read the totals, publish the outbox, prune — and the small interfaces each one needs | the domain |
 | `internal/infrastructure/*` | Postgres (unit of work, idempotent insert, outbox, inbox, totals), Kafka (publisher, the chain's stages, detours, replay), metrics | application ports, domain |
 | `internal/interfaces/http` | the HTTP front door and the one table that turns a domain refusal into a status | application, domain errors |
-| `cmd/*` | the three services, each a `run` function handed to `lifecycle.Main`, and `dlq-replayer`, a one-shot tool that keeps its own `main` because it has three outcomes, not two — exit 2 when it never started, 1 when it failed part-way, 0 when done | everything |
-| `pkg/env`, `pkg/lifecycle`, `pkg/httpserve` | what every process needs and no business rule touches: configuration that reports every problem at once, the signal-and-exit-code skeleton, graceful HTTP serving | the standard library |
+| `cmd/*` | the three services and the two one-shot jobs — `migrate` and `prune` — each a `run` function handed to `lifecycle.Main`, and `dlq-replayer`, a one-shot tool that keeps its own `main` because it has three outcomes, not two — exit 2 when it never started, 1 when it failed part-way, 0 when done | everything |
+| `pkg/env`, `pkg/lifecycle`, `pkg/httpserve`, `pkg/telemetry` | what every process needs and no business rule touches: configuration that reports every problem at once, the signal-and-exit-code skeleton, graceful HTTP serving, tracing and trace-aware logs | the standard library, OpenTelemetry |
 
 The same boundary is drawn twice on purpose: `payment.MerchantID` and `merchant.ID` have the
 same rule today, and belong to two contexts — the one that issues merchant ids and the one
@@ -218,18 +279,19 @@ flowchart LR
     RP -->|"once the lock is gone,<br/>into the first tier"| RETRY
     CG -->|"one tx: inbox ON CONFLICT<br/>+ business write"| PG
 
-    SR["Schema Registry · BACKWARD<br/>checked at registration,<br/>never in the data path"]
-    API -.-> SR
-    CG -.->|"resolve the id, then cache it"| SR
+    SR["Schema Registry · BACKWARD<br/>set by the relay on its subject,<br/>checked at registration,<br/>never in the data path"]
+    REL -.->|"declare BACKWARD,<br/>register, keep the id"| SR
 ```
 
 *Fig. — the bottom row is the write path and the top row is the consume path, and every
 solid arrow between them is a boundary where atomicity ends: the API writes state and
 event in one transaction and never calls the broker, the consumer writes the inbox row and
 the business row in one transaction and never sleeps, and everything in between is
-retryable delivery. The two dotted edges are the only ones that are not per record — the
-registry is consulted when a schema is registered and once per unseen id, never in the
-data path. The group is drawn mid-deploy, one worker on each schema version, because that
+retryable delivery. The dotted edge is the only one that is not per record: the relay
+declares BACKWARD for its subject and registers the schema once, when it starts. The consumer
+does not call the registry at all — it strips the schema id off the front of each record and
+decodes the one message type it knows; protobuf keeps that safe across compatible versions,
+because fields are matched by number. The group is drawn mid-deploy, one worker on each schema version, because that
 is the only state in which compatibility means anything
 ([09](docs/static/09-schema-evolution.md)).*
 
@@ -242,7 +304,7 @@ is the only state in which compatibility means anything
 | `payments-consumer.retry.*` | a contended record waits without blocking the partition it came from; the chain belongs to the group, so a second group on `payments.main` gets its own. Run by `payments-consumer` itself: one process, one stage and one consumer group per tier | [07](docs/static/07-retry-dlq.md), [exp-18](experiments/transaction_guarantee/exp-18-retry-chain/) |
 | `payments-consumer.dlq` | a dead letter carries enough context to be replayed, not just logged — a class, a reason, where it was first read — and is kept 30 days, long enough to fix, release and replay | [07](docs/static/07-retry-dlq.md) |
 | `dlq-replayer` | one class of letters goes back into the group's own first tier, never into `payments.main`, and a second run replays nothing | [runbook](docs/runbook.md#replaying-dead-letters) |
-| Schema Registry | an incompatible schema is rejected at registration, not discovered at read. The registry is never in the data path: the producer encodes a schema id into the bytes, and each consumer resolves that id once and caches it | [09](docs/static/09-schema-evolution.md) |
+| Schema Registry | an incompatible schema is rejected at registration, not discovered at read: the relay sets its subject to `BACKWARD` before it registers (Apicurio would otherwise start the subject at `NONE`, exp-12). The registry is never in the data path: the producer writes a schema id into the bytes; this consumer reads past it without a lookup, since it decodes a single message type whose compatible versions protobuf reads by field number | [09](docs/static/09-schema-evolution.md) |
 
 Two things this diagram deliberately does **not** contain: a `kafka.Publish()` call
 inside the use case, and a `time.Sleep` inside the main consumer. Both are the obvious
@@ -278,6 +340,13 @@ numbers; it is where they come from. Each run lives in
 **[`docs/tuning-checklist.md`](docs/tuning-checklist.md)** — every setting that matters,
 what it buys, what it costs, and the defaults where franz-go and the Java client disagree.
 
+**[`docs/k8s/`](docs/k8s/)** — the same service containerised and run on Kubernetes (kind),
+with Kafka on Strimzi: optimized images, a Helm chart, and a runbook built on scripted
+drills whose logs are committed — rolling update and rollback under load, the HPA, seven
+broken releases, a broker pod killed mid-traffic — with the requests and limits of every
+long-running container sized from a logged measurement of the running stand (the short-lived
+Jobs say where they are not measured).
+
 **[`docs/dynamic/`](docs/dynamic/)** — six of those ten cases as interactive
 walkthroughs: open `docs/dynamic/index.html` in a browser and step through with the arrow
 keys. Built for learning the mechanics and for presenting them; not a replacement for the
@@ -300,7 +369,11 @@ something goes wrong, so the window in which it goes wrong is on the diagram.
 
 | Choice | Why |
 |---|---|
-| franz-go | pure Go, no cgo, transactions supported |
+| Kafka, not a queue in Postgres | the PDP asks for Kafka, and at the rates the drills run (10–20 payments/s; drill 06 found no ceiling at 400) a Postgres table polled with `SKIP LOCKED` — the outbox already is one — would carry the load. What Kafka adds is what a table does not: a replayable log (7 days on `payments.main`) and per-key ordering across partitions, both used here, and independent consumer groups reading the same events at their own pace — which this service, with one group, does not use yet: that is the argument for the day a second reader appears. The price is a three-node quorum to run and the failure modes this repository measures |
+| Kafka, not RabbitMQ or NATS | a log a consumer can read again — `cmd/dlq-replayer` and the rebuild of the totals in migration 00003 both did — and per-key order across partitions; a broker queue deletes what it delivers, and NATS core keeps nothing. JetStream or RabbitMQ streams would come closer, at the cost of the Kafka ecosystem this PDP is about |
+| franz-go | pure Go, so a static binary in a distroless image (confluent-kafka-go needs cgo and librdkafka); transactions and the idempotent producer, which segmentio/kafka-go lacks; the consumer-group protocols exp-14 compares (eager, cooperative, KIP-848). Its defaults differ from the Java client's — [the tuning checklist](docs/tuning-checklist.md) lists where |
+| Protobuf through a schema registry, not JSON or Avro | typed Go code generated from `proto/` (buf), compact records, and a registry that refuses an incompatible schema before it ships (`BACKWARD`, exp-12). Its cost is measured too: proto3 reads a removed or retyped field as zero without any error, where Avro would fail loudly (exp-12e2). What stands between that and a wrong total is the consumer's domain — an amount of zero or a missing currency is refused into the dead letter topic — so every field that matters has a rule that refuses its zero value. Apicurio rather than Confluent's registry for its license ([09](docs/static/09-schema-evolution.md)) |
 | Kafka 4.x in KRaft mode, 3 brokers | no ZooKeeper, and a real ISR to break |
 | Postgres | outbox and inbox need a transaction, not a cache |
+| an inbox, not an idempotent write to the total | a total is a sum: adding the same payment twice changes it, and nothing in the sum says which payments are already in it. Something has to remember every counted event id for as long as that event can come back — that row is the inbox, and it lives in the transaction that adds to the total ([patterns](docs/patterns.md)) |
 | payments as the domain | money makes every Kafka failure mode concrete |

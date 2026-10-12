@@ -1,0 +1,15 @@
+drill 04f started 2026-09-27T18:33:33Z
+POD                             READY   RESTARTS
+apicurio-94bdfd5dd-qcfh5        false   3
+payments-api-54cd845fb4-5z5lm   true    0
+payments-api-54cd845fb4-vgjfv   true    0
+database pod gone 2026-09-27T18:36:37Z; watching for 90 s, more than three 20 s liveness periods
+POD                             READY   RESTARTS
+apicurio-94bdfd5dd-qcfh5        false   3
+payments-api-54cd845fb4-5z5lm   false   0
+payments-api-54cd845fb4-vgjfv   false   0
+database back 2026-09-27T18:38:24Z
+POD                             READY   RESTARTS
+apicurio-94bdfd5dd-qcfh5        true    3
+payments-api-54cd845fb4-5z5lm   true    0
+payments-api-54cd845fb4-vgjfv   true    0

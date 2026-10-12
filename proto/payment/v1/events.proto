@@ -17,3 +17,25 @@ message PaymentAuthorized {
   string currency = 4;
   google.protobuf.Timestamp occurred_at = 5;
 }
+
+// PaymentCaptured is published when an authorised payment is captured in full, keyed by
+// payment_id like every event of a payment, so it lands on the partition its authorisation
+// did. Appended after PaymentAuthorized, never inserted before it: the message's position in
+// this file is its index on the wire (the Confluent framing), and a consumer reads index 0 as
+// an authorisation.
+message PaymentCaptured {
+  string payment_id = 1;
+  string merchant_id = 2;
+  int64 amount_minor = 3;
+  string currency = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+}
+
+// PaymentRefunded is published when a captured payment is refunded in full.
+message PaymentRefunded {
+  string payment_id = 1;
+  string merchant_id = 2;
+  int64 amount_minor = 3;
+  string currency = 4;
+  google.protobuf.Timestamp occurred_at = 5;
+}

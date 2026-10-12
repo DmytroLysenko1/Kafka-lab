@@ -1,4 +1,4 @@
-# Seven things I believed about Kafka until I measured them
+# Eight things I believed about Kafka until I measured them
 
 A talk built out of this repository. Forty minutes, one laptop, three brokers, and no slide
 that says something a run here did not produce.
@@ -9,8 +9,8 @@ below is the same — the thing everyone repeats, the number the cluster produce
 and what to do differently on Monday.
 
 Everything is reproducible on the machine in front of you: `make up`, then `make exp-NN`.
-The numbers in the margins are from [the journal](00-journal.md), which has all
-twenty-three runs with what went wrong in each.
+The numbers in the margins are from [the journal](00-journal.md), which has every
+run with what went wrong in each.
 
 ---
 
@@ -64,7 +64,8 @@ it believed written was lost.
 
 **Monday.** `acks=all` does not make writes safe on its own — it is `min.insync.replicas`
 that decides how many copies count, and this run had it at 3. Together they make *unsafe
-writes fail*; `acks=all` at `min.insync.replicas=1` succeeds from a single machine. That is a
+writes fail*; `acks=all` at `min.insync.replicas=1` succeeds from a single machine (reasoned,
+not staged: it cannot be on three combined nodes). That is a
 different promise, and it is the one you want — but only if the thing behind the producer
 can hold what the broker refuses. Which is the next section.
 
@@ -79,8 +80,8 @@ can hold what the broker refuses. Which is the next section.
 and the event in one transaction.
 
 **What the run said.** Ten payments a second through the real API while two of three
-brokers were killed for thirty seconds: **303 payments accepted, none refused**, 468–523
-records queued in Postgres, and the relay worked them off in 18–24 seconds once the cluster
+brokers were killed for thirty seconds: **303 payments accepted, none refused**, 458–523
+records queued in Postgres, and the relay worked them off in 17.3–24.2 seconds once the cluster
 was whole.
 
 **Monday.** The outbox is not only about correctness, it is about *availability*. Taking a
@@ -157,6 +158,27 @@ database that is down still holds the offset, because giving up on those is how 
 missing quietly.
 
 > exp-11.
+
+---
+
+## 8. "Retry until it works"
+
+**What everyone says.** A failed record is retried a few times, then given up on.
+
+**What the run said.** One merchant's row held by another transaction for 30 s, 600
+payments. Retried in place, **every payment behind a contended one waited out the whole lock,
+through 13 restarts**. Retried by classification — only a lock timeout goes to a retry topic,
+5 s, 1 min, 10 min, and a database that is down stops the consumer instead — **all 594
+healthy payments were counted while the row was still locked**, and every payment exactly
+once, including the six that went all the way to the dead letter topic and were replayed.
+The price: 280–316 payments counted out of partition order, which a sum does not mind.
+
+**Monday.** Decide what a retry is for before choosing how many. The chain is for one record
+failing among healthy ones; an outage sent down it floods the dead letter topic in eleven
+minutes and hammers the dependency four times per payment on its way back.
+
+> exp-18, and the design decisions behind it with their costs — outbox and inbox, Protobuf
+> against Avro, Kafka against a queue — in the README's Stack table.
 
 ---
 

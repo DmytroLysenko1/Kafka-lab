@@ -11,7 +11,7 @@ Look at these three, in this order:
 1. **`outbox_backlog_records`** — records the service owes Kafka, counted in the service's
    own Postgres, the one component a broker outage cannot reach. The relay counts it on a
    tick of its own, so it keeps climbing while every sweep is stuck on a dead cluster; it
-   trails the database by about 15 s. (Before that was fixed, exp-13 watched it sit at 1
+   trails the database by about 5 s — one 5 s scrape plus the relay's tick (exp-13's rerun: 4 s behind as the backlog rose, ≤ 7 s as it fell). (Before that was fixed, exp-13 watched it sit at 1
    while 308 records waited — if the panel is ever flat while `published/s` is zero, check
    `SELECT count(*) FROM outbox WHERE published_at IS NULL` directly.)
 2. **`kafka_consumergroup_lag`** — read from the cluster by the exporter, not by the
@@ -40,9 +40,20 @@ of three brokers were dead.
 3. Is the cluster short of brokers? `kafka_brokers` from the exporter, and
    `docker compose ps`. Below `min.insync.replicas` nothing publishes at all.
 
-**What to expect once the cluster is back:** the relay drains on its own, at roughly its
-batch size per sweep interval. exp-13 worked off 468–523 records in 18–24 s while payments
-kept arriving at 10/s.
+**What to expect once the cluster is back:** the relay drains on its own. A sweep that
+publishes a full batch is followed at once by the next, so a backlog drains as fast as the
+broker takes it rather than one batch a second. exp-13 worked off 458–523 records in
+17.3–24.2 s (four runs) while payments kept arriving at 10/s — measured before that change,
+when every sweep waited for the next tick; on the current relay drill 06 cleared 137 records
+within 2 s (`deploy/k8s/drills/results/06-write-throughput-20260928-043357.log`). exp-13 has not
+been rerun on it.
+
+**If the backlog grows while the brokers are healthy** — `kafka_brokers` 3, nothing
+under-replicated, `outbox_sweeps_total{outcome="failed"}` rising — the relay is stuck on an
+outbox row it cannot encode, typically an event type the API writes and this relay version
+does not know. The relay's log names it (`kafka: encode outbox record … unknown event type`).
+Ship the relay that knows the type; do not mark the row published by hand — that is a payment
+event lost (docs/k8s/decisions.md, "Rollout order").
 
 **Do not** restart the relay to "unstick" it. A restart re-reads from the last committed
 state and changes nothing about a broker that is down; what it does change is the
@@ -76,7 +87,13 @@ classes, three different problems:
 - **`refused`** — decoded fine, and the consumer will not take it. exp-12 produced exactly
   this by removing `amount_minor` from the schema: the field arrived as zero and the domain
   rule refused it. **Check what changed in the producer's schema before assuming the
-  consumer is wrong.**
+  consumer is wrong.** Two refusals no fix and no replay will change, told apart by
+  `dlq_reason`: *"older than the inbox is sure to remember"* — an event more than 39 days old,
+  which the consumer will not count because the inbox may have forgotten it already; and
+  *"out of range"* (SQLSTATE 22003) — a merchant's total in that currency past bigint's range.
+  Replaying either sends it straight back here with a fresh 30 days. Both are payments that were
+  authorised and are not in the total: settle them by hand against
+  `SELECT sum(amount_minor) FROM payments WHERE merchant_id = … AND currency = …`.
 - **`exhausted`** — a payment whose merchant row another transaction held through every
   retry tier: 2 s of lock wait on the main topic, then 5 s, 1 min and 10 min tiers, each with
   its own 2 s wait. Nothing is wrong with the payment. Find what holds the row (`SELECT pid,

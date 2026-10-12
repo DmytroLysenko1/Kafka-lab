@@ -1,0 +1,19 @@
+measured 2026-09-27T18:10:30Z on arm64, docker 29.3.1
+warm-up (fills the caches, not reported): naive 42.1s, real 1.1s
+rebuild after editing one .go file: naive 28.3s
+rebuild after editing one .go file: real  1.9s
+image sizes (unpacked, as docker image ls reports them):
+kafka-lab/payments-api:measure-naive  1.66GB
+kafka-lab/payments-api:measure-dev  23.2MB
+the same binary, linked with and without -s -w (linux/arm64, bytes):
+  plain  18395337  stripped  12583074
+every command's image at IMAGE_TAG=e628bfc-dirty-e1fb5af0 (make images):
+kafka-lab/payments-api:e628bfc-dirty-e1fb5af0  23.2MB
+kafka-lab/outbox-relay:e628bfc-dirty-e1fb5af0  29MB
+kafka-lab/payments-consumer:e628bfc-dirty-e1fb5af0  28.4MB
+kafka-lab/migrate:e628bfc-dirty-e1fb5af0  19.1MB
+kafka-lab/dlq-replayer:e628bfc-dirty-e1fb5af0  22MB
+kafka-lab/prune:e628bfc-dirty-e1fb5af0  18.8MB
+a shell in the distroless image:
+  docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: "sh": executable file not found in $PATH
+  

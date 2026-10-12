@@ -1,0 +1,25 @@
+drill 02 started 2026-09-28T01:06:31Z
+REVISION	UPDATED                 	STATUS    	CHART         	APP VERSION	DESCRIPTION     
+91      	Sun Sep 27 23:44:28 2026	superseded	payments-0.1.0	dev        	Upgrade complete
+92      	Mon Sep 28 04:03:42 2026	superseded	payments-0.1.0	dev        	Upgrade complete
+93      	Mon Sep 28 04:05:15 2026	deployed  	payments-0.1.0	dev        	Upgrade complete
+migrate job before: 2026-09-28T01:05:16Z
+rolling back to revision 92
+rollback took 6s
+REVISION	UPDATED                 	STATUS    	CHART         	APP VERSION	DESCRIPTION     
+92      	Mon Sep 28 04:03:42 2026	superseded	payments-0.1.0	dev        	Upgrade complete
+93      	Mon Sep 28 04:05:15 2026	superseded	payments-0.1.0	dev        	Upgrade complete
+94      	Mon Sep 28 04:06:41 2026	deployed  	payments-0.1.0	dev        	Rollback to 92  
+migrate job after:  2026-09-28T01:05:16Z
+DEPLOYMENT          IMAGE
+outbox-relay        kafka-lab/outbox-relay:e628bfc-dirty-a4463bf2
+payments-api        kafka-lab/payments-api:e628bfc-dirty-a4463bf2
+payments-consumer   kafka-lab/payments-consumer:e628bfc-dirty-a4463bf2
+Requests      [total, rate, throughput]         1200, 20.02, 20.02
+Duration      [total, attack, wait]             59.954s, 59.95s, 3.416ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.957ms, 4.105ms, 3.296ms, 5.571ms, 8.514ms, 14.066ms, 110.061ms
+Bytes In      [total, mean]                     64800, 54.00
+Bytes Out     [total, mean]                     90000, 75.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      201:1200  
+Error Set:

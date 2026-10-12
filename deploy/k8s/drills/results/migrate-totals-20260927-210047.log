@@ -1,0 +1,6 @@
+migrate totals started 2026-09-27T18:00:47Z, rolling to e628bfc-dirty-fc01fd4e
+old table before: 10 merchants, 1741999 minor units
+stopping the consumer 2026-09-27T18:00:47Z
+rolling forward, the migration runs as the hook 2026-09-27T18:00:56Z
+level=WARN msg="upgrade failed" name=payments error="conflict occurred while applying object lab/payments-api apps/v1, Kind=Deployment: Apply failed with 1 conflict: conflict with \"kubectl\" using apps/v1: .spec.template.spec.containers[name=\"payments-api\"].image"
+Error: UPGRADE FAILED: conflict occurred while applying object lab/payments-api apps/v1, Kind=Deployment: Apply failed with 1 conflict: conflict with "kubectl" using apps/v1: .spec.template.spec.containers[name="payments-api"].image

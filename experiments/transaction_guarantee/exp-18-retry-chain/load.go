@@ -13,6 +13,7 @@ import (
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/outboxwire"
 )
 
 // payments is who is who in the run, by event id: the inbox is keyed by it, and it is what
@@ -55,7 +56,7 @@ func produce(ctx context.Context, s *settings) (payments, error) {
 func paymentRecord(s *settings, i int) (outbox.Record, error) {
 	paymentID := fmt.Sprintf("exp18-%s-%d", s.cell, i)
 	occurred := time.Now().UTC()
-	payload, err := json.Marshal(outbox.AuthorizedPayload{
+	payload, err := json.Marshal(outboxwire.Payload{
 		PaymentID:   paymentID,
 		MerchantID:  s.merchantFor(i),
 		AmountMinor: 1,
@@ -68,7 +69,7 @@ func paymentRecord(s *settings, i int) (outbox.Record, error) {
 	return outbox.Record{
 		ID:          s.firstEventID + int64(i),
 		AggregateID: paymentID,
-		EventType:   outbox.EventTypeAuthorized,
+		EventType:   outboxwire.EventTypeAuthorized,
 		Payload:     payload,
 		OccurredAt:  occurred,
 	}, nil
@@ -83,14 +84,14 @@ type lock struct {
 
 func lockMerchant(ctx context.Context, pool *pgxpool.Pool, merchant string) (lock, error) {
 	if _, err := pool.Exec(ctx,
-		"INSERT INTO merchant_totals (merchant_id, authorized_minor, updated_at) VALUES ($1, 0, now())", merchant); err != nil {
+		"INSERT INTO merchant_currency_totals (merchant_id, currency, authorized_minor, updated_at) VALUES ($1, 'EUR', 0, now())", merchant); err != nil {
 		return lock{}, fmt.Errorf("create the row of %s: %w", merchant, err)
 	}
 	holder, err := pool.Begin(ctx)
 	if err != nil {
 		return lock{}, fmt.Errorf("begin the holding transaction: %w", err)
 	}
-	if _, err := holder.Exec(ctx, "SELECT 1 FROM merchant_totals WHERE merchant_id = $1 FOR UPDATE", merchant); err != nil {
+	if _, err := holder.Exec(ctx, "SELECT 1 FROM merchant_currency_totals WHERE merchant_id = $1 AND currency = 'EUR' FOR UPDATE", merchant); err != nil {
 		return lock{}, fmt.Errorf("lock the row of %s: %w", merchant, err)
 	}
 	return lock{release: sync.OnceValue(func() error {

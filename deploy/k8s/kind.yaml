@@ -1,0 +1,29 @@
+# One control plane and two workers: enough for the API's two replicas to sit on different
+# nodes and for a rolling update to move pods between them. Not enough for Kafka: three
+# brokers on two schedulable nodes (the control plane is tainted) put two of them, and two
+# of the three KRaft controllers, on one node — losing or draining that worker loses the
+# quorum. A third worker would fix it; it is left out because the stand already uses ~87%
+# of the 8 GB Docker VM (measured 27.09.2026). Draining is blocked anyway: CloudNativePG's
+# PDB allows no disruption of a single-instance cluster, and local-path volumes pin the
+# brokers to their nodes. The control plane carries the ingress port mapping — Traefik is a NodePort
+# service, and a NodePort is open on every node, this one included.
+# Host port 8800, not 80: on this Docker Desktop a connection to host port 80 was accepted
+# and reset without a byte reaching the node, while the same NodePort answered from inside
+# the Docker VM and through any other host port (docs/k8s/decisions.md).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kafka-lab
+nodes:
+  # Pinned like every chart in up.sh: the node image is the Kubernetes version, and the chart
+  # relies on features of recent ones (the native preStop sleep action).
+  - role: control-plane
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8800
+        listenAddress: 127.0.0.1
+        protocol: TCP
+  - role: worker
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
+  - role: worker
+    image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5

@@ -53,6 +53,8 @@ func ParseClass(name string) (Class, error) {
 }
 
 const (
+	headerEventID                   = "event_id"
+	headerEventType                 = "event_type"
 	headerRetryAttempt              = "retry_attempt"
 	headerRetryOriginTopic          = "retry_origin_topic"
 	headerRetryOriginPartition      = "retry_origin_partition"
@@ -64,6 +66,7 @@ const (
 	headerDeadLetterOriginPartition = "dlq_origin_partition"
 	headerDeadLetterOriginOffset    = "dlq_origin_offset"
 	headerDeadLetterArchivedAt      = "dlq_archived_at"
+	headerDeadLetterTraceID         = "dlq_trace_id"
 	headerDeadLetterPrefix          = "dlq_"
 )
 

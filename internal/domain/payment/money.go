@@ -9,6 +9,8 @@ var (
 
 const currencyCodeLength = 3
 
+const maxAuthorizedMinor = 1 << 50
+
 type Currency struct {
 	code string
 }
@@ -68,6 +70,16 @@ func (m Money) Minor() int64 {
 // balance can be zero, but zero authorises nothing.
 func (m Money) IsPositive() bool {
 	return m.minor > 0
+}
+
+// IsWithinAuthorizationLimit is whether one authorisation may be for this much. The limit is
+// not a business rule but arithmetic: a merchant's total grows by authorised amounts in a
+// bigint, and 2^50 minor units — eleven trillion of a two-decimal currency — leaves room for
+// eight thousand of the largest payments before any total could overflow. The consumer that
+// keeps those totals refuses the same bound (merchant.maxAuthorizedMinor), and so does the
+// payments table, so a payment accepted here is one that can always be counted.
+func (m Money) IsWithinAuthorizationLimit() bool {
+	return m.minor <= maxAuthorizedMinor
 }
 
 func (m Money) Currency() Currency {
