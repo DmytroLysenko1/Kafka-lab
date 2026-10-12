@@ -1,0 +1,40 @@
+{{- $scope := dict "root" $ "name" "prune" "command" "prune" }}
+# Deletes inbox and outbox rows past their horizons (cmd/prune). Hourly, so each run finds an
+# hour of rows and finishes in seconds; Forbid, so a run that is slow for a reason — a locked
+# table, a sick database — is never joined by the next one.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: prune
+  labels:
+    {{- include "payments.labels" $scope | nindent 4 }}
+spec:
+  schedule: {{ .Values.prune.schedule | quote }}
+  concurrencyPolicy: Forbid
+  # One success is enough to show the job runs; three failures keep the logs of a
+  # pattern (three hours of a database that will not answer) for whoever looks next.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.prune.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.prune.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "payments.labels" $scope | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: prune
+              image: {{ include "payments.image" $scope }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              env:
+                {{- include "payments.databaseURL" . | nindent 16 }}
+              resources:
+                {{- toYaml .Values.prune.resources | nindent 16 }}

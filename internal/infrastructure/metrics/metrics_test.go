@@ -2,12 +2,15 @@ package metrics_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
 )
@@ -20,6 +23,7 @@ func TestTheRelayReportsPublishedRecordsSweepOutcomesAndItsBacklog(t *testing.T)
 	observed := metrics.New()
 
 	observed.Swept(3, 20*time.Millisecond, nil)
+	observed.Swept(0, time.Millisecond, nil)
 	observed.Swept(0, 5*time.Millisecond, errBroker)
 	observed.Backlog(7)
 
@@ -32,8 +36,9 @@ outbox_backlog_records 7
 outbox_records_published_total 3
 # HELP outbox_sweeps_total Outbox sweeps, by outcome.
 # TYPE outbox_sweeps_total counter
+outbox_sweeps_total{outcome="empty"} 1
 outbox_sweeps_total{outcome="failed"} 1
-outbox_sweeps_total{outcome="ok"} 1
+outbox_sweeps_total{outcome="published"} 1
 `
 	if err := testutil.GatherAndCompare(observed.Gatherer(), strings.NewReader(expected),
 		"outbox_backlog_records", "outbox_records_published_total", "outbox_sweeps_total"); err != nil {
@@ -81,9 +86,9 @@ outbox_records_published_total 1000
 func TestTheConsumerSeparatesCountedEventsFromDuplicates(t *testing.T) {
 	observed := metrics.New()
 
-	observed.Handled(true, time.Millisecond)
-	observed.Handled(false, time.Millisecond)
-	observed.Handled(false, time.Millisecond)
+	observed.Handled("counted")
+	observed.Handled("duplicate")
+	observed.Handled("duplicate")
 	observed.DeadLettered("undecodable")
 
 	expected := `
@@ -143,10 +148,10 @@ func TestRecordsMovedAsideAreCountedByTheTierTheyWentTo(t *testing.T) {
 # HELP payment_events_dead_lettered_total Payment events archived to the dead letter topic, by why.
 # TYPE payment_events_dead_lettered_total counter
 payment_events_dead_lettered_total{reason="exhausted"} 1
-# HELP payment_events_retried_total Payment events moved aside into a retry tier, by the tier they went to.
+# HELP payment_events_retried_total Payment events moved aside into a retry tier, by the tier topic they went to.
 # TYPE payment_events_retried_total counter
-payment_events_retried_total{tier="payments-consumer.retry.1m"} 1
-payment_events_retried_total{tier="payments-consumer.retry.5s"} 2
+payment_events_retried_total{topic="payments-consumer.retry.1m"} 1
+payment_events_retried_total{topic="payments-consumer.retry.5s"} 2
 `
 	if err := testutil.GatherAndCompare(observed.Gatherer(), strings.NewReader(expected),
 		"payment_events_retried_total", "payment_events_dead_lettered_total"); err != nil {
@@ -177,7 +182,7 @@ func TestTimingsAreObservedAsHistograms(t *testing.T) {
 	observed := metrics.New()
 
 	observed.Swept(1, 100*time.Millisecond, nil)
-	observed.Handled(true, 250*time.Millisecond)
+	observed.HandlingTook("counted", 250*time.Millisecond)
 	observed.Served("GET /merchants/{id}/total", "200", 10*time.Millisecond)
 
 	for _, name := range []string{
@@ -193,4 +198,111 @@ func TestTimingsAreObservedAsHistograms(t *testing.T) {
 			t.Errorf("%s: collected %d series, want 1", name, count)
 		}
 	}
+}
+
+// The top bucket of each histogram is the timeout that bounds its operation, so the slowest
+// thing that can happen still lands in a bucket of its own: a sweep that waited out an
+// unreachable broker is told apart from one that took ten seconds of real work, and a record
+// that waited out the lock timeout is told apart from a fast one — instead of both vanishing
+// into +Inf, where a quantile panel draws a flat line at the last bound.
+func TestTheSlowestOutcomeOfEachOperationLandsInsideItsTopBucket(t *testing.T) {
+	type args struct {
+		observe func(*metrics.Registry)
+		metric  string
+		outcome string
+	}
+	tests := []struct {
+		name string
+		args args
+		want want
+	}{
+		{
+			name: "a sweep that waited out the producer's 10 s delivery timeout",
+			args: args{
+				observe: func(observed *metrics.Registry) { observed.Swept(0, 11*time.Second, errBroker) },
+				metric:  "outbox_sweep_duration_seconds",
+				outcome: "failed",
+			},
+			want: want{LowestBound: 15, BelowIt: 10},
+		},
+		{
+			name: "a sweep cut off by the relay's 30 s sweep timeout, then rolled back",
+			args: args{
+				observe: func(observed *metrics.Registry) { observed.Swept(0, 35*time.Second, errBroker) },
+				metric:  "outbox_sweep_duration_seconds",
+				outcome: "failed",
+			},
+			want: want{LowestBound: 36, BelowIt: 15},
+		},
+		{
+			name: "a record that gave up on a lock after 2 s",
+			args: args{
+				observe: func(observed *metrics.Registry) { observed.HandlingTook("contended", 2010*time.Millisecond) },
+				metric:  "payment_event_handling_duration_seconds",
+				outcome: "contended",
+			},
+			want: want{LowestBound: 2.5, BelowIt: 1},
+		},
+		{
+			name: "a record cut off by the 15 s handling timeout, then rolled back",
+			args: args{
+				observe: func(observed *metrics.Registry) { observed.HandlingTook("failed", 20*time.Second) },
+				metric:  "payment_event_handling_duration_seconds",
+				outcome: "failed",
+			},
+			want: want{LowestBound: 21, BelowIt: 15},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			observed := metrics.New()
+			tt.args.observe(observed)
+
+			got := lowestBucketHolding(t, observed, tt.args.metric, tt.args.outcome)
+
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("buckets (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+type want struct {
+	LowestBound float64
+	BelowIt     float64
+}
+
+// lowestBucketHolding finds the smallest bound whose cumulative count includes the one
+// observation, and the bound just below it. +Inf is never reported as a bound.
+func lowestBucketHolding(t *testing.T, observed *metrics.Registry, metric, outcome string) want {
+	t.Helper()
+	families, err := observed.Gatherer().Gather()
+	if err != nil {
+		t.Fatalf("gathering: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != metric {
+			continue
+		}
+		for _, series := range family.GetMetric() {
+			if !hasLabel(series.GetLabel(), "outcome", outcome) {
+				continue
+			}
+			previous := 0.0
+			for _, bucket := range series.GetHistogram().GetBucket() {
+				if bucket.GetCumulativeCount() > 0 {
+					return want{LowestBound: bucket.GetUpperBound(), BelowIt: previous}
+				}
+				previous = bucket.GetUpperBound()
+			}
+		}
+	}
+	t.Fatalf("%s{outcome=%q}: the observation is in no finite bucket", metric, outcome)
+	return want{}
+}
+
+func hasLabel(labels []*dto.LabelPair, name, value string) bool {
+	return slices.ContainsFunc(labels, func(label *dto.LabelPair) bool {
+		return label.GetName() == name && label.GetValue() == value
+	})
 }

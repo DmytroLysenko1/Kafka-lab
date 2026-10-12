@@ -1,0 +1,102 @@
+# Only what the lab reads: Prometheus, Grafana, the operator and kube-state-metrics.
+# Alertmanager and node-exporter are off to keep the stand inside Docker's memory.
+alertmanager:
+  enabled: false
+nodeExporter:
+  enabled: false
+kubeStateMetrics:
+  enabled: true
+
+# It ran BestEffort, memory the scheduler did not know about. Figures:
+# deploy/k8s/drills/results/resources-20260927-175351.log.
+kube-state-metrics:
+  resources:
+    requests: { cpu: 10m, memory: 48Mi }
+    limits: { memory: 96Mi }
+
+prometheus:
+  prometheusSpec:
+    # 5 s, as in deploy/prometheus/prometheus.yml: the drills measure the seconds after a
+    # pod dies, and a 30 s scrape would draw a recovery as a line between two samples.
+    scrapeInterval: 5s
+    evaluationInterval: 5s
+    # 24 h on a volume, not 6 h in emptyDir: the resource figures quoted next to every
+    # request and limit on this stand are read back from here after a drill session
+    # (deploy/k8s/resources.sh), and with 6 h in memory one restart of this pod erased the
+    # only copy of them. A day covers a session and the write-up after it.
+    retention: 24h
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              # ~92k series × 17,280 samples a day at a 5 s scrape ≈ 1.6e9 samples; at the
+              # ~1–2 bytes a sample Prometheus compresses to, 1.6–3.2 GB a day, plus WAL.
+              # local-path does not enforce the size, so this is the planning figure.
+              storage: 4Gi
+    # Pick up every ServiceMonitor/PodMonitor in the cluster, not only the ones this
+    # release labelled: the payments chart and the Kafka monitors live in their own places.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    # ~92k series at a 5 s scrape. Memory grows with the head block as retention fills: 480Mi
+    # typical in the first log (resources-20260927-175351.log), 587Mi a few hours later
+    # (resources-20260927-214046.log), 628Mi typical and 701Mi peak in the latest
+    # (resources-20260928-043718.log). The request sits at the latest typical; the limit at
+    # 1.64× that peak, room for the head block of a full 24 h retention, which no log covers yet.
+    resources:
+      requests: { cpu: 100m, memory: 640Mi }
+      limits: { memory: 1152Mi }
+
+prometheusOperator:
+  # Figures: deploy/k8s/drills/results/resources-20260927-175351.log.
+  resources:
+    requests: { cpu: 20m, memory: 48Mi }
+    limits: { memory: 96Mi }
+  # The config-reloader sidecar it injects into Prometheus ran without resources.
+  prometheusConfigReloader:
+    resources:
+      requests: { cpu: 10m, memory: 40Mi }
+      limits: { memory: 64Mi }
+
+grafana:
+  # Anonymous, as in the compose stand: a dashboard behind a password is a dashboard nobody
+  # opens during the incident it was built for. Editor, not Admin: Explore — where the Loki
+  # logs the runbook points to are read — needs Editor, and nothing on the stand needs an
+  # anonymous caller to manage users, datasources or plugins. Reachable only via 127.0.0.1;
+  # lab-only (docs/k8s/decisions.md, "Lab, not production").
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+      org_role: Editor
+    auth:
+      disable_login_form: true
+    users:
+      default_theme: light
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts: [grafana.localtest.me]
+  sidecar:
+    # The two sidecars ran without resources; figures in resources-20260927-175351.log.
+    resources:
+      requests: { cpu: 10m, memory: 80Mi }
+      limits: { memory: 128Mi }
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki.monitoring.svc:3100
+  # 256Mi OOM-killed Grafana 13.2 seven times in its first 2.7 h (session observation, before
+  # the resource log existed). Given room it settles at ~320–340Mi (resources-20260927-175351.log):
+  # the request is that. Over the stand's whole day Prometheus recorded a peak of 544Mi
+  # (max_over_time of the working set, 27.09 17:55Z, a window the drill session's resource log
+  # opened after), so the limit is ~1.5× that peak, not the 1.18× the earlier 640Mi left.
+  resources:
+    requests: { cpu: 50m, memory: 336Mi }
+    limits: { memory: 832Mi }

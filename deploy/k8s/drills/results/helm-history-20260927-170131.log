@@ -1,0 +1,2 @@
+helm history payments -n lab, 2026-09-27T14:01:31Z: the failed revisions the runbook quotes
+rev 55  2026-09-27T04:12:23.177612+03:00  Upgrade "payments" failed: conflict occurred while applying object lab/payments-api apps/v1, Kind=Deployment: Apply failed with 1 conflict: conflict with "kubectl" using apps/v1: .spec.template.spec.containers[name="payments-api"].image

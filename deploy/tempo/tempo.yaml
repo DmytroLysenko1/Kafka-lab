@@ -1,0 +1,28 @@
+# One process, local disk: the lab keeps a trace long enough to follow one payment through the
+# five systems it crosses, not to answer questions about last month.
+stream_over_http_enabled: true
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+# OTLP over HTTP only — what the services export (pkg/telemetry) — on the standard port.
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+
+# Six hours, the same as Prometheus here: a trace is read right after the demo or the
+# experiment that made it.
+compactor:
+  compaction:
+    block_retention: 6h
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal

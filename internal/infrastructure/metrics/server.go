@@ -11,6 +11,9 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/pkg/httpserve"
 )
 
+// A scrape is one GET answered from memory in milliseconds; these only stop a client that
+// connects and never finishes from holding a connection. Shutdown is short because nothing
+// in flight here is worth waiting for.
 const (
 	readHeaderTimeout = 5 * time.Second
 	readTimeout       = 10 * time.Second

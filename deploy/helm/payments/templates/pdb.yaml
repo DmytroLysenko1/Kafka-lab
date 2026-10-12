@@ -1,0 +1,22 @@
+{{- range $name, $component := .Values.components }}
+{{- with $component.podDisruptionBudget }}
+{{- $scope := dict "root" $ "name" $name }}
+---
+# A node drain may take the API's pods only as fast as the budget in values.yaml allows.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "payments.labels" $scope | nindent 4 }}
+spec:
+  {{- if .maxUnavailable }}
+  maxUnavailable: {{ .maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "payments.selector" $scope | nindent 6 }}
+{{- end }}
+{{- end }}

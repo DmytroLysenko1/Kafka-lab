@@ -1,0 +1,46 @@
+# One CloudNativePG instance holds both databases the compose Postgres held: the service's
+# and the schema registry's. The operator writes the connection details into the secret
+# payments-db-app (keys uri, username, password, host…), which the chart and Apicurio read —
+# no password is written in this repository.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: payments-db
+  namespace: lab
+spec:
+  instances: 1
+  # PostgreSQL 18.6, pinned by digest like every chart in up.sh: the floating :18 tag would
+  # move the database under a rerun.
+  imageName: ghcr.io/cloudnative-pg/postgresql:18@sha256:899d3ed526b659d77935dde0e6bf2d69dbbf17d3d8c6486ca8cfd04bd3c18533
+  # local-path does not enforce a size: 2Gi is a claim, not a quota. The lab's tables hold
+  # thousands of rows; the volume's real use has not been measured (kubelet reports no
+  # stats for local-path volumes).
+  storage:
+    size: 2Gi
+  bootstrap:
+    initdb:
+      database: payments
+      owner: payments
+  # Figures: deploy/k8s/drills/results/resources-20260927-175351.log — 137Mi typical, 191Mi
+  # peak, 104m CPU p95 under the drills (the request follows it). The limit leaves room for
+  # shared_buffers (128MB by default) and the connection budget in
+  # deploy/helm/payments/values.yaml (pool sizes are set there, not left to the driver).
+  resources:
+    requests: { cpu: 100m, memory: 160Mi }
+    limits: { memory: 384Mi }
+  # No Postgres dashboard exists yet; scraping it would add series nobody reads to a
+  # Prometheus whose memory grows with every series (587Mi typical, resources-20260927-214046.log)
+  # on a stand with about a gigabyte to spare.
+  monitoring:
+    enablePodMonitor: false
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: apicurio
+  namespace: lab
+spec:
+  name: apicurio
+  owner: payments
+  cluster:
+    name: payments-db

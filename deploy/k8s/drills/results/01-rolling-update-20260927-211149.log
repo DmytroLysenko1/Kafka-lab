@@ -1,0 +1,19 @@
+drill 01 started 2026-09-27T18:11:49Z, rolling 49443da-dirty-e1fb5af0 -> 49443da-dirty-e1fb5af0-next under 20 req/s for 90s
+REVISION	UPDATED                 	STATUS  	CHART         	APP VERSION	DESCRIPTION     
+77      	Sun Sep 27 21:08:52 2026	deployed	payments-0.1.0	dev        	Upgrade complete
+rollout to 49443da-dirty-e1fb5af0-next took 16s (helm --wait, migrate hook included)
+POD                                  IMAGE                                                     READY
+migrate-bpc6c                        kafka-lab/migrate:49443da-dirty-e1fb5af0-next             false
+outbox-relay-7894b46b57-zpkrz        kafka-lab/outbox-relay:49443da-dirty-e1fb5af0-next        true
+payments-api-5ccbfff948-hdj55        kafka-lab/payments-api:49443da-dirty-e1fb5af0-next        true
+payments-api-5ccbfff948-jpsgn        kafka-lab/payments-api:49443da-dirty-e1fb5af0-next        true
+payments-consumer-78c5885dfd-f5h6z   kafka-lab/payments-consumer:49443da-dirty-e1fb5af0-next   true
+payments-consumer-78c5885dfd-w2f6f   kafka-lab/payments-consumer:49443da-dirty-e1fb5af0-next   true
+Requests      [total, rate, throughput]         1800, 20.01, 20.01
+Duration      [total, attack, wait]             1m30s, 1m30s, 4.228ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.9ms, 3.405ms, 2.953ms, 5.099ms, 5.907ms, 7.95ms, 58.246ms
+Bytes In      [total, mean]                     97200, 54.00
+Bytes Out     [total, mean]                     135000, 75.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      201:1800  
+Error Set:

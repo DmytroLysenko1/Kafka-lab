@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/payment"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/outboxwire"
 )
 
 var errUnknownEvent = errors.New("postgres: no outbox mapping for the event")
@@ -19,27 +19,39 @@ type outboxRow struct {
 	occurredAt  time.Time
 }
 
-func encodeEvent(event payment.Event) (outboxRow, error) {
-	authorized, isAuthorized := event.(*payment.Authorized)
-	if !isAuthorized {
-		return outboxRow{}, fmt.Errorf("postgres.encodeEvent %T: %w", event, errUnknownEvent)
+// eventType is the one place a domain event is given its name on the wire. The switch is
+// exhaustive because Event is sealed: a new event fails here, loudly, until it is named.
+func eventType(event payment.Event) (string, error) {
+	switch event.(type) {
+	case *payment.Authorized:
+		return outboxwire.EventTypeAuthorized, nil
+	case *payment.Captured:
+		return outboxwire.EventTypeCaptured, nil
+	case *payment.Refunded:
+		return outboxwire.EventTypeRefunded, nil
 	}
+	return "", fmt.Errorf("postgres.eventType %T: %w", event, errUnknownEvent)
+}
 
-	payload, err := json.Marshal(outbox.AuthorizedPayload{
-		PaymentID:   authorized.PaymentID().String(),
-		MerchantID:  authorized.Merchant().String(),
-		AmountMinor: authorized.Amount().Minor(),
-		Currency:    authorized.Amount().Currency().String(),
-		OccurredAt:  authorized.OccurredAt(),
+func encodeEvent(event payment.Event) (outboxRow, error) {
+	name, err := eventType(event)
+	if err != nil {
+		return outboxRow{}, err
+	}
+	payload, err := json.Marshal(outboxwire.Payload{
+		PaymentID:   event.PaymentID().String(),
+		MerchantID:  event.Merchant().String(),
+		AmountMinor: event.Amount().Minor(),
+		Currency:    event.Amount().Currency().String(),
+		OccurredAt:  event.OccurredAt(),
 	})
 	if err != nil {
-		return outboxRow{}, fmt.Errorf("postgres.encodeEvent %s: %w", outbox.EventTypeAuthorized, err)
+		return outboxRow{}, fmt.Errorf("postgres.encodeEvent %s: %w", name, err)
 	}
-
 	return outboxRow{
-		aggregateID: authorized.PaymentID().String(),
-		eventType:   outbox.EventTypeAuthorized,
+		aggregateID: event.PaymentID().String(),
+		eventType:   name,
 		payload:     payload,
-		occurredAt:  authorized.OccurredAt(),
+		occurredAt:  event.OccurredAt(),
 	}, nil
 }

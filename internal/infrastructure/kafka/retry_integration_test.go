@@ -21,6 +21,7 @@ import (
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/outboxwire"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 )
 
@@ -80,14 +81,14 @@ func holdMerchant(t *testing.T, pool *pgxpool.Pool) (release func()) {
 	t.Helper()
 	merchant := hotMerchant
 	if _, err := pool.Exec(t.Context(),
-		"INSERT INTO merchant_totals (merchant_id, authorized_minor, updated_at) VALUES ($1, 0, now())", merchant); err != nil {
+		"INSERT INTO merchant_currency_totals (merchant_id, currency, authorized_minor, updated_at) VALUES ($1, 'EUR', 0, now())", merchant); err != nil {
 		t.Fatalf("create the merchant's row: %v", err)
 	}
 	holder, err := pool.Begin(t.Context())
 	if err != nil {
 		t.Fatalf("begin the holding transaction: %v", err)
 	}
-	if _, err := holder.Exec(t.Context(), "SELECT 1 FROM merchant_totals WHERE merchant_id = $1 FOR UPDATE", merchant); err != nil {
+	if _, err := holder.Exec(t.Context(), "SELECT 1 FROM merchant_currency_totals WHERE merchant_id = $1 AND currency = 'EUR' FOR UPDATE", merchant); err != nil {
 		t.Fatalf("lock the merchant's row: %v", err)
 	}
 
@@ -108,8 +109,8 @@ func holdMerchant(t *testing.T, pool *pgxpool.Pool) (release func()) {
 func payment(t *testing.T, merchant string, eventID, minor int64) outbox.Record {
 	t.Helper()
 	paymentID := uuid.New().String()
-	occurred := time.Date(2026, time.September, 25, 9, 0, 0, 0, time.UTC)
-	payload, err := json.Marshal(outbox.AuthorizedPayload{
+	occurred := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	payload, err := json.Marshal(outboxwire.Payload{
 		PaymentID:   paymentID,
 		MerchantID:  merchant,
 		AmountMinor: minor,
@@ -119,7 +120,7 @@ func payment(t *testing.T, merchant string, eventID, minor int64) outbox.Record 
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	return outbox.Record{ID: eventID, AggregateID: paymentID, EventType: outbox.EventTypeAuthorized, Payload: payload, OccurredAt: occurred}
+	return outbox.Record{ID: eventID, AggregateID: paymentID, EventType: outboxwire.EventTypeAuthorized, Payload: payload, OccurredAt: occurred}
 }
 
 func publishAll(t *testing.T, topic string, records ...outbox.Record) {
@@ -378,7 +379,7 @@ func TestAContendedPaymentTheTierCannotStoreKeepsItsOffset(t *testing.T) {
 
 	publishAll(t, main, payment(t, hotMerchant, hotEventID, hotAmountMinor), payment(t, "m-42", 1, 100))
 
-	record := merchants.NewRecordAuthorized(postgres.NewInboxStore(storage), postgres.NewTotalsStore(storage), storage, time.Now)
+	record := merchants.NewRecordMovement(postgres.NewInboxStore(storage), postgres.NewTotalsStore(storage), storage, time.Now)
 	detours, err := kafka.NewDetours(brokers(t), dlq, metrics.Discard{})
 	if err != nil {
 		t.Fatalf("detours: %v", err)

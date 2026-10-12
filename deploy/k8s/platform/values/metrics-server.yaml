@@ -1,0 +1,8 @@
+# kind's kubelets serve self-signed certificates; without this flag metrics-server cannot
+# scrape them, and the HPA reads "<unknown>" for CPU forever.
+args:
+  - --kubelet-insecure-tls
+# Figures: deploy/k8s/drills/results/resources-20260927-175351.log.
+resources:
+  requests: { cpu: 10m, memory: 48Mi }
+  limits: { memory: 128Mi }

@@ -1,0 +1,11 @@
+drill 03 started 2026-09-28T01:38:33Z, 1200 req/s for 180s, watching 420s after
+t=   0s cpu=1% desired=3 current=3
+t=  11s cpu=1% desired=3 current=3
+t=  21s cpu=1% desired=3 current=3
+t=  31s cpu=113% desired=5 current=3
+t=  41s cpu=132% desired=5 current=5
+t=  52s cpu=100% desired=5 current=5
+t=  62s cpu=100% desired=5 current=5
+t=  72s cpu=99% desired=5 current=5
+t=  83s cpu=103% desired=5 current=5
+t=  93s cpu=103% desired=5 current=5

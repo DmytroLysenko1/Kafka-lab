@@ -17,6 +17,7 @@ import (
 
 type config struct {
 	databaseURL string
+	maxConns    int32
 	brokers     []string
 	topic       string
 	dlqTopic    string
@@ -24,7 +25,7 @@ type config struct {
 	metricsAddr string
 }
 
-func main() { lifecycle.Main("payments consumer", run) }
+func main() { lifecycle.Main("payments-consumer", run) }
 
 func run(ctx context.Context, logger *slog.Logger) error {
 	settings, err := load()
@@ -32,18 +33,11 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		return err
 	}
 
-	storage, err := postgres.New(ctx, settings.databaseURL)
+	storage, err := postgres.New(ctx, settings.databaseURL, postgres.MaxConns(settings.maxConns))
 	if err != nil {
 		return err
 	}
 	defer storage.Close()
-
-	record := merchants.NewRecordAuthorized(
-		postgres.NewInboxStore(storage),
-		postgres.NewTotalsStore(storage),
-		storage,
-		time.Now,
-	)
 
 	observed := metrics.New()
 	detours, err := kafka.NewDetours(settings.brokers, settings.dlqTopic, observed)
@@ -52,20 +46,40 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 	defer detours.Close()
 
-	consumers, err := provideConsumers(&settings, record, detours, logger, observed)
+	consumers, err := provideConsumers(&settings, provideRecorder(storage), detours, logger, observed)
 	defer closeAll(consumers)
 	if err != nil {
 		return err
 	}
 
+	announce(ctx, logger, &settings, len(consumers))
+	return serve(ctx, &settings, consumers, observed)
+}
+
+func announce(ctx context.Context, logger *slog.Logger, settings *config, stages int) {
 	logger.InfoContext(ctx, "payments consumer started",
 		"topic", settings.topic,
 		"group", settings.group,
-		"stages", len(consumers),
+		"stages", stages,
 		"dead_letter_topic", settings.dlqTopic,
 		"metrics", settings.metricsAddr,
 	)
+}
 
+// provideRecorder counts each event once: the inbox claim and the total in one transaction,
+// told in the merchants' words.
+func provideRecorder(storage *postgres.Storage) *merchants.RecordMovement {
+	return merchants.NewRecordMovement(
+		postgres.NewInboxStore(storage),
+		postgres.NewTotalsStore(storage),
+		postgres.NewMerchantTransactions(storage),
+		time.Now,
+	)
+}
+
+// serve runs every stage and the metrics until any of them stops: one stage failing stops the
+// rest, and the orchestrator restarts the whole consumer rather than a part of its chain.
+func serve(ctx context.Context, settings *config, consumers []*kafka.Consumer, observed *metrics.Registry) error {
 	running, stop := errgroup.WithContext(ctx)
 	for _, consumer := range consumers {
 		running.Go(func() error { return consumer.Run(stop) })
@@ -74,33 +88,10 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	return running.Wait()
 }
 
-// stages is the main topic followed by the retry tiers, each tier a group of its own: a
-// tier waiting ten minutes for its head record must not hold a rebalance of the main
-// group, and a separate group is what keeps their offsets and members apart. The tier
-// topics are the catalog's (deploy/topics/), and each carries its delay in its name so
-// that nobody reading a topic list has to guess what it holds records for.
-func stages(settings *config) []kafka.Stage {
-	tiers := []struct {
-		topic string
-		delay time.Duration
-	}{
-		{topic: "payments-consumer.retry.5s", delay: 5 * time.Second},
-		{topic: "payments-consumer.retry.1m", delay: time.Minute},
-		{topic: "payments-consumer.retry.10m", delay: 10 * time.Minute},
-	}
-
-	chain := make([]kafka.Stage, 0, 1+len(tiers))
-	chain = append(chain, kafka.Stage{Topic: settings.topic, Group: settings.group})
-	for _, tier := range tiers {
-		chain = append(chain, kafka.Stage{Topic: tier.topic, Group: tier.topic, Delay: tier.delay})
-	}
-	return kafka.Chain(chain...)
-}
-
 // provideConsumers returns every consumer it built, even when a later one failed, so that
 // the caller closes the ones that did open.
-func provideConsumers(settings *config, record *merchants.RecordAuthorized, detours *kafka.Detours, logger *slog.Logger, observed *metrics.Registry) ([]*kafka.Consumer, error) {
-	chain := stages(settings)
+func provideConsumers(settings *config, record *merchants.RecordMovement, detours *kafka.Detours, logger *slog.Logger, observed *metrics.Registry) ([]*kafka.Consumer, error) {
+	chain := kafka.PaymentsChain(settings.topic, settings.group)
 	consumers := make([]*kafka.Consumer, 0, len(chain))
 	for _, stage := range chain {
 		consumer, err := kafka.NewConsumer(settings.brokers, stage, record, detours, logger, observed)
@@ -122,6 +113,10 @@ func load() (config, error) {
 	var read env.Reader
 	settings := config{
 		databaseURL: read.Required("DATABASE_URL"),
+		// One per stage — the main topic and three retry tiers run side by side, each handling
+		// one record at a time in one transaction — plus one spare. The budget across services
+		// is in deploy/helm/payments/values.yaml.
+		maxConns:    read.PositiveInt32("DB_MAX_CONNS", 5),
 		brokers:     read.List("KAFKA_BROKERS"),
 		topic:       env.Or("CONSUMER_TOPIC", "payments.main"),
 		dlqTopic:    env.Or("CONSUMER_DLQ_TOPIC", "payments-consumer.dlq"),

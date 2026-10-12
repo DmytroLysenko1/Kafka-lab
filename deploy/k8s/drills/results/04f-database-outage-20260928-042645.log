@@ -1,0 +1,51 @@
+drill 04f started 2026-09-28T01:26:45Z
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            false   0          <none>    <none>
+outbox-relay-5878ddf965-bzxp4        true    0          <none>    <none>
+payments-api-6559fb5784-2h8lc        true    0          <none>    <none>
+payments-api-6559fb5784-jw25f        true    0          <none>    <none>
+payments-consumer-6656b66df4-7w5vb   true    0          <none>    <none>
+payments-consumer-6656b66df4-rxv8k   true    0          <none>    <none>
+database pod gone 2026-09-28T01:29:49Z; sampling every 30 s for 90 s, more than three 20 s liveness periods
+--- 2026-09-28T01:30:19Z
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            false   0          <none>    <none>
+outbox-relay-5878ddf965-bzxp4        true    0          <none>    <none>
+payments-api-6559fb5784-2h8lc        false   0          <none>    <none>
+payments-api-6559fb5784-jw25f        false   0          <none>    <none>
+payments-consumer-6656b66df4-7w5vb   true    0          <none>    <none>
+payments-consumer-6656b66df4-rxv8k   true    0          <none>    <none>
+--- 2026-09-28T01:30:49Z
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            false   0          <none>    <none>
+outbox-relay-5878ddf965-bzxp4        true    0          <none>    <none>
+payments-api-6559fb5784-2h8lc        false   0          <none>    <none>
+payments-api-6559fb5784-jw25f        false   0          <none>    <none>
+payments-consumer-6656b66df4-7w5vb   true    0          <none>    <none>
+payments-consumer-6656b66df4-rxv8k   true    0          <none>    <none>
+--- 2026-09-28T01:31:19Z
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            false   0          <none>    <none>
+outbox-relay-5878ddf965-bzxp4        true    0          <none>    <none>
+payments-api-6559fb5784-2h8lc        false   0          <none>    <none>
+payments-api-6559fb5784-jw25f        false   0          <none>    <none>
+payments-consumer-6656b66df4-7w5vb   true    0          <none>    <none>
+payments-consumer-6656b66df4-rxv8k   true    0          <none>    <none>
+database back 2026-09-28T01:31:20Z
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            false   0          <none>    <none>
+outbox-relay-5878ddf965-bzxp4        true    0          <none>    <none>
+payments-api-6559fb5784-2h8lc        false   0          <none>    <none>
+payments-api-6559fb5784-jw25f        false   0          <none>    <none>
+payments-consumer-6656b66df4-7w5vb   true    0          <none>    <none>
+payments-consumer-6656b66df4-rxv8k   true    0          <none>    <none>
+first payment accepted 14 s after the database was back
+that payment counted 15 s after the database was back
+every watched pod ready 16 s after the database was back (2026-09-28T01:31:36Z)
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            true    0          <none>    <none>
+outbox-relay-5878ddf965-bzxp4        true    0          <none>    <none>
+payments-api-6559fb5784-2h8lc        true    0          <none>    <none>
+payments-api-6559fb5784-jw25f        true    0          <none>    <none>
+payments-consumer-6656b66df4-7w5vb   true    0          <none>    <none>
+payments-consumer-6656b66df4-rxv8k   true    0          <none>    <none>

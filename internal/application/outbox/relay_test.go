@@ -208,7 +208,7 @@ func authorized(id int64) Record {
 	return Record{
 		ID:          id,
 		AggregateID: "11111111-1111-4111-8111-11111111111" + string(rune('0'+id)),
-		EventType:   EventTypeAuthorized,
+		EventType:   "payment.authorized",
 		Payload:     []byte(`{"amount_minor":1999}`),
 		OccurredAt:  time.Date(2026, time.September, 25, 9, 0, 0, 0, time.UTC),
 	}
@@ -222,7 +222,35 @@ func harness(t *testing.T, outbox *fakeOutbox, publisher *fakePublisher, batch i
 func watched(t *testing.T, outbox *fakeOutbox, publisher *fakePublisher, batch int, watch *watcher) *Relay {
 	t.Helper()
 	swept := time.Date(2026, time.September, 25, 12, 0, 0, 0, time.UTC)
-	return NewRelay(outbox, publisher, outbox, func() time.Time { return swept }, batch, slog.New(slog.DiscardHandler), watch)
+	relay, err := NewRelay(outbox, publisher, outbox, func() time.Time { return swept }, Limits{Batch: batch, SweepTimeout: 30 * time.Second, BacklogTimeout: 2 * time.Second}, slog.New(slog.DiscardHandler), watch)
+	if err != nil {
+		t.Fatalf("new relay: %v", err)
+	}
+	return relay
+}
+
+// A batch of nothing would make every empty sweep look full, and the relay would sweep back
+// to back without ever waiting for its tick; a sweep with no time would fail before it began,
+// and a backlog count with none would never move the gauge.
+func TestARelayWithLimitsItCannotWorkWithinIsRefused(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    Limits
+		wantErr error
+	}{
+		{name: "a batch of nothing", args: Limits{Batch: 0, SweepTimeout: time.Second, BacklogTimeout: time.Second}, wantErr: ErrBatch},
+		{name: "no time for a sweep", args: Limits{Batch: 1, SweepTimeout: 0, BacklogTimeout: time.Second}, wantErr: ErrTimeout},
+		{name: "no time to count the backlog", args: Limits{Batch: 1, SweepTimeout: time.Second, BacklogTimeout: 0}, wantErr: ErrTimeout},
+		{name: "limits it can work within", args: Limits{Batch: 1, SweepTimeout: time.Second, BacklogTimeout: time.Second}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewRelay(newFakeOutbox(), &fakePublisher{}, newFakeOutbox(), time.Now, tt.args, slog.New(slog.DiscardHandler), &watcher{})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestSweepPublishesTheClaimedRecordsAndMarksThem(t *testing.T) {
@@ -406,6 +434,67 @@ func TestRunKeepsSweepingAfterAFailedSweep(t *testing.T) {
 	})
 }
 
+// A tick-paced relay publishes at most one batch per tick — 100 events a second with the
+// service's defaults — however much is waiting and however fast the broker is. A full batch
+// is the signal that more is waiting, so the relay sweeps again at once and only waits for
+// the tick once a sweep comes back short.
+func TestABacklogLargerThanABatchIsDrainedWithoutWaitingForTheTick(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		backlog := make([]Record, 0, 250)
+		for id := range int64(250) {
+			backlog = append(backlog, authorized(id+1))
+		}
+		outbox := newFakeOutbox(backlog...)
+		publisher := &fakePublisher{}
+		relay := harness(t, outbox, publisher, 100)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		stopped := make(chan error, 1)
+		go func() { stopped <- relay.Run(ctx, time.Second) }()
+		synctest.Wait()
+
+		if diff := cmp.Diff(0, outbox.unpublished()); diff != "" {
+			t.Errorf("records still waiting before the first tick (-want +got):\n%s", diff)
+		}
+		sizes := make([]int, 0, 3)
+		for _, batch := range publisher.published() {
+			sizes = append(sizes, len(batch))
+		}
+		if diff := cmp.Diff([]int{100, 100, 50}, sizes); diff != "" {
+			t.Errorf("batch sizes (-want +got):\n%s", diff)
+		}
+
+		cancel()
+		if err := <-stopped; err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	})
+}
+
+// The same shortcut must not turn a broker outage into a busy loop: a failed sweep waits
+// for the tick even when it would have been a full batch.
+func TestAFailedFullBatchWaitsForTheTick(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		outbox := newFakeOutbox(authorized(1), authorized(2))
+		publisher := &fakePublisher{fail: errBroker}
+		relay := harness(t, outbox, publisher, 2)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		stopped := make(chan error, 1)
+		go func() { stopped <- relay.Run(ctx, time.Second) }()
+		synctest.Wait()
+
+		if diff := cmp.Diff(1, len(publisher.published())); diff != "" {
+			t.Errorf("publish attempts before the first tick (-want +got):\n%s", diff)
+		}
+
+		cancel()
+		if err := <-stopped; err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	})
+}
+
 func TestEachSweepIsReportedWithWhatItPublished(t *testing.T) {
 	outbox := newFakeOutbox(authorized(1), authorized(2), authorized(3))
 	watch := &watcher{}
@@ -438,6 +527,24 @@ func TestAFailedSweepIsStillReported(t *testing.T) {
 // The failure exp-13 found on the dashboard: with the cluster unable to answer, no sweep
 // ends, and a backlog reported at the end of a sweep sat at its last value while payments
 // kept arriving. An operator must see the backlog grow while the sweep is stuck.
+// A sweep the shutdown cut short is the relay stopping, not the relay failing: reported as a
+// failure it would put every rollout on the sweep-outcome panel, which exists to show a broker
+// the relay cannot reach.
+func TestASweepCutShortByTheShutdownIsNotReportedAsFailed(t *testing.T) {
+	outbox := newFakeOutbox(authorized(1))
+	watch := &watcher{}
+	relay := watched(t, outbox, &fakePublisher{fail: context.Canceled}, 10, watch)
+	stopping, stop := context.WithCancel(t.Context())
+	stop()
+
+	relay.sweepOnce(stopping)
+
+	sweeps, _ := watch.reported()
+	if diff := cmp.Diff([]sweep(nil), sweeps, cmp.AllowUnexported(sweep{})); diff != "" {
+		t.Errorf("sweeps reported (-want +got):\n%s", diff)
+	}
+}
+
 func TestTheBacklogKeepsBeingReportedWhileASweepIsStuckOnTheBroker(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		outbox := newFakeOutbox(authorized(1))

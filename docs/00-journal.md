@@ -1523,7 +1523,7 @@ records on one partition, one fresh on another, 11 s with the topic paused. Now 
 waiting partition is paused, each with its own resume time, and the poll is bounded by the
 earliest of them. Fixing that surfaced the next one, found by a run rather than a reviewer:
 a resumed partition joined only the *next* fetch, and franz-go's default fetch wait is 5 s,
-so exp-18 counted replayed payments 5–8 s after the replay into a 3 s tier. Tiers now fetch
+so exp-18 counted replayed payments 5–8 s after the replay into a 3 s tier (that run's log was not kept). Tiers now fetch
 with a 500 ms wait; the delay test measures 40–70 ms of lateness and fails at the default.
 The security review found that the attempt count and the origin of a retried record were
 read from headers a producer controls, and that dead-letter headers were appended beside

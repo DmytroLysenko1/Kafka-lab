@@ -42,9 +42,9 @@ again the queue was already at its pre-outage level.
 
 **Two brokers down is the case the outbox exists for.** Nothing can be published for the
 whole thirty seconds and the backlog grows by the load, about 300 records. It keeps growing
-for a while after the cluster is whole — to 468–523 — because the relay's first sweeps
+for a while after the cluster is whole — to 458–523 over four runs — because the relay's first sweeps
 after the outage are still waiting out their timeouts against the dead connections; then it
-works the queue off in 18–24 s while payments keep arriving at ten a second throughout.
+works the queue off in 17.3–24.2 s while payments keep arriving at ten a second throughout.
 
 **And the cluster reports itself healthy the entire time.** In cell B the metadata says
 zero under-replicated partitions and zero without a leader, which is exactly wrong: two
@@ -66,7 +66,8 @@ within a second, was the backlog as this experiment read it: straight from Postg
 relay now counts it on a clock of its own, in a goroutine beside the sweeps, and the rerun
 shows the panel doing its job: 5 before the kill, then 10, 60, 110 … 460 every five
 seconds through the outage, back to 5 once the relay caught up. It trails the database by
-about 15 s — scrape interval plus the relay's tick — which is a lag, not a lie. The dashboard also trails the cluster by 15–20 s in cell A (brokers 2 from +40 s to
+about 5 s — one 5 s scrape plus the relay's 500 ms tick: the panel first rose at +24 s for a
+kill at +20 s, and was back down ≤ 7 s after Postgres counted it drained — a lag, not a lie. The dashboard also trails the cluster by 15–20 s in cell A (brokers 2 from +40 s to
 +65 s for a kill at +20 s and a restart at +50 s): scrape interval, exporter polling and
 rate windows, stacked.
 

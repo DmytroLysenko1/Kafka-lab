@@ -7,12 +7,11 @@ import (
 	"time"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/payment"
+
+	"github.com/DmytroLysenko1/Kafka-lab/pkg/telemetry"
 )
 
-var (
-	ErrIdempotencyKeyRequired = errors.New("payments: idempotency key is required")
-	ErrIdempotencyKeyReused   = errors.New("payments: the idempotency key was used for a different amount")
-)
+var ErrIdempotencyKeyReused = errors.New("payments: the idempotency key was used for a different amount")
 
 // paymentStore stores the aggregate and the events it is holding in one transaction, and
 // refuses to store the same idempotency key twice: the key belongs to the caller's protocol,
@@ -20,7 +19,7 @@ var (
 // is taken it returns the payment that key already bought, and reports it as not created;
 // whether the replay may stand is the payment's decision, not the store's.
 type paymentStore interface {
-	CreateOrGet(ctx context.Context, authorized *payment.Payment, idempotencyKey string) (*payment.Payment, bool, error)
+	CreateOrGet(ctx context.Context, authorized *payment.Payment, idempotencyKey IdempotencyKey) (*payment.Payment, bool, error)
 }
 
 type txManager interface {
@@ -51,7 +50,7 @@ type AuthorizeCommand struct {
 	MerchantID     string
 	AmountMinor    int64
 	Currency       string
-	IdempotencyKey string
+	IdempotencyKey IdempotencyKey
 }
 
 type AuthorizeResult struct {
@@ -60,7 +59,14 @@ type AuthorizeResult struct {
 }
 
 func (uc *AuthorizePayment) Execute(ctx context.Context, cmd AuthorizeCommand) (AuthorizeResult, error) {
-	if cmd.IdempotencyKey == "" {
+	ctx, end := telemetry.Start(ctx, "payments.AuthorizePayment")
+	result, err := uc.execute(ctx, cmd)
+	end(err)
+	return result, err
+}
+
+func (uc *AuthorizePayment) execute(ctx context.Context, cmd AuthorizeCommand) (AuthorizeResult, error) {
+	if cmd.IdempotencyKey.IsZero() {
 		return AuthorizeResult{}, ErrIdempotencyKeyRequired
 	}
 
@@ -84,14 +90,14 @@ func (uc *AuthorizePayment) Execute(ctx context.Context, cmd AuthorizeCommand) (
 // storeOnce answers with the payment the key bought. A replayed key that asks for a
 // different payment is ErrIdempotencyKeyReused, never the earlier payment: a caller told its
 // 5 000.00 succeeded when 19.99 was authorised is worse off than one told to look again.
-func (uc *AuthorizePayment) storeOnce(ctx context.Context, authorized *payment.Payment, idempotencyKey string) (AuthorizeResult, error) {
+func (uc *AuthorizePayment) storeOnce(ctx context.Context, authorized *payment.Payment, idempotencyKey IdempotencyKey) (AuthorizeResult, error) {
 	stored, created, err := uc.payments.CreateOrGet(ctx, authorized, idempotencyKey)
 	if err != nil {
 		return AuthorizeResult{}, err
 	}
 	if !created {
 		if err := authorized.Replays(stored); err != nil {
-			return AuthorizeResult{}, fmt.Errorf("%w: %w", ErrIdempotencyKeyReused, err)
+			return AuthorizeResult{}, errors.Join(ErrIdempotencyKeyReused, err)
 		}
 	}
 	return AuthorizeResult{

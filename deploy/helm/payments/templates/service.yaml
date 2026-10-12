@@ -1,0 +1,24 @@
+{{- range $name, $component := .Values.components }}
+{{- $scope := dict "root" $ "name" $name }}
+---
+# Named after the component: the ServiceMonitor copies the Service name into the `service`
+# label, which is the label the dashboard (deploy/grafana/dashboards/payments.json) selects.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "payments.labels" $scope | nindent 4 }}
+spec:
+  selector:
+    {{- include "payments.selector" $scope | nindent 4 }}
+  ports:
+    {{- if $component.httpPort }}
+    - name: http
+      port: {{ $component.httpPort }}
+      targetPort: http
+    {{- end }}
+    - name: metrics
+      port: {{ $component.metricsPort }}
+      targetPort: metrics
+{{- end }}

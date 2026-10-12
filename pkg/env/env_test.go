@@ -76,6 +76,40 @@ func TestANumberThatIsNotPositiveIsRefusedAndAnUnsetOneTakesTheFallback(t *testi
 	}
 }
 
+// A pool size goes to pgx as an int32: a value that would not fit is refused, not wrapped
+// round into a negative or tiny pool.
+func TestAPoolSizeThatDoesNotFitAnInt32IsRefused(t *testing.T) {
+	type args struct {
+		value string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    int32
+		wantErr error
+	}{
+		{name: "unset: the fallback", args: args{value: ""}, want: 4},
+		{name: "a positive number", args: args{value: "12"}, want: 12},
+		{name: "the largest int32", args: args{value: "2147483647"}, want: 2147483647},
+		{name: "one past it", args: args{value: "2147483648"}, wantErr: env.ErrInvalid},
+		{name: "zero", args: args{value: "0"}, wantErr: env.ErrInvalid},
+		{name: "not a number", args: args{value: "many"}, wantErr: env.ErrInvalid},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(variable, tt.args.value)
+			var read env.Reader
+			got := read.PositiveInt32(variable, 4)
+			if err := read.Err(); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("value (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // A zero interval makes a ticker panic; a bare number is a typo for a unit nobody wrote.
 func TestADurationThatIsNotPositiveIsRefusedAndAnUnsetOneTakesTheFallback(t *testing.T) {
 	type args struct {

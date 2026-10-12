@@ -14,8 +14,10 @@ make exp-18
 ## What it runs
 
 600 payments over six partitions, every hundredth one — six in all — for a merchant whose
-`merchant_totals` row a second transaction holds `FOR UPDATE`. Every payment is one minor
-unit, so each merchant's total must equal its number of inbox rows exactly. The consumer,
+`merchant_currency_totals` row (EUR) a second transaction holds `FOR UPDATE`. Every payment is
+one minor unit, so each merchant's total must equal its number of inbox rows exactly. The runs
+reported below, from 25–26.09.2026, locked the row of the older `merchant_totals` table, which
+had no currency; the lock and its row are the same in both. The consumer,
 the detours, the replay and the 2 s `lock_timeout` are the service's own
 ([`consumer.go`](../../../internal/infrastructure/kafka/consumer.go),
 [`totals.go`](../../../internal/infrastructure/postgres/totals.go)); the tiers are the
@@ -97,7 +99,7 @@ and in the 3 s and 6 s tiers, where the lock was still held; three of the six re
 12 s tier, where the lock had gone by the time they were due, and none reached the DLQ. In
 C the lock outlived the chain: all six ended in the DLQ as `exhausted`, the operator
 released the row and replayed them in 50 ms, and they were counted 3.0–3.5 s later — the
-first tier's delay. Before the tiers fetched with a short wait, that was 5–8 s: a partition
+first tier's delay. Before the tiers fetched with a short wait, that was 5–8 s (seen in the session, log not kept): a partition
 resumed after its delay joined only the next fetch, and franz-go's default fetch wait is
 5 s ([case 07](../../../docs/static/07-retry-dlq.md#why-blocking-is-correct-in-the-retry-consumer)).
 

@@ -28,11 +28,14 @@ make reset-topic TOPIC=exp11.archived.dlq
 
 # The inbox and the projection are the experiment's evidence, so they start empty. Each
 # cell addresses its own merchant and its own range of event ids, so neither can be
-# mistaken for the other — or deduplicated against it.
+# mistaken for the other — or deduplicated against it. The ranges start at 9.11e15: the
+# inbox is shared with the service, whose event ids are outbox row ids counting up from 1,
+# and a range the outbox could reach would make a real payment look like a duplicate of an
+# experiment's — or the cleanup below delete a real payment's inbox row.
 make migrate
 docker exec -i kafka-lab-postgres psql -U lab -d lab -q -c \
-  "DELETE FROM merchant_totals WHERE merchant_id LIKE 'exp11-%';
-   DELETE FROM inbox WHERE event_id LIKE 'exp11-%' OR event_id BETWEEN '110000' AND '120099';"
+  "DELETE FROM merchant_currency_totals WHERE merchant_id LIKE 'exp11-%';
+   DELETE FROM inbox WHERE event_id LIKE 'exp11-%' OR event_id ~ '^91[12]0{10}[0-9]{3}$';"
 
 binary="$(mktemp -d)/exp-11"
 trap 'rm -rf "$(dirname "$binary")"' EXIT
@@ -46,14 +49,14 @@ go build -o "$binary" ./experiments/transaction_guarantee/exp-11-poison-pill
   echo
 
   echo "== cell A: no dead letter route =="
-  "$binary" -phase produce -topic exp11.blocked -merchant exp11-blocked -first-event-id 110000 \
+  "$binary" -phase produce -topic exp11.blocked -merchant exp11-blocked -first-event-id 9110000000000000 \
     -records "$records" -poison-at "$poison_at"
   "$binary" -phase consume -topic exp11.blocked -group exp11-blocked -merchant exp11-blocked \
     -records "$records" -poison-at "$poison_at" -budget "$budget"
   echo
 
   echo "== cell B: the same records, archived to a dead letter topic =="
-  "$binary" -phase produce -topic exp11.archived -merchant exp11-archived -first-event-id 120000 \
+  "$binary" -phase produce -topic exp11.archived -merchant exp11-archived -first-event-id 9120000000000000 \
     -records "$records" -poison-at "$poison_at"
   "$binary" -phase consume -topic exp11.archived -dlq-topic exp11.archived.dlq -group exp11-archived \
     -merchant exp11-archived -records "$records" -poison-at "$poison_at" -budget "$budget"

@@ -1,0 +1,15 @@
+# The build needs go.mod, go.sum and the Go packages the commands import. Everything else
+# only enlarges the context and, when it changes, invalidates the COPY . . layer.
+.git
+.idea
+.vscode
+.claude
+docs
+deploy
+experiments
+exp-*-*
+*.md
+bin
+dist
+.env
+.env.local

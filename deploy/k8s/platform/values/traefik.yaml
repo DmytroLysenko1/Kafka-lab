@@ -1,0 +1,38 @@
+# Traefik rather than ingress-nginx: ingress-nginx was retired in March 2026 and gets no
+# more releases, security fixes included. The chart's own Ingress objects stay standard
+# networking.k8s.io/v1, so the controller behind them is a swap in this file only.
+deployment:
+  replicas: 1
+service:
+  type: NodePort
+ports:
+  web:
+    nodePort: 30080
+  # No TLS on the stand: everything is on 127.0.0.1. A real ingress terminates 443 here, with
+  # certificates from cert-manager.
+  websecure:
+    expose:
+      default: false
+providers:
+  kubernetesIngress:
+    enabled: true
+  kubernetesCRD:
+    enabled: false
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+  name: traefik
+log:
+  format: json
+accessLog:
+  enabled: true
+  format: json
+# No CPU limit, so the ingress is never what throttles a load drill. Figures, drill 03's
+# 1200 req/s included: resources-20260927-214046.log — 41Mi typical, 63Mi peak; then
+# resources-20260928-043718.log, drills 01–06 including drill 06's 400 writes/s — 54Mi typical,
+# 117Mi peak, CPU 424m p95. 128Mi was 1.09× that peak; 192Mi is 1.64×. The CPU request is the idle figure
+# on purpose: a request sized for the drills' peak would reserve almost half a core for the
+# ~15 minutes a session loads it.
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { memory: 192Mi }

@@ -19,9 +19,9 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
-	"github.com/DmytroLysenko1/Kafka-lab/internal/application/outbox"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/metrics"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/outboxwire"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/postgres"
 	schemas "github.com/DmytroLysenko1/Kafka-lab/proto"
 )
@@ -198,7 +198,7 @@ func produce(ctx context.Context, s *settings, out io.Writer) error {
 			Value: append(prefix, generation.body(paymentID, s.merchant)...),
 			Headers: []kgo.RecordHeader{
 				{Key: "event_id", Value: []byte(generation.eventID)},
-				{Key: "event_type", Value: []byte(outbox.EventTypeAuthorized)},
+				{Key: "event_type", Value: []byte(outboxwire.EventTypeAuthorized)},
 			},
 		}
 		if err := client.ProduceSync(ctx, record).FirstErr(); err != nil {
@@ -222,7 +222,7 @@ func consume(ctx context.Context, s *settings, out io.Writer) error {
 	}
 	defer dead.Close()
 
-	record := merchants.NewRecordAuthorized(
+	record := merchants.NewRecordMovement(
 		postgres.NewInboxStore(storage),
 		postgres.NewTotalsStore(storage),
 		storage,
@@ -277,9 +277,16 @@ func report(ctx context.Context, s *settings, storage *postgres.Storage, out io.
 		}
 	}
 
-	total, err := merchants.NewReadTotal(postgres.NewTotalsStore(storage)).Execute(ctx, s.merchant)
+	totals, err := merchants.NewReadTotals(postgres.NewTotalsStore(storage)).Execute(ctx, s.merchant)
 	if err != nil {
 		return err
+	}
+	// Every variant is written in EUR, so the EUR total is everything that was counted.
+	var total int64
+	for _, counted := range totals {
+		if counted.Currency().String() == "EUR" {
+			total = counted.Authorized()
+		}
 	}
 	written.printf("\nmerchant total: %d minor units from %d records\n", total, len(variants))
 	return written.err

@@ -5,6 +5,11 @@ delivering better. They are absorbed by writing idempotently: the consumer claim
 payment id and writes the row in one transaction, so a redelivery loses the race for the
 primary key and changes nothing.
 
+The payment id works as the claim here only because the stand publishes one event per
+payment. The service publishes three — authorized, captured, refunded — and claims the
+event id instead (`internal/infrastructure/kafka/decode.go`); a payment-id inbox there would
+drop a capture as a duplicate of its authorization.
+
 ```
 make exp-07
 ```

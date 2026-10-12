@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
@@ -20,8 +19,6 @@ import (
 )
 
 var errNotATier = errors.New("dlq-replayer: letters are replayed only into this group's retry tiers")
-
-const retryTierPrefix = "payments-consumer.retry."
 
 // main keeps a skeleton of its own rather than lifecycle.Main: the services share one
 // outcome — running, or stopped with a reason — while this tool has three, and says which
@@ -76,7 +73,7 @@ func load() (kafka.ReplayRequest, []string, error) {
 	var request kafka.ReplayRequest
 	class := flag.String("class", string(kafka.ClassExhausted), "dead letter class to replay: exhausted, refused or undecodable")
 	flag.StringVar(&request.DeadLetterTopic, "from", "payments-consumer.dlq", "dead letter topic")
-	flag.StringVar(&request.Into, "into", "payments-consumer.retry.5s", "first tier of the chain the letters go back into")
+	flag.StringVar(&request.Into, "into", kafka.FirstRetryTier(), "first tier of the chain the letters go back into")
 	flag.Parse()
 
 	parsed, err := kafka.ParseClass(*class)
@@ -87,7 +84,7 @@ func load() (kafka.ReplayRequest, []string, error) {
 	request.Group = "payments-consumer.dlq-replayer." + *class
 	// A replay goes back to the group's own chain and nowhere else: into payments.main it
 	// would reach every group reading that topic, and one without an inbox counts it twice.
-	if !strings.HasPrefix(request.Into, retryTierPrefix) {
+	if !kafka.IsRetryTier(request.Into) {
 		return kafka.ReplayRequest{}, nil, fmt.Errorf("%w: %q", errNotATier, request.Into)
 	}
 

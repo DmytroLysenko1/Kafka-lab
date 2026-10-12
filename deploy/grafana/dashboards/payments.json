@@ -479,8 +479,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (tier) (rate(payment_events_retried_total[30s]))",
-          "legendFormat": "{{tier}}",
+          "expr": "sum by (topic) (rate(payment_events_retried_total[30s]))",
+          "legendFormat": "{{topic}}",
           "refId": "A"
         }
       ]
@@ -506,6 +506,31 @@
         {
           "expr": "sum by (consumergroup) (kafka_consumergroup_lag{consumergroup=~\"payments-consumer\\\\.retry\\\\..*\"})",
           "legendFormat": "{{consumergroup}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 107,
+      "type": "timeseries",
+      "title": "Records arriving at the brokers per second, by topic",
+      "description": "The brokers' side of throughput: how fast each topic's log end offset moves, read by kafka-exporter from the cluster, not counted by any service. When 'Records published per second' says the relay is publishing and this says nothing is arriving, the records are not reaching Kafka.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 69
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (topic) (rate(kafka_topic_partition_current_offset{topic=~\"payments.*\"}[1m]))",
+          "legendFormat": "{{topic}}",
           "refId": "A"
         }
       ]

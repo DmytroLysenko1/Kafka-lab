@@ -1,0 +1,194 @@
+image:
+  # Images are built by `make images` and loaded into kind by `make k8s-images`: nothing is
+  # pulled, so IfNotPresent with an immutable tag. The tag is the commit plus a hash of any
+  # uncommitted changes (deploy/docker/image-tag.sh, set by the Makefile) and has no default: a reused
+  # tag such as `dev` is rebuilt in place, the template does not change, nothing rolls, and
+  # the next restarted pod quietly runs different code than its neighbours.
+  repository: kafka-lab
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Backing services the platform (deploy/k8s/platform) runs in the same namespace.
+kafka:
+  brokers: kafka-lab-kafka-bootstrap:9092
+schemaRegistry:
+  url: http://apicurio:8080/apis/ccompat/v7
+
+# Credentials are never values: the database secret is written by CloudNativePG, the API key
+# by `make k8s-secret`. The chart only names them.
+secrets:
+  database:
+    name: payments-db-app
+    key: uri
+  apiKey:
+    name: payments-api-key
+    key: PAYMENTS_API_KEY
+
+# Every pod gets these; they are what a restricted Pod Security profile demands, and a
+# distroless static binary needs nothing more.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# Before SIGTERM a pod behind a Service first has to leave its endpoints, which kube-proxy
+# and Traefik learn about asynchronously: without the pause, requests keep arriving at a
+# process that has stopped accepting them. Native sleep — distroless has no sleep binary.
+# Only components with readiness get it: nothing routes to the relay or the consumer.
+# 5 s is not measured; drill 01 shows zero failed requests with it, and a control run
+# with 0 would show whether it is needed at all (docs/k8s/runbook.md).
+preStopSleepSeconds: 5
+
+# Every component: the kubelet's first look at a started container. 1–7 s from container
+# start to Ready when observed (not logged); 2 s × 30 = 60 s covers a cold node pulling nothing but still
+# slow to schedule, and fails a hung start within a minute.
+startupProbe:
+  periodSeconds: 2
+  failureThreshold: 30
+
+# Connection budget. Postgres (CloudNativePG defaults) accepts max_connections 100, 3 kept for
+# superusers: 97. Each component caps its pool with DB_MAX_CONNS (the code's default is the same
+# number), and the API holds one more for readiness (internal/infrastructure/postgres/storage.go):
+#   payments-api       (4 + 1 probe) × 5 pods at the HPA's max  = 25
+#   payments-consumer  5 × 2 pods                              = 10
+#   outbox-relay       2 × 1 pod                               =  2
+#   migrate / prune    2 each, short-lived                     =  4
+#   Apicurio           JDBC pool fixed at 20 (platform/apicurio.yaml) = 20
+#   total                                                      = 61 of 97
+# A rolling update adds one pod per component (maxSurge 1), and a helm upgrade rolls them
+# together: one more API pod (5) and one more consumer pod (5), 71 of 97 at the HPA's max. The
+# relay is Recreate and never overlaps.
+# Raising a replica count or a pool means redoing this sum.
+components:
+  payments-api:
+    # Ignored while autoscaling is set: the HPA owns the count, and a replicas field in the
+    # template would fight it on every upgrade. Kept for a release without the HPA.
+    replicas: 2
+    command: payments-api
+    httpPort: 8081
+    metricsPort: 9103
+    # Only the API has a readiness probe: it is the only component the Service routes
+    # callers to. A relay or consumer that cannot reach Kafka is not helped by being taken
+    # out of a Service nobody calls.
+    readiness: true
+    env:
+      PAYMENTS_API_ADDR: 0.0.0.0:8081
+      METRICS_ADDR: 0.0.0.0:9103
+      DB_MAX_CONNS: "4"
+    apiKey: true
+    # 20 s of in-flight requests (shutdownTimeout in internal/interfaces/http/server.go)
+    # after the preStop pause, then a 1 s trace flush, plus headroom.
+    terminationGracePeriodSeconds: 30
+    # Idle a pod uses a few millicores. Under drill 03's 1200 req/s the HPA read 109–160% of
+    # this request on two to four pods and 64–66% on five (03-autoscaling-20260927-211420.log;
+    # 60–67% in 03-autoscaling-20260928-044933.log; 72–78% in …-040732.log, on a stand still
+    # busy with the platform's rollout — at its max, above the target),
+    # i.e. well over 100m of work per pod before the scale-out. The CPU request is what the HPA's
+    # percentage is taken of, so it is set as a round share of a loaded pod, not at idle
+    # use. Calibrated on reads (drill 03 sends GETs). Writes: drill 06 took 400 payments/s on
+    # two pods at 60% of this request (06-write-throughput-20260928-043357.log), below the
+    # target, so the HPA does not move for them at that rate. Memory: figures in
+    # deploy/k8s/drills/results/resources-20260927-175351.log.
+    resources:
+      requests: { cpu: 100m, memory: 32Mi }
+      limits: { memory: 64Mi }
+    # min 2: one pod can go and one keeps serving (the PDB holds that line); the spread
+    # constraint prefers one per worker but does not guarantee it. Target 70%:
+    # the headroom that absorbs a surge during the ~15 s HPA sync plus the ~5 s a new pod
+    # needs to become ready. max 5: in drill 03 five pods held 1200 req/s at 60–67%, so at the
+    # target they cover ~1300 req/s — just above the heaviest load the drills generate. On a
+    # machine busy with something else they did not (72–78%, ~1120 req/s at the target, drill
+    # 03 in the 28.09 evidence session). More load needs a higher max and more nodes.
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 5
+      cpuUtilization: 70
+    # One pod at a time: with 2 replicas that keeps one serving through a drain, and with the
+    # HPA at 5 it still takes them one by one — minAvailable: 1 would have let a drain evict
+    # four at once.
+    podDisruptionBudget:
+      maxUnavailable: 1
+    ingress:
+      host: payments.localtest.me
+      className: traefik
+
+  outbox-relay:
+    # One. A second would publish no record twice (each sweep claims its rows with FOR UPDATE
+    # SKIP LOCKED), but could publish two events of one payment out of order — harmless only
+    # while a payment has a single event type (docs/k8s/decisions.md).
+    # And one during a rollout too: a surge would run old and new relay side by side for
+    # seconds (01-rolling-update-20260927-012247.log lists both), which is the reordering
+    # window above. While
+    # the relay is replaced the outbox holds the events — that is what it is for.
+    replicas: 1
+    strategy: Recreate
+    command: outbox-relay
+    metricsPort: 9101
+    env:
+      METRICS_ADDR: 0.0.0.0:9101
+      DB_MAX_CONNS: "2"
+    # The Kubernetes default, and enough by arithmetic: a sweep in flight at SIGTERM ends within
+    # its publish bound — up to ~20 s against a hung broker — plus a 5 s rollback and a 1 s
+    # trace flush, ~26 s.
+    terminationGracePeriodSeconds: 30
+    # Figures: deploy/k8s/drills/results/resources-20260927-175351.log.
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 64Mi }
+
+  payments-consumer:
+    # Never more than six: payments.main has six partitions, and a seventh member of the
+    # group would own none of them. No HPA for the same reason — CPU is not what bounds a
+    # consumer group, partitions and lag are. Two: three partitions each, and spread across the
+    # workers (templates/deployment.yaml, topologySpreadConstraints) so a lost node leaves a
+    # member that takes over the other three. The spread is preferred, not required: a
+    # worker short of room still gets its pod placed, unevenly, rather than left Pending.
+    replicas: 2
+    command: payments-consumer
+    metricsPort: 9102
+    env:
+      METRICS_ADDR: 0.0.0.0:9102
+      DB_MAX_CONNS: "5"
+    # The Kubernetes default, and enough by arithmetic: a record in flight at SIGTERM rolls back
+    # (5 s bound), may be detoured to a retry tier (18 s bound), and the handled part of the
+    # batch commits its offsets (5 s bound) — 28 s at most (kafka/consumer.go, commitTimeout) —
+    # and the last spans are flushed (1 s, telemetry.FlushTimeout): 29 s, checked by
+    # kafka/budget_test.go.
+    terminationGracePeriodSeconds: 30
+    # Figures: deploy/k8s/drills/results/resources-20260927-175351.log.
+    resources:
+      requests: { cpu: 15m, memory: 32Mi }
+      limits: { memory: 64Mi }
+
+migrate:
+  # Two retries for a database that is still starting; five minutes for the longest
+  # migration this schema has (seconds) with a wide margin. Not measured. The resources are
+  # those of the services: a short-lived pod the resource log rarely catches.
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  resources:
+    requests: { cpu: 50m, memory: 32Mi }
+    limits: { memory: 64Mi }
+
+prune:
+  # At minute 17: off the hour, when other scheduled work tends to start.
+  schedule: "17 * * * *"
+  # No retries inside a run: the next hourly run is the retry, and every batch a run deletes
+  # stays deleted. A run that fails — a database that was down, or ten minutes that were not
+  # enough (cmd/prune runTimeout) — leaves a failed Job to see; retrying a timed-out run would
+  # only put another ten minutes of deletes on a database that was already slow.
+  backoffLimit: 0
+  # The backstop for a process that does not stop at its own ten minutes: 15 min, inside the
+  # hour to the next run, which Forbid would otherwise skip.
+  activeDeadlineSeconds: 900
+  # Like migrate: a short-lived pod with one statement at a time. Not measured.
+  resources:
+    requests: { cpu: 50m, memory: 32Mi }
+    limits: { memory: 64Mi }

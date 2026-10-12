@@ -11,6 +11,12 @@
 # mechanism for CLAUDE.md's context/concurrency/error doctrine.
 version: "2"
 
+# The integration suite is ordinary code behind a build tag; without the tag the linter never
+# reads it, and it once stopped compiling with nothing saying so (docs/00-journal.md).
+run:
+  build-tags:
+    - integration
+
 linters:
   default: none
   enable:

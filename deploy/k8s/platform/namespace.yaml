@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lab
+  # Warn and audit against the restricted profile the payments chart is written for, without
+  # enforcing it: Strimzi's pods (the three brokers, the entity operator, the exporter) do
+  # not meet it as configured, and hardening them goes through the Kafka CR's templates,
+  # which this stand does not do. CloudNativePG's instance already complies. Check the
+  # would-be violations with:
+  #   kubectl label --dry-run=server --overwrite ns lab pod-security.kubernetes.io/enforce=restricted
+  labels:
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

@@ -2,7 +2,9 @@ package payment
 
 import (
 	"errors"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -12,9 +14,18 @@ var (
 	ErrMerchantTooLong   = errors.New("payment: merchant id is longer than allowed")
 	ErrIDFormat          = errors.New("payment: id is not a uuid")
 	ErrAmountNotPositive = errors.New("payment: an authorised payment is for a positive amount")
+	ErrAmountTooLarge    = errors.New("payment: the amount is larger than one authorisation may be")
+	ErrMerchantInvalid   = errors.New("payment: merchant id is not valid UTF-8 text")
 	ErrStorage           = errors.New("payment: storage failure")
-	ErrStatusUnknown     = errors.New("payment: status is not one a payment can be in")
+	ErrOutcomeUnknown    = errors.New("payment: the storage did not say whether the payment was kept")
+	ErrCorrupt           = errors.New("payment: a stored payment or its event cannot be read or written as one")
 	ErrNotTheSamePayment = errors.New("payment: a replay asks for a different payment than the one it repeats")
+	ErrNotFound          = errors.New("payment: no such payment for this merchant")
+	ErrInvalidTransition = errors.New("payment: the payment is not in a state that allows this")
+	// ErrConcurrentModification is a payment whose status changed between being read and being
+	// written, which the row lock taken on read is there to make impossible: seeing it means
+	// something wrote the row without taking that lock.
+	ErrConcurrentModification = errors.New("payment: the payment changed while it was being changed")
 )
 
 const merchantIDMaxLength = 64
@@ -23,7 +34,9 @@ type ID struct {
 	value uuid.UUID
 }
 
-func NewID() ID { return ID{value: uuid.New()} }
+func NewID() ID {
+	return ID{value: uuid.New()}
+}
 
 func ParseID(value string) (ID, error) {
 	parsed, err := uuid.Parse(value)
@@ -49,6 +62,8 @@ func ParseMerchantID(value string) (MerchantID, error) {
 		return MerchantID{}, ErrMerchantRequired
 	case len(value) > merchantIDMaxLength:
 		return MerchantID{}, ErrMerchantTooLong
+	case !isStorableText(value):
+		return MerchantID{}, ErrMerchantInvalid
 	}
 	return MerchantID{
 		value: value,
@@ -59,38 +74,72 @@ func (m MerchantID) String() string {
 	return m.value
 }
 
+// isStorableText refuses what Postgres refuses to store in a text column — a NUL byte and
+// bytes that are not UTF-8. Refused here it is a 400 the caller can act on; refused by the
+// database it would be a storage failure, and the same payment would fail on every retry.
+func isStorableText(value string) bool {
+	return utf8.ValidString(value) && !strings.ContainsRune(value, 0)
+}
+
 type Status uint8
 
 const (
 	StatusUnknown Status = iota
 	StatusAuthorized
+	StatusCaptured
+	StatusRefunded
 )
 
-const statusAuthorized = "authorized"
-
+// String is the status as the domain names it — in logs, traces and answers. How a status is
+// spelled in a table is the store's business (postgres/statuses.go).
 func (s Status) String() string {
-	if s == StatusAuthorized {
-		return statusAuthorized
+	switch s {
+	case StatusAuthorized:
+		return "authorized"
+	case StatusCaptured:
+		return "captured"
+	case StatusRefunded:
+		return "refunded"
 	}
 	return "unknown"
 }
 
-// ParseStatus reads a status back from storage. Only a status a payment can actually be in
-// is accepted: an "unknown" row is a corrupted one, not a payment in an unknown state.
-func ParseStatus(value string) (Status, error) {
-	if value != statusAuthorized {
-		return StatusUnknown, ErrStatusUnknown
+// History is when a payment reached each status it has been in. A status not reached yet is
+// the zero time. It is a value: changing it makes another one.
+type History struct {
+	authorizedAt time.Time
+	capturedAt   time.Time
+	refundedAt   time.Time
+}
+
+// NewHistory holds every time in UTC, and a status not reached as the zero time.
+func NewHistory(authorizedAt, capturedAt, refundedAt time.Time) History {
+	return History{
+		authorizedAt: utcOrZero(authorizedAt),
+		capturedAt:   utcOrZero(capturedAt),
+		refundedAt:   utcOrZero(refundedAt),
 	}
-	return StatusAuthorized, nil
+}
+
+func (h History) AuthorizedAt() time.Time {
+	return h.authorizedAt
+}
+
+func (h History) CapturedAt() time.Time {
+	return h.capturedAt
+}
+
+func (h History) RefundedAt() time.Time {
+	return h.refundedAt
 }
 
 type Payment struct {
-	id           ID
-	merchant     MerchantID
-	amount       Money
-	status       Status
-	authorizedAt time.Time
-	events       []Event
+	id       ID
+	merchant MerchantID
+	amount   Money
+	status   Status
+	history  History
+	events   []Event
 }
 
 // Authorize is the only way a Payment comes into existence, so an amount of zero cannot be
@@ -100,19 +149,19 @@ func Authorize(id ID, merchant MerchantID, amount Money, at time.Time) (*Payment
 	if !amount.IsPositive() {
 		return nil, ErrAmountNotPositive
 	}
+	if !amount.IsWithinAuthorizationLimit() {
+		return nil, ErrAmountTooLarge
+	}
 
 	authorized := &Payment{
-		id:           id,
-		merchant:     merchant,
-		amount:       amount,
-		status:       StatusAuthorized,
-		authorizedAt: at.UTC(),
+		id:       id,
+		merchant: merchant,
+		amount:   amount,
+		status:   StatusAuthorized,
+		history:  NewHistory(at, time.Time{}, time.Time{}),
 	}
 	authorized.events = append(authorized.events, &Authorized{
-		paymentID:  id,
-		merchant:   merchant,
-		amount:     amount,
-		occurredAt: authorized.authorizedAt,
+		movement: authorized.movement(authorized.history.AuthorizedAt()),
 	})
 	return authorized, nil
 }
@@ -120,14 +169,21 @@ func Authorize(id ID, merchant MerchantID, amount Money, at time.Time) (*Payment
 // Reconstitute rebuilds a payment that was authorised earlier and stored. It emits nothing:
 // the payment's events were published when it came into existence, and rebuilding it to
 // compare a replay against must not announce it a second time.
-func Reconstitute(id ID, merchant MerchantID, amount Money, status Status, authorizedAt time.Time) *Payment {
+func Reconstitute(id ID, merchant MerchantID, amount Money, status Status, history History) *Payment {
 	return &Payment{
-		id:           id,
-		merchant:     merchant,
-		amount:       amount,
-		status:       status,
-		authorizedAt: authorizedAt.UTC(),
+		id:       id,
+		merchant: merchant,
+		amount:   amount,
+		status:   status,
+		history:  history,
 	}
+}
+
+func utcOrZero(at time.Time) time.Time {
+	if at.IsZero() {
+		return time.Time{}
+	}
+	return at.UTC()
 }
 
 func (p *Payment) ID() ID {
@@ -146,8 +202,46 @@ func (p *Payment) Status() Status {
 	return p.status
 }
 
-func (p *Payment) AuthorizedAt() time.Time {
-	return p.authorizedAt
+func (p *Payment) History() History {
+	return p.history
+}
+
+// Capture takes the whole authorised amount. Capturing a captured payment again changes
+// nothing and announces nothing — the caller repeating a capture whose answer it lost gets the
+// same payment back, not a second capture. A refunded payment cannot be captured again.
+func (p *Payment) Capture(at time.Time) error {
+	switch p.status {
+	case StatusCaptured:
+		return nil
+	case StatusAuthorized:
+	default:
+		return ErrInvalidTransition
+	}
+	p.status = StatusCaptured
+	p.history.capturedAt = at.UTC()
+	p.events = append(p.events, &Captured{
+		movement: p.movement(p.history.capturedAt),
+	})
+	return nil
+}
+
+// Refund returns the whole captured amount. Only a captured payment can be refunded: an
+// authorisation that was never captured took no money to give back. Refunding twice changes
+// nothing, for the same reason capturing twice does not.
+func (p *Payment) Refund(at time.Time) error {
+	switch p.status {
+	case StatusRefunded:
+		return nil
+	case StatusCaptured:
+	default:
+		return ErrInvalidTransition
+	}
+	p.status = StatusRefunded
+	p.history.refundedAt = at.UTC()
+	p.events = append(p.events, &Refunded{
+		movement: p.movement(p.history.refundedAt),
+	})
+	return nil
 }
 
 // Replays says whether this authorisation may stand as a replay of an earlier one, and

@@ -27,12 +27,19 @@ merchant, status — and the consumer needs nobody.
 | Replay rebuilds a read model | no, the API only answers *now* | yes, if the topic is compacted |
 | Load on the producer | one call per event per consumer | none |
 
-**Compaction is what makes the second one replayable, and it is measured.** A compacted
-topic keeps the last value per key: exp-03 wrote 2 010 records over 50 keys and the cleaner
-left 50 — the 40 live values plus 10 tombstones
+**Compaction is what makes the second one replayable.** A compacted topic keeps one record
+per key: exp-03 wrote 2 010 records over 50 keys and the cleaner left 50 — 40 live keys plus
+10 tombstones. That it kept the *last* value is the broker's documented rule, not this run's
+finding: exp-03 reads back keys and tombstones, not the values
 ([run](../experiments/kafka_internals/exp-03-segments-retention/results/run-2026-09-20-200653.log)).
 That is the difference between a topic that is a log of what happened and a topic that is
 also the current state.
+
+**This service is the state-transfer side, and it runs.** Every event carries the
+amount, currency and merchant (`proto/payment/v1/events.proto`), and the consumer builds
+per-merchant totals from the events alone — `internal/application/merchants` never calls the
+payments API, so the API can be down while totals move. The notification side is argued
+here, not run.
 
 **For payments:** notification across team boundaries, where the producer must stay free to
 change; state transfer where a consumer maintains a read model or a projection it has to be
@@ -148,9 +155,9 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 
 | Anti-pattern | What it costs, measured | Run |
 |---|---|---|
-| Assuming a global order across partitions | 6 827 – 8 721 of 10 000 events handled out of their business order, every payment split across partitions; keyed: 0, every run | [exp-01](../experiments/kafka_internals/exp-01-partition-keys/) |
+| Assuming one payment's events stay in order without a key | 6 827 – 8 721 of 10 000 events handled out of their business order, every payment split across partitions; keyed: 0, every run | [exp-01](../experiments/kafka_internals/exp-01-partition-keys/) |
 | A key that concentrates traffic (hot partition) | 85% of records on one partition; six consumers drained it 1.12–1.16× faster than one against a ceiling of 1.17×, while the same six drained evenly keyed events 5.2–5.8× faster (three runs each), and the seventh handled nothing | [exp-02](../experiments/kafka_internals/exp-02-hot-partition/) |
-| Retention as an afterthought | a 5 s retention left 0 of 2 000 records readable; compaction is the opposite lever and left 50 of 2 010 | [exp-03](../experiments/kafka_internals/exp-03-segments-retention/) |
+| Retention as an afterthought | records deleted before a reader got to them, with no error: a 5 s retention left 0 of 2 000 readable to a reader that came later. What a lagging group then does depends on its reset policy — not run | [exp-03](../experiments/kafka_internals/exp-03-segments-retention/) |
 | Committing the offset before the work | 49 of 1 000 payments gone with no error anywhere; with `GreedyAutoCommit`, the unwritten rest of a batch — 38 and 41 | [exp-05](../experiments/transaction_guarantee/exp-05-at-most-once/), [exp-05b](../experiments/transaction_guarantee/exp-05b-autocommit-greedy/) |
 | `acks=1` on a topic that carries money | 2 000 records acknowledged, 0 readable after the leader died inside the replication window | [exp-08](../experiments/transaction_guarantee/exp-08-acks/) |
 | Turning idempotence off to "go faster" | 80–291 duplicates per run over five runs; in the three that counted retries, exactly the records the leader had appended before answering `REQUEST_TIMED_OUT` — 80, 80 and 191 | [exp-09](../experiments/transaction_guarantee/exp-09-reordering/) |
@@ -158,7 +165,28 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 | One failure class for everything the database says | a row lock on one merchant read as "the database is down": every payment behind it waited out the 30 s lock, through 13 restarts | [exp-18](../experiments/transaction_guarantee/exp-18-retry-chain/) |
 | Leaving a transaction open | `read_committed` consumers saw nothing for 23.2–27.3 s behind a 20 s transaction timeout — lag with no messages, on a partition whose producer had nothing to do with the transaction | [exp-10d](../experiments/transaction_guarantee/exp-10d-hanging-transaction/) |
 | Treating a Kafka transaction as covering the database | Kafka exactly 1 000, Postgres 1 050 | [exp-10b](../experiments/transaction_guarantee/exp-10b-database-boundary/) |
-| Porting a Java config to franz-go unchanged | the defaults differ where it matters: one in-flight request instead of five, snappy instead of none, 10 ms of linger instead of 5, `AtStart` instead of `latest` | [checklist §7](tuning-checklist.md) |
+| Retention left unbounded (`retention.ms=-1` without compaction) | not run — argued below: the inbox's horizon would have to grow with it | — |
+| Porting a Java config to franz-go unchanged | the defaults differ where it matters: four in-flight requests with idempotence instead of five, snappy instead of none, 10 ms of linger instead of 5, `AtStart` instead of `latest` | [checklist §7](tuning-checklist.md) |
+
+### Unbounded retention — argued, not run
+
+`retention.ms=-1` on a topic that is not compacted keeps every record forever, and the cost
+does not show up where it is set. Disk is the obvious part. The less obvious parts are what
+grows with the log: every reassignment copies all of it — exp-15 moved 66–73 MiB in 2.2–2.3 s
+at about 30 MiB/s, so a log a thousand times larger would take a thousand times longer at the
+same rate (arithmetic, not a run) — and every consumer that can be pointed back at the start
+can redeliver all of it.
+
+In this service the second part is a correctness limit, not a cost. The inbox remembers an
+event id for 40 days because that is how long an event can come back: 30 days in the DLQ and
+7 more in a retry tier, plus a day of segment rounding each
+([README](../README.md#running-the-service), `internal/domain/retention`). That horizon is
+derived from the topics' retention. A DLQ or a retry tier with unbounded retention would make
+the horizon unbounded too — the inbox could never forget an id without risking a payment
+counted twice — so the bookkeeping table would grow forever along with the topic. Every
+topic here is bounded for that reason: 7 days on `payments.main` and the retry tiers, 30 on
+the DLQ (`deploy/topics/`). Keep forever only what is compacted to one record per key, where
+the log is a table and not a history.
 
 ---
 
@@ -180,7 +208,8 @@ around the dependency. Section 6 of the [tuning checklist](tuning-checklist.md) 
 
 ## What this document does not claim
 
-- **CDC and stream enrichment** are reasoned from the mechanics, not run here.
+- **CDC, stream enrichment and unbounded retention** are reasoned from the mechanics, not
+  run here.
 - **The retry chain** is measured on one failure only — a merchant row held by another
   transaction (exp-18) — and with its tiers scaled to 3 s / 6 s / 12 s. It is not measured
   against a table-wide lock, which it does not detect and would carry into the DLQ.

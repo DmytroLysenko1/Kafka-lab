@@ -1,0 +1,24 @@
+drill 01 started 2026-09-26T22:22:47Z, rolling to v2 under 20 req/s for 90s
+REVISION	UPDATED                 	STATUS  	CHART         	APP VERSION	DESCRIPTION     
+1       	Sun Sep 27 01:21:51 2026	deployed	payments-0.1.0	dev        	Install complete
+rollout to v2 took 10s (helm --wait, migrate hook included)
+POD                                  IMAGE                             READY
+migrate-7fnbf                        kafka-lab/migrate:v2              false
+outbox-relay-565c8df76f-9jgzp        kafka-lab/outbox-relay:v2         true
+outbox-relay-766cdbf979-mhkc8        kafka-lab/outbox-relay:dev        true
+payments-api-56d8999665-c2q96        kafka-lab/payments-api:v2         true
+payments-api-56d8999665-n44tc        kafka-lab/payments-api:v2         true
+payments-api-9d4c88d6c-r4kjr         kafka-lab/payments-api:dev        true
+payments-api-9d4c88d6c-zlbvb         kafka-lab/payments-api:dev        true
+payments-consumer-5978fff76c-7rl25   kafka-lab/payments-consumer:dev   true
+payments-consumer-5978fff76c-rx4vw   kafka-lab/payments-consumer:dev   true
+payments-consumer-789f5d94b9-26qhf   kafka-lab/payments-consumer:v2    true
+payments-consumer-789f5d94b9-qk8b9   kafka-lab/payments-consumer:v2    true
+Requests      [total, rate, throughput]         1800, 20.01, 20.01
+Duration      [total, attack, wait]             1m30s, 1m30s, 18.882ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  1.911ms, 3.699ms, 3.115ms, 5.217ms, 6.349ms, 11.954ms, 63.159ms
+Bytes In      [total, mean]                     97200, 54.00
+Bytes Out     [total, mean]                     135000, 75.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      201:1800  
+Error Set:

@@ -57,7 +57,7 @@ func measure(ctx context.Context, pool *pgxpool.Pool, s *settings, produced paym
 	// Every payment is one minor unit, so the merchants' totals and the inbox must agree to
 	// the unit: a payment counted twice shows up here and nowhere else.
 	err = pool.QueryRow(ctx,
-		"SELECT coalesce(sum(authorized_minor), 0) FROM merchant_totals WHERE merchant_id LIKE $1",
+		"SELECT coalesce(sum(authorized_minor), 0) FROM merchant_currency_totals WHERE merchant_id LIKE $1",
 		"exp18-"+s.cell+"-%").Scan(&result.totalOfCellsMerchants)
 	if err != nil {
 		return counts{}, fmt.Errorf("read the totals: %w", err)

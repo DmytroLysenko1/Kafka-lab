@@ -1,0 +1,40 @@
+{{- $scope := dict "root" $ "name" "migrate" "command" "migrate" }}
+# Migrations run as a command before the rollout, never from a service on boot (see
+# cmd/migrate/main.go): two replicas starting together would race through the same schema
+# change. As a pre-install/pre-upgrade hook the new schema is in place before the first new
+# pod starts, and a failed migration fails the release before any pod is replaced.
+# helm rollback does not run this hook: migrations only go forward, and each one must be
+# readable by the previous release (expand and contract).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  labels:
+    {{- include "payments.labels" $scope | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    # The last run stays until the next one, so its logs can be read after a failure.
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "payments.labels" $scope | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "payments.image" $scope }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            {{- include "payments.databaseURL" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}

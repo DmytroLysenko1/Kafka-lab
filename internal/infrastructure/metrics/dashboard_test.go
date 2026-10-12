@@ -24,6 +24,7 @@ var exported = []string{
 	"kafka_consumergroup_lag",
 	"kafka_consumergroup_members",
 	"kafka_consumergroup_current_offset",
+	"kafka_topic_partition_current_offset",
 	"kafka_topic_partition_under_replicated_partition",
 }
 
@@ -81,7 +82,8 @@ func publishedNames(t *testing.T) []string {
 	observed := metrics.New()
 	observed.Swept(1, time.Millisecond, nil)
 	observed.Backlog(1)
-	observed.Handled(true, time.Millisecond)
+	observed.Handled("counted")
+	observed.HandlingTook("counted", time.Millisecond)
 	observed.DeadLettered("undecodable")
 	observed.Retried("payments-consumer.retry.5s")
 	observed.Failed("handle")

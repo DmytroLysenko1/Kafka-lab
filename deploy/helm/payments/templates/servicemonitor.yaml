@@ -1,0 +1,19 @@
+# job="payments" is what the dashboard queries, as in the compose stand's prometheus.yml.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: payments
+  labels:
+    app.kubernetes.io/part-of: payments
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: payments
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: metrics
+      interval: 5s
+      relabelings:
+        - targetLabel: job
+          replacement: payments

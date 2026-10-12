@@ -1,0 +1,17 @@
+# Scrape targets for what the operators run. The exporter's job is renamed to "kafka", the
+# label deploy/grafana/dashboards/payments.json queries (as in the compose stand), so the
+# same dashboard file serves both stands.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kafka-exporter
+  namespace: lab
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/name: kafka-lab-kafka-exporter
+  podMetricsEndpoints:
+    - port: tcp-prometheus
+      relabelings:
+        - targetLabel: job
+          replacement: kafka

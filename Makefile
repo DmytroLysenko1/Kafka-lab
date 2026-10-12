@@ -13,14 +13,24 @@ BOOTSTRAP := --bootstrap-server localhost:9092
 DATABASE_URL ?= postgres://lab:lab@localhost:5432/lab?sslmode=disable
 KAFKA_BROKERS ?= localhost:19092,localhost:29092,localhost:39092
 SCHEMA_REGISTRY_URL ?= http://localhost:8080/apis/ccompat/v7
-export DATABASE_URL KAFKA_BROKERS SCHEMA_REGISTRY_URL
+# Tempo on the stand (make up); set it empty to run a service without exporting spans.
+OTEL_EXPORTER_OTLP_ENDPOINT ?= http://localhost:4318
+export DATABASE_URL KAFKA_BROKERS SCHEMA_REGISTRY_URL OTEL_EXPORTER_OTLP_ENDPOINT
 
 TOPICS ?=
 TOPIC ?=
 GROUP ?=
 EXP ?=
 
-.PHONY: up stop down logs proto topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag migrate build vet lint test test-race test-integration verify tidy
+SERVICES := payments-api outbox-relay payments-consumer migrate dlq-replayer prune
+# The commit the images are built from, plus a hash of the uncommitted changes when there
+# are any (deploy/docker/image-tag.sh): a tag that is rebuilt in place changes no pod
+# template, so nothing rolls (deploy/helm/payments).
+IMAGE_TAG ?= $(shell deploy/docker/image-tag.sh)
+export IMAGE_TAG
+DOCKER_BUILD := DOCKER_BUILDKIT=1 docker build -f deploy/docker/Dockerfile
+
+.PHONY: up stop down logs proto topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag migrate prune build vet lint test test-race test-integration verify tidy images image-measure app-up app-down k8s-up k8s-down k8s-images k8s-secret k8s-verify k8s-deploy k8s-replay k8s-drill-% k8s-evidence k8s-resources
 
 up:
 	$(COMPOSE) up -d --wait
@@ -32,6 +42,15 @@ stop:
 # empty log. Use `make stop` to pause an experiment without shredding its state.
 down:
 	$(COMPOSE) down -v
+
+# The services as containers next to the stand (the compose `app` profile). Needs `make up`
+# and `make topics` first, and the host-run services stopped: both bind the same ports.
+app-up:
+	$(if $(PAYMENTS_API_KEY),,$(error PAYMENTS_API_KEY is required: the API refuses to start without it))
+	$(COMPOSE) --profile app up -d --build --wait payments-api outbox-relay payments-consumer
+
+app-down:
+	$(COMPOSE) --profile app rm -sf migrate payments-api outbox-relay payments-consumer
 
 logs:
 	$(COMPOSE) logs -f
@@ -110,11 +129,17 @@ proto:
 migrate:
 	go run ./cmd/migrate
 
+# Deletes inbox and outbox rows past their horizons (cmd/prune); on Kubernetes an hourly CronJob.
+prune:
+	go run ./cmd/prune
+
 build:
 	go build ./...
 
+# The integration tag is vetted too, which compiles the suite: it cannot run without the stand,
+# but it can stop compiling without one, and once did unnoticed.
 vet:
-	go vet ./...
+	go vet -tags integration ./...
 
 lint:
 	golangci-lint run
@@ -130,7 +155,7 @@ test-race:
 # can decode what the publisher wrote by the schema id inside it. Needs `make up`.
 # The packages share one Postgres and run in parallel; they stay hermetic by owning
 # disjoint tables — the payments side truncates payments and outbox, the consumer side
-# inbox and merchant_totals.
+# inbox and merchant_currency_totals.
 test-integration:
 	go test -race -count=1 -tags=integration ./internal/...
 
@@ -144,3 +169,88 @@ verify:
 
 tidy:
 	go mod tidy
+
+# Sizes and rebuild times of docs/k8s/01-docker.md, with the log kept in deploy/docker/results/.
+image-measure:
+	deploy/docker/measure.sh
+
+images:
+	@for service in $(SERVICES); do \
+		$(DOCKER_BUILD) --build-arg SERVICE=$$service -t kafka-lab/$$service:$(IMAGE_TAG) . || exit 1; \
+	done
+
+# The Kubernetes stand (docs/k8s/): kind, the platform charts, Kafka through Strimzi,
+# Postgres through CloudNativePG. Refuses to start next to the compose stand.
+k8s-up:
+	deploy/k8s/up.sh
+
+k8s-down:
+	kind delete cluster --name kafka-lab
+
+CHART := deploy/helm/payments
+K8S_NAMESPACE := lab
+# The tag running in the cluster, read from the release. IMAGE_TAG is computed from the working
+# tree, which drifts from what was built and loaded as soon as a file changes; a one-off job
+# run beside the release must use the image the release runs. Recursive (=), so helm is
+# asked only by a target that uses it.
+DEPLOYED_TAG = $(shell helm get values payments -n $(K8S_NAMESPACE) -o json 2>/dev/null | jq -r .image.tag)
+CLASS ?= exhausted
+# Schemas for the CRDs the chart uses (ServiceMonitor), from the community catalog at a fixed
+# commit — its main branch would change what `make k8s-verify` accepts without a change here.
+KUBECONFORM := kubeconform -strict -summary -schema-location default \
+	-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/ad3b08c5045129d7bb1eeffd8e61719b2c8dd1e2/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+
+# Nothing is pulled from a registry: the images are copied into the kind nodes.
+k8s-images: images
+	@for service in $(SERVICES); do \
+		kind load docker-image kafka-lab/$$service:$(IMAGE_TAG) --name kafka-lab || exit 1; \
+	done
+
+# Generated once and never printed; an existing key is left alone, so a rerun does not
+# lock out the callers that hold it.
+k8s-secret:
+	@kubectl get secret payments-api-key -n $(K8S_NAMESPACE) >/dev/null 2>&1 || \
+		kubectl create secret generic payments-api-key -n $(K8S_NAMESPACE) \
+			--from-literal=PAYMENTS_API_KEY="$$(openssl rand -hex 24)"   # 192 random bits
+
+# The chart and the platform's own manifests (Strimzi, CloudNativePG, prometheus-operator
+# objects included, through the pinned CRD catalog).
+k8s-verify:
+	helm lint $(CHART) --set image.tag=verify
+	helm template payments $(CHART) --namespace $(K8S_NAMESPACE) --set image.tag=verify | $(KUBECONFORM)
+	$(KUBECONFORM) deploy/k8s/platform/*.yaml
+
+# The chart's version and appVersion never change, so helm history tells revisions apart only
+# by the description: every upgrade names the image tag it rolled out, which is what the
+# runbook picks a rollback target by.
+k8s-deploy: k8s-verify k8s-secret
+	helm upgrade --install payments $(CHART) --namespace $(K8S_NAMESPACE) \
+		--set image.tag=$(IMAGE_TAG) --description "image $(IMAGE_TAG)" --wait --timeout 5m
+
+# The restricted profile and a memory limit, as for the chart's pods; kubectl run has no flags
+# for either, so they go in as an override of the generated pod. runAsUser is numeric on
+# purpose: the image says USER nonroot, and the kubelet cannot prove a user name is not
+# root, so runAsNonRoot alone refuses to start the container.
+REPLAYER_OVERRIDES = {"spec":{"automountServiceAccountToken":false,"securityContext":{"runAsNonRoot":true,"runAsUser":65532,"runAsGroup":65532,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"replayer","image":"kafka-lab/dlq-replayer:$(DEPLOYED_TAG)","args":["-class=$(CLASS)"],"env":[{"name":"KAFKA_BROKERS","value":"kafka-lab-kafka-bootstrap:9092"}],"securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}},"resources":{"requests":{"cpu":"10m","memory":"32Mi"},"limits":{"memory":"64Mi"}}}]}}
+
+# The replayer is a command run by hand, not a workload: one pod, attached, removed after.
+k8s-replay:
+	@test -n "$(DEPLOYED_TAG)" -a "$(DEPLOYED_TAG)" != null || { echo "no payments release in $(K8S_NAMESPACE) to take the image tag from" >&2; exit 1; }
+	kubectl run dlq-replayer-$$(date +%s) -n $(K8S_NAMESPACE) --rm -i --restart=Never \
+		--image=kafka-lab/dlq-replayer:$(DEPLOYED_TAG) --image-pull-policy=IfNotPresent \
+		--overrides='$(REPLAYER_OVERRIDES)' -- -class=$(CLASS)
+
+# make k8s-drill-01 runs deploy/k8s/drills/01-*.sh; each writes its evidence under results/.
+k8s-drill-%:
+	$(eval DRILL := $(firstword $(wildcard deploy/k8s/drills/$*-*.sh)))
+	$(if $(DRILL),,$(error no drill matches deploy/k8s/drills/$*-*.sh))
+	cd deploy/k8s/drills && ./$(notdir $(DRILL))
+
+# Every log the docs cite, in one run (its length is in the resource log's header): see
+# deploy/k8s/drills/session.sh.
+k8s-evidence:
+	deploy/k8s/drills/session.sh
+
+# What every container requested and used over WINDOW (default 3h), into drills/results/.
+k8s-resources:
+	deploy/k8s/resources.sh

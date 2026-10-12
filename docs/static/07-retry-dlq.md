@@ -99,7 +99,7 @@ main group.
 
 **A resumed partition waits for the fetch already in flight.** The broker holds a fetch open
 for up to `fetch.max.wait` when it has nothing new, and a partition resumed meanwhile joins
-only the next one. With franz-go's default of 5 s, exp-18 counted replayed payments 5–8 s
+only the next one. With franz-go's default of 5 s, exp-18 counted replayed payments 5–8 s (a session observation, its log not kept)
 after the replay into a 3 s tier. The tiers fetch with a 500 ms wait; the main topic keeps
 the default, because it never pauses and data arriving ends its fetch at once.
 
@@ -215,6 +215,10 @@ The DLQ also runs on `LogAppendTime` for a second reason: retention deletes a se
 its newest timestamp, and a dead letter forwarded with its original timestamp would start
 the clock at the event's birth rather than at its death. It deliberately has no
 `retention.bytes`: a storm of poison records must not silently push payments out by size.
+For the same reason — whole segments — a record outlives its retention by up to one
+`segment.ms`, so the tiers and the DLQ roll a segment a day: with the default week a letter
+would stay replayable for 37 days and the inbox, which must remember an event for as long as
+it can come back, would need a longer horizon than the one it has.
 One gap remains for the replayer itself: it runs on demand, and a group idle for longer
 than `offsets.retention.minutes` (seven days here) loses its committed offsets, so a
 replayer that trusts its group offset would replay everything from the start.
@@ -232,28 +236,41 @@ Classifying the error at the boundary is what makes the difference visible in co
 
 ## Retries reorder events by design
 
-A record sent to `payments-consumer.retry.10m` comes back long after its neighbours, and
-that produces two different wrong orders, not one. The state transition is guarded in the
-database, `UPDATE ... WHERE status = $expected`, and the handler has to tell the two apart
-by which side of the expected state the row is on:
+A record sent to `payments-consumer.retry.10m` comes back long after its neighbours: a
+payment's `PaymentCaptured` can be counted after the `PaymentRefunded` that followed it. This
+service is built so that the order does not matter, and it gets there in two halves.
 
-- **The row is already past the expected state** — a *stale* event: the transition it
-  carries has been applied. Note this cannot be its own predecessor coming back late, since
-  the rule below keeps a successor behind it; it is a second copy of an applied transition
-  under a different `event_id` — the provider reporting one authorization twice, say — which
-  the inbox does not deduplicate. It changes nothing and is acknowledged.
-- **The row is still behind the expected state** — a *premature* event: `Authorized` went
-  to `retry.1m`, `Captured` arrived next and finds the payment still `Requested`. Treating
-  this as "wrong state, change nothing" loses the capture. It is a retriable error and goes
-  into the chain after its predecessor.
+**The state machine lives where the command arrives, not in the consumer.** A capture or a
+refund is decided by the payments API, in one transaction: the payment row is read
+`FOR UPDATE`, scoped to its merchant, the domain decides whether the move is allowed
+(`authorized → captured → refunded`, a repeat changes nothing), and the write applies only if
+the status is still the one the decision was made from — `UPDATE … WHERE status = $from` —
+with the event in the outbox beside it (`internal/application/payments/change.go`,
+`postgres/payments.go`). A refund that races its capture waits on the row lock and either
+finds the payment captured or is refused; the CHECK `payments_status_history` refuses a
+refund without a capture whatever the code believes. So no event leaves the service out of
+order with the state it describes, and no consumer has to referee a transition.
 
-Because the key survives every hop, the premature event lands in the same partition as its
-predecessor and, inside a tier, behind it. The residual risk is worth stating: if the
-successor exhausts its attempts before the predecessor does, it reaches the DLQ first, so
-the replay has to follow the offsets of a key, not the order of the letters. The stricter
-alternative is to park the key — while any event of a payment sits in the chain, every
-later event of the same payment goes straight in behind it. Ordering is not restored by
-the retry chain and must not be assumed by anything downstream of it.
+**The consumer keeps sums, and sums do not care about order.** What it projects per merchant
+and currency is three numbers — authorised, captured, refunded — each grown by an atomic
+`+=` in the database (`postgres/totals.go`), each event counted once by the inbox. A refund
+counted before its capture makes `refunded_minor` run ahead of `captured_minor` for as long as
+the capture spends in a tier, and the totals end on the same values whichever order the events
+arrive in, however many times (`internal/application/merchants/movements_test.go` drives every
+order; the projection's CHECKs hold each sum ≥ 0 and deliberately do not tie them together).
+Once every event is in, `refunded ≤ captured ≤ authorized`.
+
+**What a consumer that ran the state machine would need instead.** A projection that kept a
+*status* rather than sums would have to tell two wrong orders apart by which side of the
+expected state its row is on: a *stale* event — the transition is already applied, a second
+copy under another `event_id` the inbox does not catch — changes nothing and is acknowledged;
+a *premature* one — `Captured` arriving before the authorisation its row needs — must not be
+dropped as "wrong state", or the capture is lost: it is a retriable error and goes into the
+chain behind its predecessor. Even then, a successor that exhausts its attempts first reaches
+the DLQ first, so a replay would have to follow a key's offsets, not the letters' order — or
+the chain would have to park the key while any event of the payment sits in it. This service
+avoids all of that by not keeping a status downstream. Ordering is not restored by the retry
+chain and must not be assumed by anything downstream of it.
 
 ## The chain is for one failing record, not for an outage
 
@@ -268,6 +285,13 @@ removed, no commit rewound and nothing handled twice, where the inline retry had
 removed and a stale commit rewind a partition 1 726–1 732 records. The retry chain stays for what it is good at: one record failing among
 healthy ones.
 
+This service takes the plainer of the two ways out of the chain: it has no circuit breaker,
+and when Postgres itself is unreachable the consumer stops on the first record it cannot
+count — the error leaves the process, the offset stays where it was, and Kubernetes restarts
+it until the database answers ([docs/k8s/decisions.md](../k8s/decisions.md), drill 04f).
+Nothing is lost or counted twice either way; the breaker would keep the group membership and
+spare the restart back-off.
+
 ## What the service moves into the chain, and what it does not
 
 The handler's only dependency is Postgres, so the chain has exactly one failure to carry: a
@@ -277,6 +301,14 @@ own transaction, and Postgres's answer when it runs out — SQLSTATE `55P03` —
 chain. Postgres being unreachable is not a record's failure: the offset is held and the
 consumer stops, as before. A payment that cannot be decoded, or that the domain refuses,
 goes straight to the DLQ.
+
+Why the contention exists at all: records are keyed by `payment_id`, so one merchant's
+payments spread over all six partitions and meet at its totals row. Keying by `merchant_id`
+would serialise them in one partition and remove the contention between our own members — but
+not the holders the chain is really for, a report or a reconciliation holding the row from
+outside (exp-18's scenario), and it would make a large merchant a hot partition (exp-02). The
+key is for ordering, which is per payment; a total is a sum, and a sum does not care about
+order.
 
 exp-18 measured what that buys, with one merchant's row held for 30 s under 600 payments:
 without the chain every payment behind a contended one waited out the lock — 30.5 s and
@@ -293,7 +325,8 @@ is moved, and Postgres applies `lock_timeout` to each lock acquisition, not to t
 statement: queued behind a tier's transaction that is already waiting on the row, the main
 stage waits up to 2 s for the tuple lock and up to 2 s more for the row. exp-18 saw eight
 waits for six payments, 16 of the 17 s. A batch therefore also has a budget of its own —
-20 s, after which the rest of it is rewound and fetched again — so that a partition full of
+15 s, after which the rest of it is rewound and fetched again (exp-18 ran with 20 s; it came
+down when the rollback that follows a failed handling was counted in the sum, `budget_test.go`) — so that a partition full of
 one locked merchant's payments cannot hold the rebalance past its 60 s timeout, the failure
 exp-16 measured.
 
@@ -301,20 +334,21 @@ exp-16 measured.
 keeps — no payment overtook a contended one without the chain, and 280–316 did with it
 (exp-18, third run). That is the mechanism working, and it is also a contract change for
 anyone downstream: a partition's events stop arriving in the order they were produced for
-every key that ever meets a lock. The inbox here counts authorisations, whose order does not
-matter; events of one payment whose order does would need the chain to park the later ones
-behind the earlier, which this chain does not do.
+every key that ever meets a lock. The inbox here counts movements into sums, whose order does
+not matter (the section above); a downstream that kept a status per payment would need the
+chain to park the later events behind the earlier, which this chain does not do.
 
 **A lock on the whole table is not contention on one row.** A migration or a bulk update
 that holds every merchant makes every payment contended, and the chain carries all of them
 to the DLQ eleven minutes in. That is the outage case above; the chain does not detect it.
 
 **Reordering is harmless here, and the condition is written down.** A contended payment is
-overtaken by the payments behind it, and by other payments of the same merchant. That is
-safe in this service because each payment has one event and the merchant total is a sum,
-which does not care about order. The day a second event for the same payment appears — a
-capture, a refund — the section above applies: the later event has to follow the earlier
-one into the chain, not overtake it.
+overtaken by the payments behind it, by other payments of the same merchant, and — now that a
+payment has three events — by its own later capture or refund. That is safe in this service
+because every merchant total is a sum per kind of movement, which does not care about order,
+and the state machine that does care runs in the API, before any event is published (see
+"Retries reorder events by design"). The condition that keeps it safe: nothing downstream of
+this topic keeps a per-payment status. A consumer that did would need the key parked.
 
 ## To be measured
 

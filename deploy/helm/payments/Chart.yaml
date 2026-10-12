@@ -1,0 +1,6 @@
+apiVersion: v2
+name: payments
+description: The Kafka-lab payments service — API, outbox relay and consumer — with its migration as a pre-install/pre-upgrade hook.
+type: application
+version: 0.1.0
+appVersion: dev

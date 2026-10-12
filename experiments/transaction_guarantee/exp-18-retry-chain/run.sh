@@ -30,11 +30,12 @@ for topic in "$here"/topics/*.yaml; do
 done
 
 # The inbox and the totals are the evidence, so they start empty. Each cell has its own
-# merchants and its own range of event ids, 180000–182999.
+# merchants and its own range of event ids, from 9.180e15 up — far past anything the outbox,
+# whose row ids are the service's event ids, will reach in the shared inbox (see exp-11).
 make migrate
 docker exec -i kafka-lab-postgres psql -U lab -d lab -q -c \
-  "DELETE FROM merchant_totals WHERE merchant_id LIKE 'exp18-%';
-   DELETE FROM inbox WHERE event_id ~ '^18[0-2][0-9]{3}$';"
+  "DELETE FROM merchant_currency_totals WHERE merchant_id LIKE 'exp18-%';
+   DELETE FROM inbox WHERE event_id ~ '^918[0-2]0{9}[0-9]{3}$';"
 
 binary="$(mktemp -d)/exp-18"
 trap 'rm -rf "$(dirname "$binary")"' EXIT
@@ -49,15 +50,15 @@ go build -o "$binary" ./experiments/transaction_guarantee/exp-18-retry-chain
   echo
 
   echo "== cell A: no chain =="
-  "$binary" -cell a -hold "$hold" -first-event-id 180000 -budget "$budget"
+  "$binary" -cell a -hold "$hold" -first-event-id 9180000000000000 -budget "$budget"
   echo
 
   echo "== cell B: the chain, lock released after $hold =="
-  "$binary" -cell b -hold "$hold" -first-event-id 181000 -budget "$budget"
+  "$binary" -cell b -hold "$hold" -first-event-id 9181000000000000 -budget "$budget"
   echo
 
   echo "== cell C: the chain, lock held until every contended payment is archived, then replayed =="
-  "$binary" -cell c -first-event-id 182000 -budget "$budget"
+  "$binary" -cell c -first-event-id 9182000000000000 -budget "$budget"
 } 2>&1 | tee "$log"
 
 echo "written to ${log#"$repo"/}"

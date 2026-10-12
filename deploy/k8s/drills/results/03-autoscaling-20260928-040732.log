@@ -1,0 +1,69 @@
+drill 03 started 2026-09-28T01:07:32Z, 1200 req/s for 180s, watching 420s after
+t=   0s cpu=<none>% desired=2 current=2
+t=  10s cpu=9% desired=2 current=2
+t=  20s cpu=9% desired=2 current=2
+t=  31s cpu=9% desired=2 current=2
+t=  41s cpu=138% desired=4 current=2
+t=  51s cpu=182% desired=5 current=4
+t=  61s cpu=182% desired=5 current=4
+t=  71s cpu=148% desired=5 current=5
+t=  82s cpu=88% desired=5 current=5
+t=  92s cpu=88% desired=5 current=5
+t= 102s cpu=74% desired=5 current=5
+t= 112s cpu=75% desired=5 current=5
+t= 122s cpu=75% desired=5 current=5
+t= 133s cpu=72% desired=5 current=5
+t= 143s cpu=76% desired=5 current=5
+t= 153s cpu=76% desired=5 current=5
+t= 163s cpu=75% desired=5 current=5
+t= 173s cpu=75% desired=5 current=5
+t= 184s cpu=75% desired=5 current=5
+t= 194s cpu=78% desired=5 current=5
+t= 204s cpu=97% desired=5 current=5
+t= 214s cpu=97% desired=5 current=5
+t= 224s cpu=33% desired=5 current=5
+t= 234s cpu=6% desired=5 current=5
+t= 245s cpu=6% desired=5 current=5
+t= 255s cpu=1% desired=5 current=5
+t= 265s cpu=1% desired=5 current=5
+t= 275s cpu=1% desired=5 current=5
+t= 285s cpu=1% desired=5 current=5
+t= 295s cpu=1% desired=5 current=5
+t= 305s cpu=1% desired=5 current=5
+t= 315s cpu=1% desired=5 current=5
+t= 326s cpu=1% desired=5 current=5
+t= 336s cpu=1% desired=5 current=5
+t= 346s cpu=1% desired=5 current=5
+t= 356s cpu=1% desired=5 current=5
+t= 366s cpu=1% desired=5 current=5
+t= 376s cpu=1% desired=5 current=5
+t= 386s cpu=1% desired=5 current=5
+t= 397s cpu=1% desired=5 current=5
+t= 407s cpu=1% desired=5 current=5
+t= 417s cpu=1% desired=5 current=5
+t= 427s cpu=1% desired=5 current=5
+t= 437s cpu=1% desired=5 current=5
+t= 447s cpu=1% desired=5 current=5
+t= 458s cpu=1% desired=5 current=5
+t= 468s cpu=1% desired=5 current=5
+t= 478s cpu=1% desired=5 current=5
+t= 488s cpu=1% desired=5 current=5
+t= 498s cpu=1% desired=5 current=5
+t= 508s cpu=1% desired=3 current=5
+t= 518s cpu=1% desired=2 current=3
+t= 528s cpu=1% desired=2 current=3
+t= 538s cpu=1% desired=2 current=2
+t= 549s cpu=1% desired=2 current=2
+t= 559s cpu=1% desired=2 current=2
+t= 569s cpu=1% desired=2 current=2
+t= 579s cpu=2% desired=2 current=2
+t= 589s cpu=2% desired=2 current=2
+t= 599s cpu=2% desired=2 current=2
+Requests      [total, rate, throughput]         216000, 1200.01, 1199.97
+Duration      [total, attack, wait]             3m0s, 3m0s, 4.831ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  581.208µs, 12.516ms, 1.432ms, 9.689ms, 32.319ms, 181.69ms, 1.444s
+Bytes In      [total, mean]                     9072000, 42.00
+Bytes Out     [total, mean]                     0, 0.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      200:216000  
+Error Set:

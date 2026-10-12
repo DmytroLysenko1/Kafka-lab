@@ -114,10 +114,11 @@ func TestADeadLetterCarriesOnlyItsOwnVerdict(t *testing.T) {
 			{Key: "dlq_reason", Value: []byte("nothing to see")},
 			{Key: "dlq_origin_topic", Value: []byte("somewhere.else")},
 			{Key: "dlq_class", Value: []byte("exhausted")},
+			{Key: "dlq_trace_id", Value: []byte("not-the-trace")},
 		},
 	}
 
-	letter := deadLetterHeaders(forged, errors.New("merchants: the event names no merchant"), ClassRefused, entered)
+	letter := deadLetterHeaders(forged, errors.New("merchants: the event names no merchant"), ClassRefused, "4bf92f3577b34da6a3ce929d0e0e4736", entered)
 
 	want := map[string]string{
 		"event_id":             "7",
@@ -127,6 +128,7 @@ func TestADeadLetterCarriesOnlyItsOwnVerdict(t *testing.T) {
 		"dlq_origin_partition": "2",
 		"dlq_origin_offset":    "5",
 		"dlq_archived_at":      "2026-09-25T12:00:00Z",
+		"dlq_trace_id":         "4bf92f3577b34da6a3ce929d0e0e4736",
 	}
 	if diff := cmp.Diff(want, headerMap(letter)); diff != "" {
 		t.Errorf("dead letter headers (-want +got):\n%s", diff)
@@ -144,7 +146,7 @@ func TestMovingARecordOnLeavesTheFetchedRecordUntouched(t *testing.T) {
 	fetched := &kgo.Record{Topic: "payments.main", Headers: headers}
 
 	_ = retryHeaders(fetched, 1, entered)
-	_ = deadLetterHeaders(fetched, errors.New("refused"), ClassRefused, entered)
+	_ = deadLetterHeaders(fetched, errors.New("refused"), ClassRefused, "", entered)
 	_ = replayHeaders(fetched)
 
 	want := []kgo.RecordHeader{{Key: "event_id", Value: []byte("7")}}

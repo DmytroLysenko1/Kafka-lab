@@ -55,7 +55,7 @@ type cell struct {
 	s       *settings
 	admin   *kadm.Client
 	pool    *pgxpool.Pool
-	record  *merchants.RecordAuthorized
+	record  *merchants.RecordMovement
 	detours *kafka.Detours
 	lock    lock
 	counted func() bool
@@ -101,7 +101,7 @@ func measureCell(ctx context.Context, s *settings) (err error) {
 		s:       s,
 		admin:   admin,
 		pool:    pool,
-		record:  merchants.NewRecordAuthorized(postgres.NewInboxStore(storage), postgres.NewTotalsStore(storage), storage, time.Now),
+		record:  merchants.NewRecordMovement(postgres.NewInboxStore(storage), postgres.NewTotalsStore(storage), storage, time.Now),
 		detours: detours,
 		lock:    held,
 		counted: func() bool {
@@ -242,10 +242,10 @@ func (c *cell) release() error {
 // blindToContention hides the one thing the chain is built on: its error still reports a
 // database failure, but no longer says which kind.
 type blindToContention struct {
-	inner *merchants.RecordAuthorized
+	inner *merchants.RecordMovement
 }
 
-func (b blindToContention) Execute(ctx context.Context, event merchants.AuthorizedEvent) (bool, error) {
+func (b blindToContention) Execute(ctx context.Context, event *merchants.PaymentEvent) (bool, error) {
 	counted, err := b.inner.Execute(ctx, event)
 	if errors.Is(err, merchants.ErrContended) {
 		return counted, fmt.Errorf("%w: %s", errDatabase, err.Error())

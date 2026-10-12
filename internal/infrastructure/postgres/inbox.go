@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"time"
-)
 
-var ErrInbox = errors.New("postgres: inbox")
+	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
+	"github.com/DmytroLysenko1/Kafka-lab/internal/domain/merchant"
+)
 
 const claimEvent = `
 INSERT INTO inbox (event_id, consumed_at) VALUES ($1, $2) ON CONFLICT (event_id) DO NOTHING`
@@ -26,14 +27,23 @@ func NewInboxStore(storage *Storage) *InboxStore {
 // insert itself: two consumers handed the same redelivered event both try to write the same
 // key, and only one of them can. It has to run in the transaction that does the work, or
 // the claim would survive a rollback and the event would be dropped instead of retried.
+//
+// The claim runs before TotalsStore.Add sets lock_timeout, so it waits without that bound. It
+// can only wait on the same event id held by another transaction — a duplicate in flight in a
+// sibling stage — which settles within its own handlingTimeout, and the waiter's handlingTimeout
+// bounds the wait too; in the rare case that runs out, the record stays where it is and is
+// handled after the restart. The wait that can last — on a merchant's row — is not this one.
 func (s *InboxStore) Claim(ctx context.Context, eventID string, at time.Time) (bool, error) {
 	if _, inside := transaction(ctx); !inside {
 		return false, fmt.Errorf("postgres.Claim inbox: %w", ErrOutsideTransaction)
 	}
 
 	claimed, err := s.storage.conn(ctx).Exec(ctx, claimEvent, eventID, at.UTC())
-	if err != nil {
-		return false, fmt.Errorf("postgres.Claim inbox %s: %w", eventID, errors.Join(ErrInbox, err))
+	switch {
+	case refusedByData(err):
+		return false, fmt.Errorf("postgres.Claim inbox %s: %w", eventID, errors.Join(merchants.ErrUnprocessable, err))
+	case err != nil:
+		return false, fmt.Errorf("postgres.Claim inbox %s: %w", eventID, errors.Join(merchant.ErrStorage, err))
 	}
 	return claimed.RowsAffected() == 1, nil
 }

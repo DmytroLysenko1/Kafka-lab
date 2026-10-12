@@ -1,12 +1,13 @@
 # 09 — Schema evolution: who gets upgraded first
 
-**The question:** a field is added to `PaymentCaptured` — who has to be deployed first,
-the producers or the consumers, and who decides?
+**The question:** a field of a payment event changes — who has to be deployed first, the
+producers or the consumers, and who decides?
 
 KR3 · no interactive twin: the answer is a deploy order and a decision table, and both
 read better sitting still.
 
-The change under test in both figures is **`merchant_ref` deleted from `PaymentCaptured`**.
+The change under test in both figures is **`amount_minor` deleted from `PaymentAuthorized`**
+— the deletion exp-12 made to the schema the service really publishes.
 Which levels accept it is not what the level names suggest, and this stand measured it
 rather than assuming: on Apicurio 3.0.9 `BACKWARD` **refuses** the deletion (exp-12c) while
 `FULL` **accepts** it (exp-12f). So the figures below run under `FULL` — the strictest
@@ -27,16 +28,16 @@ sequenceDiagram
     participant T as payments.main
     participant C1 as payments-consumer v1<br/>still running
 
-    P->>SR: register PaymentCaptured v2, merchant_ref deleted
+    P->>SR: register PaymentAuthorized v2, amount_minor deleted
     Note over SR: the only compatibility check that will ever run:<br/>once, here, against the previous version.<br/>Nothing is checked again at read time
     SR-->>P: accepted, schema id N
 
     rect rgba(229, 57, 53, 0.16)
         Note over P,C1: v2 bytes now meet v1 readers, with the registry's<br/>strictest verdict already given and never revisited
-        P->>T: produce: magic 0x00 + id N + payload without merchant_ref
+        P->>T: produce: magic 0x00 + id N + payload without amount_minor
         T-->>C1: those bytes
-        C1->>SR: GET schema N, cached after the first call
-        Note over T,C1: Avro: v1 declares merchant_ref with no default,<br/>so resolution fails and the consumer stops — loudly.<br/>proto3: there is no "required", so merchant_ref decodes<br/>as "" and the handler carries on with an empty merchant
+        C1->>SR: GET schema N, cached after the first call<br/>(a registry-aware client — this repo's consumer skips it)
+        Note over T,C1: Avro: v1 declares amount_minor with no default,<br/>so resolution fails and the consumer stops — loudly.<br/>proto3: there is no "required", so amount_minor decodes<br/>as 0, and only the domain rule that an authorised<br/>amount is positive keeps it out of the total
     end
 ```
 
@@ -57,14 +58,14 @@ sequenceDiagram
     participant T as payments.main
     participant C2 as payments-consumer v2
 
-    P->>SR: register PaymentCaptured v2, merchant_ref deleted
+    P->>SR: register PaymentAuthorized v2, amount_minor deleted
     SR-->>P: accepted, schema id N
 
     Note over C2: v2 consumers roll out first and immediately<br/>start reading v1 bytes, still produced by v1 producers
     P->>T: produce with the v1 schema, id 31
     T-->>C2: v1 bytes
     C2->>SR: GET schema 31
-    Note over C2: this is exactly the direction the registry checked:<br/>a v2 reader reading v1 data, ignoring merchant_ref
+    Note over C2: this is exactly the direction the registry checked:<br/>a v2 reader reading v1 data, ignoring amount_minor
 
     Note over P,C2: only now do producers roll to v2, and the bytes they<br/>write are read by consumers that were built for them
 ```
@@ -85,20 +86,24 @@ Never assemble this by hand — use `franz-go/pkg/sr`. The symptom of getting it
 distinctive and initially baffling: the consumer fails immediately, on the first byte,
 with a decode error that mentions nothing about schemas.
 
-## Subjects: one topic, four event types
+## Subjects: one topic, one file, three event messages
 
-The figures above register `PaymentCaptured` as if it owned its subject. With the default
-`TopicNameStrategy` it does not: the subject is `payments.main-value`, and every schema
-registered under it is checked against the one before. `payments.main` carries four event
-types — requested, authorized, captured, refunded — and they have to share it, because
-splitting them across topics would give up the per-payment ordering the key exists for.
-Registering `PaymentAuthorized` into that subject would then be judged against
-`PaymentCaptured`.
+The figures draw `PaymentAuthorized` as if it owned its subject. It does not: with the
+default `TopicNameStrategy` the subject is `payments.main-value`, and what the relay
+registers there at start-up is one schema — the whole of `proto/payment/v1/events.proto`,
+with `PaymentAuthorized`, `PaymentCaptured` and `PaymentRefunded` in it
+(`internal/infrastructure/kafka/publisher.go`, `registerSchema`). All three event types
+travel under that one schema id, and the message index in the framing says which of them a
+record is; the consumer picks the message by that index (`decode.go`). They share the topic
+because the per-payment ordering the key exists for would not survive splitting them.
 
-The value is therefore one envelope, `PaymentEvent { oneof event { … } }`, under
-`TopicNameStrategy`, and a new event type is a new `oneof` variant — which the registry
-should accept as compatible, a verdict exp-12 records from a run against the pinned
-registry image rather than from memory. Three more rules follow from the same wire format:
+So every change to any of the three is a new version of the one file, checked against the
+version before it, and a new event type is a new message appended to the file — appended,
+because the index is a position, and a message inserted earlier would shift every index
+after it. That is how captures and refunds arrived with the Kubernetes stage. Whether the pinned registry
+accepts an appended message under `BACKWARD` has no log of its own yet; exp-12 records the
+nearest measured case, an added field, accepted under every level. Three more rules follow
+from the same wire format:
 
 - **The retry tiers and the DLQ forward bytes verbatim** — magic byte, schema id and
   payload untouched — and no subject is registered for them. A forwarder that decoded and
@@ -118,7 +123,7 @@ means the same thing for every format:
 
 | Mode | Guarantee | Deploy order |
 |---|---|---|
-| `BACKWARD` (default) | a **new** schema can read data written with the **previous** one | **consumers first** |
+| `BACKWARD` (Confluent's default; Apicurio starts a subject at `NONE`, so the relay sets it) | a **new** schema can read data written with the **previous** one | **consumers first** |
 | `FORWARD` | the **previous** schema can read data written with the **new** one | **producers first** |
 | `FULL` | both directions against the previous version | either order |
 | `*_TRANSITIVE` | the same, checked against **all** previous versions, not only the last | as above |

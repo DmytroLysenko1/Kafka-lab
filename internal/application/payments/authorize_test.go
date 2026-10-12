@@ -56,12 +56,12 @@ func (db *fakeDB) WithinTx(ctx context.Context, fn func(ctx context.Context) err
 // CreateOrGet returns what the key already bought and decides nothing about it, as the real
 // store does: whether a replay may stand is the payment's call, and a fake that made it
 // would let the use case pass a test without ever asking.
-func (db *fakeDB) CreateOrGet(_ context.Context, authorized *payment.Payment, idempotencyKey string) (*payment.Payment, bool, error) {
+func (db *fakeDB) CreateOrGet(_ context.Context, authorized *payment.Payment, idempotencyKey IdempotencyKey) (*payment.Payment, bool, error) {
 	if db.failStore != nil {
 		return nil, false, db.failStore
 	}
 
-	key := authorized.Merchant().String() + "|" + idempotencyKey
+	key := authorized.Merchant().String() + "|" + idempotencyKey.String()
 	if earlier, taken := db.byKey[key]; taken {
 		return earlier, false, nil
 	}
@@ -74,7 +74,7 @@ func (db *fakeDB) CreateOrGet(_ context.Context, authorized *payment.Payment, id
 		Status:   authorized.Status().String(),
 		Events:   len(authorized.PullEvents()),
 	}
-	stored := payment.Reconstitute(authorized.ID(), authorized.Merchant(), authorized.Amount(), authorized.Status(), authorized.AuthorizedAt())
+	stored := payment.Reconstitute(authorized.ID(), authorized.Merchant(), authorized.Amount(), authorized.Status(), authorized.History())
 	db.staged = append(db.staged, func() {
 		db.byKey[key] = stored
 		db.payments[id] = row
@@ -111,7 +111,7 @@ func mustID(t *testing.T, value string) payment.ID {
 }
 
 func validCommand() AuthorizeCommand {
-	return AuthorizeCommand{MerchantID: "m-42", AmountMinor: 1999, Currency: "EUR", IdempotencyKey: "key-1"}
+	return AuthorizeCommand{MerchantID: "m-42", AmountMinor: 1999, Currency: "EUR", IdempotencyKey: mustKey("key-1")}
 }
 
 func TestAuthorizeStoresThePaymentAndItsEventTogether(t *testing.T) {
@@ -210,7 +210,7 @@ func TestAuthorizeWithADifferentKeyIsADifferentPayment(t *testing.T) {
 		t.Fatalf("first authorize: %v", err)
 	}
 	other := validCommand()
-	other.IdempotencyKey = "key-2"
+	other.IdempotencyKey = mustKey("key-2")
 	if _, err := uc.Execute(t.Context(), other); err != nil {
 		t.Fatalf("second authorize: %v", err)
 	}
@@ -251,10 +251,10 @@ func TestAuthorizeRefusesCommandsThatWouldStoreNonsense(t *testing.T) {
 			wantErr: payment.ErrCurrencyFormat,
 		},
 		{
-			// Without a key a retry from the caller creates a second payment, which is the
-			// failure this use case exists to prevent.
-			name:    "no idempotency key",
-			args:    args{mutate: func(cmd *AuthorizeCommand) { cmd.IdempotencyKey = "" }},
+			// A command built without parsing its key: every keyless request of a merchant
+			// would share the empty key, and the second would replay the first one's payment.
+			name:    "a key that was never parsed",
+			args:    args{mutate: func(cmd *AuthorizeCommand) { cmd.IdempotencyKey = IdempotencyKey{} }},
 			wantErr: ErrIdempotencyKeyRequired,
 		},
 	}
@@ -306,4 +306,12 @@ func TestAuthorizeWhenTheStoreFailsReportsItAndStoresNothing(t *testing.T) {
 	if diff := cmp.Diff(0, len(db.payments)); diff != "" {
 		t.Errorf("payments stored after a failed write (-want +got):\n%s", diff)
 	}
+}
+
+func mustKey(raw string) IdempotencyKey {
+	key, err := ParseIdempotencyKey(raw)
+	if err != nil {
+		panic(err)
+	}
+	return key
 }
