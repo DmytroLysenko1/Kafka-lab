@@ -14,7 +14,6 @@ import (
 
 var ErrListen = errors.New("httpserve: cannot listen")
 
-// Serve binds server.Addr and serves on it; see ServeOn.
 func Serve(ctx context.Context, server *http.Server, shutdownTimeout time.Duration) error {
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", server.Addr)
 	if err != nil {
