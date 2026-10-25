@@ -23,8 +23,8 @@ targets() {
   key=$(api_key)
   for i in $(seq 1 "$count"); do
     body=$(printf '{"merchant_id":"m-%s-%d","amount_minor":1,"currency":"EUR"}' "$run_id" $((i % merchants)) | base64)
-    printf '{"method":"POST","url":"%s/payments","header":{"Host":["%s"],"X-API-Key":["%s"],"Idempotency-Key":["%s-%d"],"Content-Type":["application/json"]},"body":"%s"}\n' \
-      "$api" "$api_host" "$key" "$run_id" "$i" "$body"
+    printf '{"method":"POST","url":"%s/payments","header":{"X-API-Key":["%s"],"Idempotency-Key":["%s-%d"],"Content-Type":["application/json"]},"body":"%s"}\n' \
+      "$api_in_cluster" "$key" "$run_id" "$i" "$body"
   done
 }
 
@@ -67,20 +67,24 @@ for rate in $rates; do
   run_id="d06-$rate-$(date +%s)"
   seconds=$step
   [ "$rate" = "$last_rate" ] && seconds=$last_step
+  # Sent from a pod in the cluster to the Service (lib.sh says why). The step's end is its start
+  # plus its length, and the backlog is read then, not when the pod is seen done: that is
+  # polled, and would shrink outbox_left, drain_s and counted_s by up to the polling interval.
+  targets $((rate * seconds)) "$run_id" | load_start load-06 "$rate" "$seconds" json json
+  ended=$(( $(date +%s) + seconds ))
+  # Started with the attack, not before the targets are made and copied, so t=0 is its start.
   watch_hpa "$(date +%s)" > "$results_dir/.hpa" &
   watcher=$!
-  targets $((rate * seconds)) "$run_id" |
-    vegeta attack -format=json -rate="$rate" -duration="${seconds}s" > "$results_dir/.attack.bin"
-  ended=$(date +%s)
+  sleep "$seconds"
+  left=$(sql "SELECT count(*) FROM outbox WHERE published_at IS NULL")
+  report=$(load_report load-06)
   kill "$watcher" 2>/dev/null || true
   wait "$watcher" 2>/dev/null || true
-  report=$(vegeta report -type=json < "$results_dir/.attack.bin")
   sent=$(jq '.requests' <<<"$report")
   accepted=$(jq '(.status_codes["201"] // 0) + (.status_codes["200"] // 0)' <<<"$report")
   p50=$(jq '.latencies["50th"] / 1e6 | floor' <<<"$report")
   p99=$(jq '.latencies["99th"] / 1e6 | floor' <<<"$report")
   max=$(jq '.latencies.max / 1e6 | floor' <<<"$report")
-  left=$(sql "SELECT count(*) FROM outbox WHERE published_at IS NULL")
   drained=$(seconds_until "SELECT count(*) FROM outbox WHERE published_at IS NULL" 0 "$ended")
   counted=$(seconds_until "SELECT coalesce(sum(authorized_minor), 0) FROM merchant_currency_totals WHERE merchant_id LIKE 'm-$run_id-%'" "$accepted" "$ended")
   printf '%6s %8s %8s %9s %9s %9s %12s %9s %9s\n' "$rate" "$sent" "$accepted" "$p50" "$p99" "$max" "$left" "$drained" "$counted"
@@ -88,7 +92,7 @@ for rate in $rates; do
   echo "  step held ${seconds}s; the API's autoscaler during it:"
   cat "$results_dir/.hpa"
 done
-rm -f "$results_dir/.attack.bin" "$results_dir/.hpa"
+rm -f "$results_dir/.hpa"
 kubectl get hpa payments-api -n "$namespace" --no-headers \
   -o custom-columns=CPU:.status.currentMetrics[0].resource.current.averageUtilization,CURRENT:.status.currentReplicas |
   awk '{printf "api after the last step: cpu=%s%% replicas=%s\n", $1, $2}'

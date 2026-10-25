@@ -30,7 +30,7 @@ IMAGE_TAG ?= $(shell deploy/docker/image-tag.sh)
 export IMAGE_TAG
 DOCKER_BUILD := DOCKER_BUILDKIT=1 docker build -f deploy/docker/Dockerfile
 
-.PHONY: up stop down logs proto topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag migrate prune build vet lint test test-race test-integration verify verify-askdocs ask ask-sources askdocs-binary ask-eval ask-log tidy images image-measure app-up app-down k8s-up k8s-down k8s-images k8s-secret k8s-verify k8s-deploy k8s-replay k8s-drill-% k8s-evidence k8s-resources
+.PHONY: up stop down logs proto topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag migrate prune build vet lint test test-race test-integration verify verify-askdocs ask ask-sources askdocs-binary ask-eval ask-log tidy images image-measure app-up app-down k8s-up k8s-down k8s-images k8s-load-image k8s-secret k8s-verify k8s-deploy k8s-replay k8s-drill-% k8s-evidence k8s-resources
 
 up:
 	$(COMPOSE) up -d --wait
@@ -240,6 +240,12 @@ k8s-images: images
 	@for service in $(SERVICES); do \
 		kind load docker-image kafka-lab/$$service:$(IMAGE_TAG) --name kafka-lab || exit 1; \
 	done
+
+# The in-cluster load generator of drills 03 and 06 (deploy/docker/Dockerfile.vegeta); no
+# build context, the Dockerfile copies nothing from the repository.
+k8s-load-image:
+	docker build -t kafka-lab/vegeta:12.13.0 - < deploy/docker/Dockerfile.vegeta
+	kind load docker-image kafka-lab/vegeta:12.13.0 --name kafka-lab
 
 # Generated once and never printed; an existing key is left alone, so a rerun does not
 # lock out the callers that hold it.

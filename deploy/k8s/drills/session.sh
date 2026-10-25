@@ -21,6 +21,7 @@ echo "evidence session $(date -u +%FT%TZ), images $IMAGE_TAG"
 
 make k8s-up
 make k8s-images
+make k8s-load-image
 make k8s-deploy
 # Drill 01 needs a second tag to roll to. It is the same build under another name, so the
 # drill measures the rollout mechanics, not a change of code (runbook.md says so).
@@ -40,9 +41,11 @@ settle() {
 make image-measure
 settle; IMAGE_TAG_NEXT=$next make k8s-drill-01
 settle; make k8s-drill-02
-# 800, not the 1 200 of the 28.09 sessions: on 25.10, 1 200 req/s took Docker Desktop's
-# daemon down twice in a row on this 8 GB VM, ending the session. 800 still drives the API's
-# two pods well past the HPA's 70% (drill 03's own log shows by how much).
+# 800, not the 1 200 of the 28.09 sessions. On 25.10, sent from the host, this load ended the
+# session three times with Docker Desktop down; in the one whose logs survive (800 req/s,
+# 18:40 UTC) its port forward on 127.0.0.1:8800 shut down 11 s into the load, and the VM
+# stopped a minute later. Drills 03 and 06 now send from a pod in the cluster (lib.sh); 800
+# still drives the API well past the HPA's 70%, as drill 03's own log shows.
 settle; RATE=800 make k8s-drill-03
 settle; make k8s-drill-04
 settle; make k8s-drill-04f

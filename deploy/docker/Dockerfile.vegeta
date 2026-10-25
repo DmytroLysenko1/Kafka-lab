@@ -1,0 +1,17 @@
+# The load generator of drills 03 and 06, run as a pod inside the cluster. From the host, their
+# load went through Docker Desktop's port forward on 127.0.0.1:8800, which on 25.10 shut down
+# under it and took the VM with it (deploy/k8s/drills/session.sh) — the drills measured the
+# forward, not the API. The same vegeta as on the host (README's tool
+# versions), on busybox rather than distroless: the pod waits for its targets and pipes the
+# attack into the report, which takes a shell.
+ARG GO_VERSION=1.26.4
+ARG GO_DIGEST=sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648
+ARG VEGETA_VERSION=v12.13.0
+
+FROM golang:${GO_VERSION}-alpine@${GO_DIGEST} AS build
+ARG VEGETA_VERSION
+RUN CGO_ENABLED=0 GOBIN=/out go install -trimpath -ldflags="-s -w" github.com/tsenart/vegeta/v12@${VEGETA_VERSION}
+
+FROM busybox:1.37@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e
+COPY --from=build /out/vegeta /bin/vegeta
+USER 65532:65532
