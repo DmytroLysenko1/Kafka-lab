@@ -21,9 +21,19 @@ readonly log="$results_dir/01-rolling-update-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$results_dir"
 
 payment_targets $((rate * duration)) "$run" > "$results_dir/.targets"
+# Where each pod runs, before and after: the chart spreads every component across the workers
+# counting one ReplicaSet at a time (matchLabelKeys in templates/deployment.yaml), and a
+# rollout is the moment that rule exists for.
+pods() {
+  kubectl get pods -n "$namespace" -l app.kubernetes.io/part-of=payments --sort-by=.metadata.name \
+    -o custom-columns=POD:.metadata.name,NODE:.spec.nodeName,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready
+}
+
 {
   echo "drill 01 started $(stamp), rolling $current -> $next under $rate req/s for ${duration}s"
   helm history payments -n "$namespace" --max 1
+  echo "before:"
+  pods
 } | tee "$log"
 
 vegeta attack -format=json -targets="$results_dir/.targets" -rate="$rate" -duration="${duration}s" \
@@ -35,8 +45,9 @@ started=$(date +%s)
 helm upgrade payments ../../helm/payments -n "$namespace" --reset-then-reuse-values --set image.tag="$next" \
   --description "image $next" --wait --timeout 5m >/dev/null
 echo "rollout to $next took $(( $(date +%s) - started ))s (helm --wait, migrate hook included)" | tee -a "$log"
-kubectl get pods -n "$namespace" -l app.kubernetes.io/part-of=payments \
-  -o custom-columns=POD:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready | tee -a "$log"
+echo "after:" | tee -a "$log"
+pods | tee -a "$log"
+helm history payments -n "$namespace" --max 1 | tee -a "$log"
 
 wait "$attack"
 vegeta report < "$results_dir/.attack.bin" | tee -a "$log"

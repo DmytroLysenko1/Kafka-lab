@@ -62,6 +62,8 @@ query "max by (namespace,pod,container) (increase(kube_pod_container_status_rest
 {
   echo "resources over the last $window, $(date -u +%FT%TZ)"
   echo "docker VM: $(docker info --format '{{.MemTotal}}' | awk '{printf "%.0fMi", $1/1048576}'), $(docker info --format '{{.NCPU}}') CPU"
+  echo "what each node tells the scheduler it has (allocatable) — on kind, every node reports the whole VM:"
+  kubectl get nodes --no-headers -o custom-columns=NODE:.metadata.name,CPU:.status.allocatable.cpu,MEMORY:.status.allocatable.memory | sed 's/^/  /'
   echo "oom = an OOMKilled termination was seen in the window; restarts = restarts in the window"
   echo
   table "$scratch"/1 "$scratch"/2 "$scratch"/3 "$scratch"/4 "$scratch"/5 "$scratch"/6 "$scratch"/7 "$scratch"/8 "$scratch"/9

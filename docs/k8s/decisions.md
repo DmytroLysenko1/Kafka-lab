@@ -68,9 +68,9 @@ without a log are marked as such.
   seventh group member owns nothing. CPU is the wrong signal for a consumer group — lag is.
 - **Relay: one replica.** Two would publish no record twice — every sweep claims rows with
   `FOR UPDATE SKIP LOCKED` — but they could publish two events of one payment out of order,
-  each relay holding one of them. Harmless while a payment has a single event type
-  (`payment.authorized`); the day it gets a second, one relay or per-key ordering in the
-  claim is required.
+  each relay holding one of them. A payment has three event types now — authorized,
+  captured, refunded — so that is a real reordering, and one relay is what prevents it;
+  scaling the relay out needs per-key ordering in the claim first.
 - **The migration is a hook, and rollback skips it.** Migrations only go forward, and a
   rollback runs without the hook. Normally each migration stays readable by the previous
   release (expand and contract), which is what makes `helm rollback` safe for the schema.

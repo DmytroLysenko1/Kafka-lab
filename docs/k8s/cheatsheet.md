@@ -84,7 +84,7 @@ Relay and consumer have no readiness probe on purpose: no Service routes callers
 | is it receiving traffic? | `kubectl get endpointslices -n lab -l kubernetes.io/service-name=<svc>` |
 | is the rollout progressing? | `kubectl rollout status deploy/<name> -n lab`, `helm history payments -n lab` |
 | how much does it use? | `kubectl top pods -n lab` |
-| shell in a distroless pod? | there is none — `kubectl debug -it <pod> --image=busybox:1.37 --target=<container>` |
+| shell in a distroless pod? | there is none — `kubectl debug -it -n lab <pod> --image=busybox:1.37 --target=<container> -- sh` |
 
 The failure modes these commands were run against, with their recorded output, are in
 [runbook.md](runbook.md).

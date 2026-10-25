@@ -61,7 +61,7 @@ API has the database but no Kafka, and migrate links only pgx and its embedded S
 
 There is no shell to `exec` into. `kubectl exec -it pod -- sh` does not work, and that is the
 point. Debugging goes through an ephemeral container that shares the pod's process
-namespace — `kubectl debug -it <pod> --image=busybox:1.37 --target=<container>` — which the
+namespace — `kubectl debug -it -n lab <pod> --image=busybox:1.37 --target=<container> -- sh` — which the
 runbook uses for the broken-deployment drills. For the same reason a Kubernetes `preStop`
 hook cannot be `exec: sleep 5`: there is no `sleep` binary, so the chart uses the native
 `preStop.sleep` action instead.

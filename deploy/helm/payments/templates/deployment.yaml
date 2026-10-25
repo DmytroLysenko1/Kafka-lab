@@ -67,9 +67,9 @@ spec:
           securityContext:
             {{- toYaml $.Values.securityContext | nindent 12 }}
           ports:
-            {{- if $component.httpPort }}
+            {{- with $component.http }}
             - name: http
-              containerPort: {{ $component.httpPort }}
+              containerPort: {{ .port }}
             {{- end }}
             - name: metrics
               containerPort: {{ $component.metricsPort }}
@@ -78,13 +78,13 @@ spec:
                 name: payments-config
           env:
             {{- include "payments.databaseURL" $ | nindent 12 }}
-            {{- if $component.apiKey }}
+            {{- with $component.http }}{{ if .apiKey }}
             - name: PAYMENTS_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ $.Values.secrets.apiKey.name }}
                   key: {{ $.Values.secrets.apiKey.key }}
-            {{- end }}
+            {{- end }}{{ end }}
             {{- range $key, $value := $component.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
@@ -103,7 +103,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 2
             failureThreshold: 3
-          {{- if $component.readiness }}
+          {{- with $component.http }}{{ if .readiness }}
           # /readyz pings Postgres with a 2 s deadline of its own, inside the 3 s probe. Out of
           # the endpoints after 2 failures 5 s apart: ~10 s from database loss to no traffic.
           readinessProbe:
@@ -115,7 +115,7 @@ spec:
             preStop:
               sleep:
                 seconds: {{ $.Values.preStopSleepSeconds }}
-          {{- end }}
+          {{- end }}{{ end }}
           resources:
             {{- toYaml $component.resources | nindent 12 }}
 {{- end }}

@@ -13,9 +13,9 @@ spec:
   selector:
     {{- include "payments.selector" $scope | nindent 4 }}
   ports:
-    {{- if $component.httpPort }}
+    {{- with $component.http }}
     - name: http
-      port: {{ $component.httpPort }}
+      port: {{ .port }}
       targetPort: http
     {{- end }}
     - name: metrics

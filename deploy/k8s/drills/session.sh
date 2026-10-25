@@ -37,6 +37,7 @@ make k8s-drill-04
 make k8s-drill-04f
 make k8s-drill-05
 make k8s-drill-06
+make k8s-drill-07
 
 minutes=$(( ($(date +%s) - started) / 60 + 5 ))
 WINDOW="${minutes}m" deploy/k8s/resources.sh

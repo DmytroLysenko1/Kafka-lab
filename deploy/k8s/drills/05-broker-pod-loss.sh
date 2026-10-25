@@ -36,6 +36,14 @@ witness_memory() {
     awk '$2 == "kafka" {print $4}'
 }
 
+# What the relay still owes Kafka, read from the outbox itself: the API answers from Postgres
+# and never calls Kafka, so 2xx alone cannot say that publishing went on while a broker was
+# gone. A backlog that stays near zero through the kill says it did.
+outbox_left() {
+  kubectl exec -n "$namespace" payments-db-1 -c postgres -- \
+    psql -d payments -Atc "SELECT count(*) FROM outbox WHERE published_at IS NULL" 2>/dev/null || echo error
+}
+
 payment_targets $((rate * duration)) "$run" > "$results_dir/.targets"
 echo "drill 05 started $(stamp), killing $victim under $rate payments/s" | tee "$log"
 vegeta attack -format=json -targets="$results_dir/.targets" -rate="$rate" -duration="${duration}s" \
@@ -52,7 +60,7 @@ while true; do
   t=$(( $(date +%s) - killed ))
   urp=$(under_replicated)
   ready=$(kubectl get pod -n "$namespace" "$victim" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo false)
-  echo "t=${t}s pod_ready=${ready:-false} under_replicated=$urp witness_memory=$(witness_memory)" | tee -a "$log"
+  echo "t=${t}s pod_ready=${ready:-false} under_replicated=$urp outbox_left=$(outbox_left) witness_memory=$(witness_memory)" | tee -a "$log"
   if [ -z "$ready_at" ] && [ "$ready" = "true" ]; then ready_at=$t; fi
   # Healing is counted on its own: the first run tied it to readiness and reported 22 s for
   # partitions its own samples showed back in sync at 15 s.

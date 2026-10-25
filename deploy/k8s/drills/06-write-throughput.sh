@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"   # lib.sh is relative to this directory
 source ./lib.sh
 
-readonly rates=${RATES:-"50 100 200 400"} step=${STEP:-30} merchants=50
+readonly rates=${RATES:-"50 100 200 400"} step=${STEP:-30} last_step=${LAST_STEP:-120} merchants=50
 readonly log="$results_dir/06-write-throughput-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$results_dir"
 exec > >(tee "$log") 2>&1
@@ -43,11 +43,31 @@ seconds_until() {
 
 echo "drill 06 started $(stamp): rates $rates payments/s, ${step}s each, $merchants merchants per step"
 printf '%6s %8s %8s %9s %9s %9s %12s %9s %9s\n' rate sent accepted p50_ms p99_ms max_ms outbox_left drain_s counted_s
+# The HPA every 10 s while a step runs: it takes 30–40 s to raise its desired count even far
+# above target (drill 03), so one reading after a 30 s step could not show it moving. The last
+# step is held longer for the same reason.
+watch_hpa() {
+  local began=$1
+  while true; do
+    kubectl get hpa payments-api -n "$namespace" --no-headers \
+      -o custom-columns=CPU:.status.currentMetrics[0].resource.current.averageUtilization,DESIRED:.status.desiredReplicas,CURRENT:.status.currentReplicas 2>/dev/null |
+      awk -v t=$(( $(date +%s) - began )) '{printf "    hpa t=%ss cpu=%s%% desired=%s current=%s\n", t, $1, $2, $3}'
+    sleep 10
+  done
+}
+
+last_rate=${rates##* }
 for rate in $rates; do
   run_id="d06-$rate-$(date +%s)"
-  targets $((rate * step)) "$run_id" |
-    vegeta attack -format=json -rate="$rate" -duration="${step}s" > "$results_dir/.attack.bin"
+  seconds=$step
+  [ "$rate" = "$last_rate" ] && seconds=$last_step
+  watch_hpa "$(date +%s)" > "$results_dir/.hpa" &
+  watcher=$!
+  targets $((rate * seconds)) "$run_id" |
+    vegeta attack -format=json -rate="$rate" -duration="${seconds}s" > "$results_dir/.attack.bin"
   ended=$(date +%s)
+  kill "$watcher" 2>/dev/null || true
+  wait "$watcher" 2>/dev/null || true
   report=$(vegeta report -type=json < "$results_dir/.attack.bin")
   sent=$(jq '.requests' <<<"$report")
   accepted=$(jq '(.status_codes["201"] // 0) + (.status_codes["200"] // 0)' <<<"$report")
@@ -59,8 +79,10 @@ for rate in $rates; do
   counted=$(seconds_until "SELECT coalesce(sum(authorized_minor), 0) FROM merchant_currency_totals WHERE merchant_id LIKE 'm-$run_id-%'" "$accepted" "$ended")
   printf '%6s %8s %8s %9s %9s %9s %12s %9s %9s\n' "$rate" "$sent" "$accepted" "$p50" "$p99" "$max" "$left" "$drained" "$counted"
   jq -c '{status_codes, errors: (.errors // [] | .[:3])}' <<<"$report"
+  echo "  step held ${seconds}s; the API's autoscaler during it:"
+  cat "$results_dir/.hpa"
 done
-rm -f "$results_dir/.attack.bin"
+rm -f "$results_dir/.attack.bin" "$results_dir/.hpa"
 kubectl get hpa payments-api -n "$namespace" --no-headers \
   -o custom-columns=CPU:.status.currentMetrics[0].resource.current.averageUtilization,CURRENT:.status.currentReplicas |
   awk '{printf "api after the last step: cpu=%s%% replicas=%s\n", $1, $2}'

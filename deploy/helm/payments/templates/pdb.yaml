@@ -10,7 +10,7 @@ metadata:
   labels:
     {{- include "payments.labels" $scope | nindent 4 }}
 spec:
-  {{- if .maxUnavailable }}
+  {{- if hasKey . "maxUnavailable" }}
   maxUnavailable: {{ .maxUnavailable }}
   {{- else }}
   minAvailable: {{ .minAvailable }}

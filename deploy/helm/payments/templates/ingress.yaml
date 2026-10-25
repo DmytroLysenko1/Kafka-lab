@@ -1,5 +1,5 @@
 {{- range $name, $component := .Values.components }}
-{{- with $component.ingress }}
+{{- with ($component.http).ingress }}
 {{- $scope := dict "root" $ "name" $name }}
 ---
 apiVersion: networking.k8s.io/v1

@@ -19,7 +19,7 @@ evidence and the reasons behind them.
 | Upgrade | the same two `make` targets with the new code checked out | `RESTARTS` after the rollout, not only `READY` — a broken release can pass readiness (case d) | [Upgrade](#upgrade--rolling-update) |
 | Roll back | `helm history payments -n lab`, then `helm rollback payments <REVISION> -n lab --wait` | the revision's DESCRIPTION names its image; never a bare `helm rollback` | [Roll back](#roll-back) |
 | Something is wrong | `kubectl get pods`, `describe pod` → Events, `logs --previous`, `get events --sort-by=.lastTimestamp`, the EndpointSlice | match the symptom to the table of seven broken releases | [Troubleshooting](#troubleshooting--seven-broken-releases), [Where to look first](#where-to-look-first) |
-| A distroless pod to look inside | `kubectl debug <pod> --image=busybox:1.37 --target=<container>` | `kubectl exec … sh` cannot work: there is no shell | [Troubleshooting](#troubleshooting--seven-broken-releases), case g |
+| A distroless pod to look inside | `kubectl debug -it -n lab <pod> --image=busybox:1.37 --target=<container> -- sh` | `kubectl exec … sh` cannot work: there is no shell | [Troubleshooting](#troubleshooting--seven-broken-releases), case g |
 | A broker pod lost | nothing at first: Strimzi brings the pod back | under-replicated partitions back to 0 within about 15 s and the pod Ready in about 22 s (drill 05) | [Kafka broker pod lost](#kafka-broker-pod-lost) |
 | Dead letters to replay | `make k8s-replay CLASS=exhausted` (or another class) | the merchant totals once the replayed letters are consumed | [Replaying dead letters](#replaying-dead-letters) |
 

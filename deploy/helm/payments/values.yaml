@@ -72,17 +72,25 @@ components:
     # template would fight it on every upgrade. Kept for a release without the HPA.
     replicas: 2
     command: payments-api
-    httpPort: 8081
     metricsPort: 9103
-    # Only the API has a readiness probe: it is the only component the Service routes
-    # callers to. A relay or consumer that cannot reach Kafka is not helped by being taken
-    # out of a Service nobody calls.
-    readiness: true
+    # The API is the one component that answers HTTP, and everything that only means something
+    # for such a component hangs off this block, so none of it can be switched on without a
+    # port to point at: the container and Service port, the readiness probe and its preStop
+    # pause, the Ingress, and the API key.
+    http:
+      port: 8081
+      # Only the API has a readiness probe: it is the only component the Service routes
+      # callers to. A relay or consumer that cannot reach Kafka is not helped by being taken
+      # out of a Service nobody calls.
+      readiness: true
+      apiKey: true
+      ingress:
+        host: payments.localtest.me
+        className: traefik
     env:
       PAYMENTS_API_ADDR: 0.0.0.0:8081
       METRICS_ADDR: 0.0.0.0:9103
       DB_MAX_CONNS: "4"
-    apiKey: true
     # 20 s of in-flight requests (shutdownTimeout in internal/interfaces/http/server.go)
     # after the preStop pause, then a 1 s trace flush, plus headroom.
     terminationGracePeriodSeconds: 30
@@ -115,14 +123,12 @@ components:
     # four at once.
     podDisruptionBudget:
       maxUnavailable: 1
-    ingress:
-      host: payments.localtest.me
-      className: traefik
 
   outbox-relay:
     # One. A second would publish no record twice (each sweep claims its rows with FOR UPDATE
-    # SKIP LOCKED), but could publish two events of one payment out of order — harmless only
-    # while a payment has a single event type (docs/k8s/decisions.md).
+    # SKIP LOCKED), but could publish two events of one payment out of order — and a payment
+    # now has three, authorized, captured and refunded, so one relay is what keeps them in
+    # order (docs/k8s/decisions.md).
     # And one during a rollout too: a surge would run old and new relay side by side for
     # seconds (01-rolling-update-20260927-012247.log lists both), which is the reordering
     # window above. While
