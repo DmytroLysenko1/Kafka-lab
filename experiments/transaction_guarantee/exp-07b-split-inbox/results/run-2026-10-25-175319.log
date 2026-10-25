@@ -1,0 +1,12 @@
+exp-07b — the inbox split: the claim and the write in two transactions
+date: 2026-10-25-175319
+client: franz-go v1.22.0
+payments: 1000, consumer killed after handling 500
+
+2026/10/25 17:53:27 WARN exp-07b: killing this consumer between the claim and the write mode=inbox-split handled=499
+experiments/transaction_guarantee/exp-07b-split-inbox/run.sh: line 29: 68376 Killed: 9               "$binary" -run-id "$run_id" -payments "$payments" "$@"
+inbox-split                          produced 1000, rows 999, distinct 999
+  lost                               1
+  duplicated                         0
+  redelivered, refused by the inbox  50
+  outcome                            payments lost — as expected

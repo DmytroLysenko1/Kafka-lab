@@ -15,7 +15,7 @@ the catalog is a number about the drift.
 
 | Knob | Default | Why |
 |---|---|---|
-| `EVENTS` | 10 000 | ~100 bytes each, so ~170 KB reach every partition — well past the 64 KiB after which the keyless producer switches partition. A smaller run looks ordered and lies |
+| `EVENTS` | 10 000 | ~170 bytes each — a JSON event with 60 bytes of filler — so ~280 KB reach every partition, well past the 64 KiB after which the keyless producer switches partition. A smaller run looks ordered and lies (measured below) |
 | `PAYMENTS` | 100 | 100 events per payment, enough that a payment spans partitions rather than landing in one by luck |
 
 ## Why a run id
@@ -52,6 +52,21 @@ number there would mean the counter was broken rather than Kafka.
 
 The full story, including where the estimate in the plan was wrong, is in the
 [journal](../../../docs/00-journal.md).
+
+## Below and above the switch — 2026-10-25
+
+"A smaller run looks ordered" was the knob table's argument until these runs:
+
+| `EVENTS` | bytes produced, keyless | payments split across partitions | order violations | runs |
+|---|---|---|---|---|
+| 200 | ~34 KB — under 64 KiB | **0** | **0** | [17:31:15](results/run-2026-10-25-173115.log) · [17:31:27](results/run-2026-10-25-173127.log) |
+| 500 | ~85 KB — over 64 KiB once | **100 of 100** | **381** | [17:30:18](results/run-2026-10-25-173018.log) · [17:30:31](results/run-2026-10-25-173031.log) |
+
+Keyed, both sizes: 0 and 0. At 200 events the keyless producer never left its first
+partition, so every payment was read in order and the test a team would run on a laptop
+passes; 500 events crossed the threshold once, and one switch was enough to split every
+payment, because each payment's events are spread across the whole run. The cliff is the
+partitioner's byte count, not the event count — larger events reach it sooner.
 
 ## Cleaning up
 

@@ -37,7 +37,7 @@ all four runs and both lingers
 Linger made no consistent difference at saturation — 0 was faster in some cells and 10 ms in
 others — and every codec compressed better than under exp-17's fixed load, zstd 5.78–5.79×
 against 5.64–5.65× at best there. Both fit batches filling far faster than any linger
-expires, but this mode does not print batch sizes, so that is inferred, not measured.
+expires; the 2026-10-25 runs below print the batch sizes, and they confirm it.
 
 **Compression bought throughput, not just bytes.** Uncompressed, the producer put at most
 89 MB/s on the wire and got no further. Every codec put less on the wire and delivered more
@@ -60,6 +60,32 @@ records/s across four runs of the same cell, and its p99 from 107 ms to 2.1 s, b
 three brokers, the producer and everything else on this laptop compete for ten cores. The
 ordering — every codec above `none`, zstd highest — held in every run; the magnitudes did
 not.
+
+## The batch ceiling on its own — 2026-10-25, three runs
+
+[17:42](results/run-2026-10-25-174242.log) · [17:44](results/run-2026-10-25-174456.log) ·
+[17:47](results/run-2026-10-25-174713.log). The same eight cells, now printing records per
+batch from the client's own batch metrics, and four more: codec `none`, linger 0 and 10 ms,
+the batch ceiling at 16 KiB against the default — so the only thing that differs inside a
+pair is how many records a request may carry.
+
+| Batch ceiling, codec `none` | Records per batch | Records/s acknowledged | Producer CPU, ms per MB | p99 |
+|---|---|---|---|---|
+| 16 KiB | **64** | **154 000–265 000** | 7.8–8.8 | 130–451 ms |
+| default ≈1 MB | 288–308 | **371 000–527 000** | 4.2–4.5 | 53–107 ms |
+
+**Bigger batches bought throughput, measured on their own.** In every run and at both
+lingers the default ceiling delivered 1.4–3.0× the records of a 16 KiB one, at half the
+producer CPU per megabyte and a lower p99: a request costs about the same whatever it
+carries, and at 16 KiB the producer sent four to five times as many of them for the same
+records. Full batches were the ceiling at 16 KiB — every batch held exactly 64 records — and
+never at the default, where batches averaged about 300 records, 75 KB, a thirteenth of what
+the ceiling allows: the buffer of 10 000 records spread over six partitions runs out before
+a batch can grow further. That is the measurement behind "batches fill far faster than any
+linger expires" above, and behind the checklist's advice to leave the ceiling at the default.
+
+The eight codec cells reproduced the earlier ordering in all three runs — every codec above
+`none` — with zstd no longer always highest: lz4 led in four of the six run-and-linger pairs.
 
 **Not shown:** broker CPU and disk, which the codec also changes; a producer on its own
 host, where the byte ceiling would be the network rather than three local replicas; and

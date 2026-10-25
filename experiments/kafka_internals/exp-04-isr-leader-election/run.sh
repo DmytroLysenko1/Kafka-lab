@@ -26,6 +26,8 @@ make reset-topic TOPIC=exp04.isr
 # cold build cache that compile would land inside the interval being timed.
 binary="$(mktemp -d)/exp04"
 trap 'rm -rf "$(dirname "$binary")"' EXIT
+killed_file="$(dirname "$binary")/killed-ms"
+across_out="$(dirname "$binary")/across.out"
 go build -o "$binary" ./experiments/kafka_internals/exp-04-isr-leader-election
 exp04() { "$binary" -records "$records" "$@"; }
 
@@ -57,10 +59,18 @@ exp04() { "$binary" -records "$records" "$@"; }
   # to be in its log, or the two get averaged into one number.
   controller="$(docker exec "kafka-lab-kafka$victim" /opt/kafka/bin/kafka-metadata-quorum.sh \
     --bootstrap-server localhost:9092 describe --status | awk '/^LeaderId/ {print $2}')"
+  # The other phases write before the kill and after the re-election, never during it. This
+  # one writes through it, to the partition whose leader is about to die, so the pause a caller
+  # would see is measured instead of stepped around.
+  "$binary" -records "$records" -phase writer -killed-file "$killed_file" >"$across_out" &
+  writer_pid=$!
+  sleep 5
+
   echo "active controller     kafka$controller"
   echo "killing kafka$victim, the broker leading partition 0"
   docker kill "kafka-lab-kafka$victim" >/dev/null
   killed="$(now_ms)"
+  echo "$killed" >"$killed_file"
   echo
 
   degraded="$(exp04 -phase degraded -since "$killed")"
@@ -84,9 +94,13 @@ exp04() { "$binary" -records "$records" "$@"; }
   exp04 -phase elected -since "$elected"
   echo
 
+  wait "$writer_pid"
+  across="$(cat "$across_out")"
+  printf '%s\n\n' "$across"
+
   # Every write the cluster said yes to, before the kill and after it, has to be readable
   # from the leader that replaced the dead one.
-  acknowledged="$(printf '%s\n%s\n' "$baseline" "$degraded" | awk '/^writes accepted/ {sum += $3} END {print sum + 0}')"
+  acknowledged="$(printf '%s\n%s\n%s\n' "$baseline" "$degraded" "$across" | awk '/^writes accepted/ {sum += $3} END {print sum + 0}')"
   exp04 -phase readback -expect "$acknowledged"
 } 2>&1 | tee "$log"
 

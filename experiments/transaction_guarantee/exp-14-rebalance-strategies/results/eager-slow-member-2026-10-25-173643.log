@@ -1,0 +1,33 @@
+exp-14 — a consumer joins, strategy: eager, handler: slow-member
+date: 2026-10-25-173643
+client: franz-go v1.22.0
+
+strategy                  eager: RangeBalancer, classic protocol, every partition revoked on a rebalance
+group                     exp14-eager-1792942612231338000
+load                      400 records/s over 6 partitions
+handler                   0s a record, rebalances blocked while a batch of up to 200 is handled; member A then holds each batch 2s more
+membership                dynamic, A slow and B fast from the start, C joins; session timeout 12s
+third consumer joined at  15s
+
+assignment changes after the first
+  15.03s  B revoked [3 4 5]
+  16.04s  A revoked [0 1 2]
+  16.05s  A assigned [0 1]
+  16.05s  B assigned [2 3]
+  16.05s  C assigned [4 5]
+  35s     B revoked [2 3]
+  35s     C revoked [4 5]
+  35s     A revoked [0 1]
+
+partition  longest gap, 10s before the join  longest gap, from 2s before to 15s after
+  0        2.959s                            9.051s
+  1        4.959s                            6s
+  2        4s                                2.011s
+  3        61ms                              1.035s
+  4        62ms                              1.031s
+  5        56ms                              1.028s
+
+partitions stopped for more than 1s                6 of 6
+longest time the whole group handled nothing       1.023s
+records handled twice                              0
+records missed between the first and last handled  0

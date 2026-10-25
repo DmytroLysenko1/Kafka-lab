@@ -1,0 +1,17 @@
+exp-03 — segments, retention and compaction
+date: 2026-10-25-172546
+client: franz-go v1.22.0
+
+compacted topic                        50 keys × 40 updates, then 10 of the keys deleted, cleanup.policy compact
+  before cleaning                      2010 records readable (plus 0 segment-roll markers), 40 live keys, 10 tombstones, log starts at 0
+  after cleaning                       50 records readable (plus 2 segment-roll markers), 40 live keys, 10 tombstones, log starts at 0
+  live keys holding their last update  40 of 40, {"update":39}
+
+retention topic    2000 records, retention.ms 5000 as the broker reports it
+  before cleaning  2000 records readable (plus 0 segment-roll markers), log starts at 0, ends at 2000
+  after cleaning   0 records readable (plus 5 segment-roll markers), log starts at 2004, ends at 2009
+
+shared-segment control                    2000 records, retention.ms 5000, segment.ms 604800000 as the broker reports them
+  just written                            2000 of the batch readable, log starts at 0
+  after 15s with a fresh record every 2s  2000 of the batch readable, log starts at 0
+  then 15s with nothing new               0 of the batch readable, log starts at 2007

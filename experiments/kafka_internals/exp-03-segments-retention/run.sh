@@ -14,7 +14,7 @@ make exp-topics EXP="${here#"$repo"/experiments/}"
 
 # This experiment reads the log itself, so it has to start from an empty one: records left
 # by an earlier run would be counted as its own.
-for topic in exp03.compact exp03.retention; do
+for topic in exp03.compact exp03.retention exp03.retention-open; do
   make reset-topic TOPIC="$topic"
 done
 

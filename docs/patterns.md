@@ -27,11 +27,11 @@ merchant, status — and the consumer needs nobody.
 | Replay rebuilds a read model | no, the API only answers *now* | yes, if the topic is compacted |
 | Load on the producer | one call per event per consumer | none |
 
-**Compaction is what makes the second one replayable.** A compacted topic keeps one record
-per key: exp-03 wrote 2 010 records over 50 keys and the cleaner left 50 — 40 live keys plus
-10 tombstones. That it kept the *last* value is the broker's documented rule, not this run's
-finding: exp-03 reads back keys and tombstones, not the values
-([run](../experiments/kafka_internals/exp-03-segments-retention/results/run-2026-09-20-200653.log)).
+**Compaction is what makes the second one replayable, and it is measured.** A compacted
+topic keeps the last value per key: exp-03 wrote 2 010 records over 50 keys and the cleaner
+left 50 — 40 live keys plus 10 tombstones — and every one of the 40 live keys held its last
+update, read back value by value
+([run](../experiments/kafka_internals/exp-03-segments-retention/results/run-2026-10-25-172546.log)).
 That is the difference between a topic that is a log of what happened and a topic that is
 also the current state.
 

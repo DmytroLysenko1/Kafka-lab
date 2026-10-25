@@ -70,7 +70,7 @@ its cost:
   streamed and bounded by one budget sized from the output cap.
 - **Retrieval is the cheap half; measure it alone.** `askdocs -retrieve-only` shows what a
   question would be answered from at no cost, and `make ask-eval` runs thirteen hand-labelled
-  questions through it: 12 of 13 found their document among six sections of the 321 indexed,
+  questions through it: 12 of 13 found their document among six sections of the 331 indexed,
   and a question off the docs' subject retrieved nothing and was never sent
   ([`askdocs/results/retrieval.log`](../askdocs/results/retrieval.log)).
 - **A document about the corpus is part of the corpus.** The first version of this write-up

@@ -100,10 +100,13 @@ because the per-payment ordering the key exists for would not survive splitting 
 So every change to any of the three is a new version of the one file, checked against the
 version before it, and a new event type is a new message appended to the file — appended,
 because the index is a position, and a message inserted earlier would shift every index
-after it. That is how captures and refunds arrived with the Kubernetes stage. Whether the pinned registry
-accepts an appended message under `BACKWARD` has no log of its own yet; exp-12 records the
-nearest measured case, an added field, accepted under every level. Three more rules follow
-from the same wire format:
+after it. That is how captures and refunds arrived with the Kubernetes stage. exp-12 asked the pinned
+registry about both: Apicurio 3.0.9 accepts an appended message under every level — and an
+inserted one too, under `BACKWARD` and `FULL` alike, although it shifts every index after it
+(exp-12h, exp-12i). To a protobuf compatibility check a new message is an addition, so the
+registry cannot hold this line; the convention does, and the consumer refuses a record whose
+`event_type` header names a different message than its index (`decode.go`). Three more rules
+follow from the same wire format:
 
 - **The retry tiers and the DLQ forward bytes verbatim** — magic byte, schema id and
   payload untouched — and no subject is registered for them. A forwarder that decoded and
@@ -194,6 +197,8 @@ quoting — and on this version one expectation did not survive contact (exp-12c
 | exp-12e | a v1 consumer reads v2 data after 12a | — | decodes, unknown field ignored | **decoded and counted**, the unknown field skipped |
 | exp-12e2 | a v1 consumer reads v2 data after 12c (Fig. 9a) | — | proto3: decodes with the field empty, no error raised anywhere — the ending this file exists to make visible | **confirmed**: no decoding error anywhere; `amount_minor` arrives as 0, and the only thing that refused the record was the domain rule that an authorised amount is positive. Without it the total would have taken a payment of zero and reported success |
 | exp-12f | delete a field | `FULL` | registry verdict recorded | **accepted** — on Apicurio 3.0.9 `FULL` lets through the deletion that `BACKWARD` refuses. If `FULL` were `BACKWARD` and `FORWARD` together it could not, so this is a defect of this registry version, not a property of compatibility modes — and a reason to measure the registry you actually run rather than reason from the level names |
+| exp-12h | append a message after the last | `BACKWARD` | accepted | **accepted** under every level — the way captures and refunds were added |
+| exp-12i | insert a message before the first, shifting every index | `BACKWARD` | not predicted before the run | **accepted** under `BACKWARD` and `FULL` — the registry cannot see an index shift; the convention and the consumer's `event_type` check are what stop it |
 | exp-12g | any of the three changes on a new subject | whatever the subject arrives with | — | **all accepted** — so whatever that level is, it enforces nothing. The run now also prints the level the server reports for a fresh subject and for the registry as a whole, before anything sets it, rather than leaving the name to be inferred from the behaviour |
 
 ## Licensing, because it is a real question

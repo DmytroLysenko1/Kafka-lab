@@ -85,6 +85,27 @@ func (s *store) recordOnce(ctx context.Context, runID string, mode Mode, handled
 	})
 }
 
+// claim takes the event in a transaction of its own and reports whether it was free. A claim
+// already taken is recorded as refused, as recordOnce does.
+func (s *store) claim(ctx context.Context, runID string, mode Mode, handled Payment) (bool, error) {
+	claimed := false
+	err := s.withinTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			`INSERT INTO delivery_inbox (run_id, mode, event_id) VALUES ($1, $2, $3)
+			 ON CONFLICT DO NOTHING`,
+			runID, mode, handled.PaymentID)
+		if err != nil {
+			return fmt.Errorf("stand: claim event %s: %w", handled.PaymentID, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return refuse(ctx, tx, runID, mode, handled)
+		}
+		claimed = true
+		return nil
+	})
+	return claimed, err
+}
+
 // refuse records a redelivery the inbox turned away, in the same transaction as the claim
 // that found it taken.
 func refuse(ctx context.Context, tx pgx.Tx, runID string, mode Mode, handled Payment) error {

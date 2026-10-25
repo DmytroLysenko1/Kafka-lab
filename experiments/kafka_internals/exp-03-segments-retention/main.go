@@ -25,11 +25,15 @@ const (
 
 	compactTopic   = "exp03.compact"
 	retentionTopic = "exp03.retention"
+	openTopic      = "exp03.retention-open"
 
 	pollBatch = 500
 	readStall = 10 * time.Second
 	settle    = time.Second
-	maxKeys   = 100_000
+
+	batchKey     = "event-"
+	companyEvery = 2 * time.Second
+	maxKeys      = 100_000
 )
 
 var (
@@ -49,11 +53,15 @@ type settings struct {
 	tombstones int
 	records    int
 	timeout    time.Duration
+
+	pastRetention time.Duration
+	alone         time.Duration
 }
 
 // observation is one look at a log: what a reader finds, and where the log starts.
 type observation struct {
 	summary
+	values      map[string]string
 	StartOffset int64
 	EndOffset   int64
 }
@@ -72,6 +80,8 @@ func run() error {
 	flag.IntVar(&cfg.updates, "updates", 40, "updates written per key")
 	flag.IntVar(&cfg.tombstones, "tombstones", 10, "keys deleted afterwards")
 	flag.IntVar(&cfg.records, "records", 2000, "records written to the retention topic")
+	flag.DurationVar(&cfg.pastRetention, "past-retention", 15*time.Second, "control: how long the batch is kept company, three times its 5 s retention")
+	flag.DurationVar(&cfg.alone, "alone", 15*time.Second, "control: how long the batch is then left alone — retention plus two of the stand's 5 s checks")
 	flag.DurationVar(&cfg.timeout, "timeout", 5*time.Minute, "deadline for the whole run")
 	flag.Parse()
 
@@ -111,25 +121,115 @@ func measure(ctx context.Context, cfg *settings, out io.Writer) error {
 	defer client.Close()
 	admin := kadm.NewClient(client)
 
-	compaction, err := compact(ctx, client, admin, cfg)
-	if err != nil {
+	var found findings
+	if found.compaction, err = compact(ctx, client, admin, cfg); err != nil {
 		return err
+	}
+	if found.retention, err = expire(ctx, client, admin, cfg); err != nil {
+		return err
+	}
+	if found.open, err = keepOpen(ctx, client, admin, cfg); err != nil {
+		return err
+	}
+	if err := found.readSettings(ctx, admin); err != nil {
+		return err
+	}
+	return report(out, cfg, &found)
+}
+
+// findings is everything the report prints: the three cells, and what the broker says it is
+// enforcing on each.
+type findings struct {
+	compaction, retention [2]observation
+	open                  [3]observation
+	policy, kept          string
+	openKept, openSegment string
+}
+
+func (f *findings) readSettings(ctx context.Context, admin *kadm.Client) error {
+	reads := []struct {
+		into       *string
+		topic, key string
+	}{
+		{&f.policy, compactTopic, "cleanup.policy"},
+		{&f.kept, retentionTopic, "retention.ms"},
+		{&f.openKept, openTopic, "retention.ms"},
+		{&f.openSegment, openTopic, "segment.ms"},
+	}
+	for _, read := range reads {
+		value, err := setting(ctx, admin, read.topic, read.key)
+		if err != nil {
+			return err
+		}
+		*read.into = value
+	}
+	return nil
+}
+
+// keepOpen is the control for expire: the same five-second retention, segments left to the
+// broker's own schedule, and the batch kept company by a younger record every two seconds.
+// Retention judges a segment by its newest record, so the batch must outlive its retention
+// for as long as the company keeps coming, and go once it stops. A broker that deleted
+// record by record would drop the batch at five seconds either way.
+func keepOpen(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *settings) ([3]observation, error) {
+	var stages [3]observation
+	records := make([]*kgo.Record, 0, cfg.records)
+	for i := range cfg.records {
+		records = append(records, &kgo.Record{
+			Topic: openTopic,
+			Key:   fmt.Appendf(nil, "%s%05d", batchKey, i),
+			Value: fmt.Appendf(nil, `{"seq":%d}`, i),
+		})
+	}
+	if err := client.ProduceSync(ctx, records...).FirstErr(); err != nil {
+		return stages, fmt.Errorf("exp-03: produce %d records: %w", len(records), err)
 	}
 
-	retention, err := expire(ctx, client, admin, cfg)
-	if err != nil {
-		return err
+	var err error
+	if stages[0], err = observe(ctx, admin, cfg, openTopic); err != nil {
+		return stages, err
 	}
+	if err := keepCompany(ctx, client, cfg.pastRetention); err != nil {
+		return stages, err
+	}
+	if stages[1], err = observe(ctx, admin, cfg, openTopic); err != nil {
+		return stages, err
+	}
+	if err := pause(ctx, cfg.alone); err != nil {
+		return stages, err
+	}
+	stages[2], err = observe(ctx, admin, cfg, openTopic)
+	return stages, err
+}
 
-	policy, err := setting(ctx, admin, compactTopic, "cleanup.policy")
-	if err != nil {
-		return err
+// keepCompany writes one fresh record into the open segment every companyEvery for the
+// whole window, so the segment's newest record is never older than that.
+func keepCompany(ctx context.Context, client *kgo.Client, window time.Duration) error {
+	ticker := time.NewTicker(companyEvery)
+	defer ticker.Stop()
+	done := time.After(window)
+	for i := 0; ; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			return nil
+		case <-ticker.C:
+			fresh := &kgo.Record{Topic: openTopic, Key: fmt.Appendf(nil, "fresh-%03d", i), Value: []byte(`{"fresh":true}`)}
+			if err := client.ProduceSync(ctx, fresh).FirstErr(); err != nil {
+				return fmt.Errorf("exp-03: keep the segment company: %w", err)
+			}
+		}
 	}
-	kept, err := setting(ctx, admin, retentionTopic, "retention.ms")
-	if err != nil {
-		return err
+}
+
+func pause(ctx context.Context, wait time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(wait):
+		return nil
 	}
-	return report(out, cfg, policy, kept, &compaction, &retention)
 }
 
 // compact writes many updates per key, deletes some of them, and waits for the cleaner to
@@ -178,7 +278,7 @@ func compact(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *s
 }
 
 // expire writes to a topic kept for seconds, then waits for the broker to drop what has
-// aged out. Deletion works on whole segments, so the active one always survives.
+// aged out. Deletion works on whole segments, judged by each segment's newest record.
 func expire(ctx context.Context, client *kgo.Client, admin *kadm.Client, cfg *settings) ([2]observation, error) {
 	var stages [2]observation
 
@@ -284,6 +384,7 @@ func observe(ctx context.Context, admin *kadm.Client, cfg *settings, topic strin
 	}
 	return observation{
 		summary:     summarise(records),
+		values:      lastValues(records),
 		StartOffset: span.Start,
 		EndOffset:   span.End,
 	}, nil
@@ -353,26 +454,35 @@ func readBatch(ctx context.Context, client *kgo.Client, topic string, end int64)
 		batch = append(batch, record{
 			Key:       string(polled.Key),
 			Tombstone: polled.Value == nil,
+			Value:     string(polled.Value),
 		})
 	})
 	return batch, last, failure
 }
 
-func report(out io.Writer, cfg *settings, policy, kept string, compaction, retention *[2]observation) error {
+func report(out io.Writer, cfg *settings, found *findings) error {
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	compaction, retention, open := &found.compaction, &found.retention, &found.open
+	lastUpdate := fmt.Sprintf(`{"update":%d}`, cfg.updates-1)
 
 	lines := []string{
-		fmt.Sprintf("compacted topic\t%d keys × %d updates, then %d of the keys deleted, cleanup.policy %s", cfg.keys, cfg.updates, cfg.tombstones, policy),
+		fmt.Sprintf("compacted topic\t%d keys × %d updates, then %d of the keys deleted, cleanup.policy %s", cfg.keys, cfg.updates, cfg.tombstones, found.policy),
 		fmt.Sprintf("  before cleaning\t%d records readable (plus %d segment-roll markers), %d live keys, %d tombstones, log starts at %d",
 			compaction[0].Records-compaction[0].Rolls, compaction[0].Rolls, compaction[0].LiveKeys, compaction[0].Tombstones, compaction[0].StartOffset),
 		fmt.Sprintf("  after cleaning\t%d records readable (plus %d segment-roll markers), %d live keys, %d tombstones, log starts at %d",
 			compaction[1].Records-compaction[1].Rolls, compaction[1].Rolls, compaction[1].LiveKeys, compaction[1].Tombstones, compaction[1].StartOffset),
+		fmt.Sprintf("  live keys holding their last update\t%d of %d, %s", holding(compaction[1].values, lastUpdate), len(compaction[1].values), lastUpdate),
 		"",
-		fmt.Sprintf("retention topic\t%d records, retention.ms %s as the broker reports it", cfg.records, kept),
+		fmt.Sprintf("retention topic\t%d records, retention.ms %s as the broker reports it", cfg.records, found.kept),
 		fmt.Sprintf("  before cleaning\t%d records readable (plus %d segment-roll markers), log starts at %d, ends at %d",
 			retention[0].Records-retention[0].Rolls, retention[0].Rolls, retention[0].StartOffset, retention[0].EndOffset),
 		fmt.Sprintf("  after cleaning\t%d records readable (plus %d segment-roll markers), log starts at %d, ends at %d",
 			retention[1].Records-retention[1].Rolls, retention[1].Rolls, retention[1].StartOffset, retention[1].EndOffset),
+		"",
+		fmt.Sprintf("shared-segment control\t%d records, retention.ms %s, segment.ms %s as the broker reports them", cfg.records, found.openKept, found.openSegment),
+		fmt.Sprintf("  just written\t%d of the batch readable, log starts at %d", batchAlive(open[0].values), open[0].StartOffset),
+		fmt.Sprintf("  after %s with a fresh record every %s\t%d of the batch readable, log starts at %d", cfg.pastRetention, companyEvery, batchAlive(open[1].values), open[1].StartOffset),
+		fmt.Sprintf("  then %s with nothing new\t%d of the batch readable, log starts at %d", cfg.alone, batchAlive(open[2].values), open[2].StartOffset),
 	}
 	for _, line := range lines {
 		if _, err := fmt.Fprintln(table, line); err != nil {

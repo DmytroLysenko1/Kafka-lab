@@ -24,8 +24,8 @@ var baseline = schemas.PaymentEventsV1
 
 const amountField = "  int64 amount_minor = 3;"
 
-// The three changes anyone proposes in a design review, derived from the baseline by edit
-// so that they cannot drift away from the schema they are changes to.
+// The changes anyone proposes in a design review, derived from the baseline by edit so that
+// they cannot drift away from the schema they are changes to.
 var changes = []struct {
 	name   string
 	schema string
@@ -43,6 +43,18 @@ var changes = []struct {
 	{
 		name:   "retype a field, keeping its number",
 		schema: strings.Replace(baseline, amountField, "  string amount_minor = 3;", 1),
+	},
+	// How the service's own schema grows: captures and refunds were appended this way. A
+	// record names its message by position in the file, so appending leaves every index as it
+	// was and inserting shifts all of them — the registry is asked about both.
+	{
+		name:   "append a message after the last",
+		schema: baseline + "\nmessage PaymentChargedBack {\n  string payment_id = 1;\n}\n",
+	},
+	{
+		name: "insert a message before the first",
+		schema: strings.Replace(baseline, "message PaymentAuthorized {",
+			"message PaymentInitiated {\n  string payment_id = 1;\n}\n\nmessage PaymentAuthorized {", 1),
 	},
 }
 

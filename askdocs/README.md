@@ -27,7 +27,7 @@ logged yet** — `make ask-log` produces that log (see *What is measured and wha
 | prompt handling | [`prompt.go`](internal/infrastructure/claude/prompt.go) — the system prompt and why each rule is in it; [`docs/question.go`](internal/domain/docs/question.go) — what counts as a question; [`docs/evidence.go`](internal/domain/docs/evidence.go) — what an answer may rest on: never nothing, never more than six sections, and a citation only of what was sent |
 | error/retry logic | `answerer.go` — the retry policy and the budget; [`response.go`](internal/infrastructure/claude/response.go) — what each failure means; [`answerer_test.go`](internal/infrastructure/claude/answerer_test.go) — all of it against a scripted API, no key needed |
 | what it taught (the AI block's share-learnings KR) | [`docs/ai-learnings.md`](../docs/ai-learnings.md) |
-| a practical use case | RAG over the 321 sections of this repository's README, `docs/`, experiment READMEs and this README |
+| a practical use case | RAG over the 331 sections of this repository's README, `docs/`, experiment READMEs and this README |
 
 ## Running it
 
@@ -107,7 +107,7 @@ itself; the SDK's types never leave `internal/infrastructure/claude`.
 |---|---|---|
 | A module of its own, `askdocs/go.mod` | the Anthropic SDK's module requires the AWS SDK, an MCP SDK and testify; none of that belongs in the payments service's module graph | `make verify` reaches it through a separate `verify-askdocs` target |
 | BM25 in process, not embeddings | Anthropic's API has no embeddings endpoint (its documentation, October 2026, points to a partner provider), so embeddings mean a second provider and a second key. The corpus is English prose whose questions use its own words — ISR, outbox, rebalance — which is where a word match works | no synonyms and no other languages: a question matches only the words the docs use. The index holds English stems, so a question in another language matches only through the English terms it happens to contain, and one without any finds nothing (exit 66, nothing spent). That is the first thing embeddings would fix |
-| six sections per question | the 13 labelled questions in [`results/retrieval.log`](results/retrieval.log) sent 6 421–24 886 bytes of section text each, against the 546 310 bytes of all 321 sections, and 12 of the 13 found their labelled document among the six. Six is a chosen cap, not a measured optimum: nothing here compares it with four or eight | a question whose answer is spread over more than six sections gets a partial one |
+| six sections per question | the 13 labelled questions in [`results/retrieval.log`](results/retrieval.log) sent 6 421–24 886 bytes of section text each, against the 567 549 bytes of all 331 sections, and 12 of the 13 found their labelled document among the six. Six is a chosen cap, not a measured optimum: nothing here compares it with four or eight | a question whose answer is spread over more than six sections gets a partial one |
 | `search_result` blocks with citations, not "please cite your sources" in the prompt | the API returns each citation as structured data — which search result, and the cited text — so the sections printed are the ones the model actually used. A citation is matched to the section by its position in the request, never by the strings that come back, and one that points past the evidence is dropped | the search-result citation format is specific to Claude; another provider means another adapter (which is what the adapter is for) |
 | the SDK's retries, not a loop of our own | the SDK already retries what is retryable — 408, 409, 429, 5xx including 529 *overloaded*, and connection errors, unless an `x-should-retry` header says otherwise — with exponential backoff, jitter and `retry-after`. What it cannot know is how long the caller will wait and what a failure means to them; that is the code here: three retries, one budget for the whole question, and a classification into "try later" and "fix the setup" | three retries is a guess about how long an overload lasts; it is one constant |
 | the answer is streamed, bounded by one budget | an always-thinking model can take minutes on a hard question, and a timeout per attempt would cut a slow but healthy answer off and pay for it again. The budget, 4 min 15 s, is the SDK's own estimate for 8 000 output tokens (an hour per 128 000) plus 30 s for the retries. The adapter applies it itself, so no caller can forget it | the SDK caps neither the number of seconds a `retry-after` asks for nor their sum, so long ones eat into the time left for the answer. The SDK retries only until the first byte: an overload inside a stream that has started is reported as "try later", not re-asked. There is no idle timeout, because the SDK swallows the stream's keep-alive pings, so a quiet stream during thinking cannot be told from a dead one; the budget is what ends a dead one |
@@ -121,8 +121,8 @@ itself; the SDK's types never leave `internal/infrastructure/claude`.
 
 ## What is measured and what is not
 
-Measured, in [`results/retrieval.log`](results/retrieval.log), by `make ask-eval`: 321 sections,
-546 310 bytes of text, indexed from the four roots. **recall@6 is 12 of 13**: every labelled
+Measured, in [`results/retrieval.log`](results/retrieval.log), by `make ask-eval`: 331 sections,
+567 549 bytes of text, indexed from the four roots. **recall@6 is 12 of 13**: every labelled
 question found its document among the six sections but one — *What happens when a broker
 goes down?* gets the journal's exp-13 entry and the ISR case file, not exp-04's README, where
 the broker kill is measured. The question the docs do not cover retrieves nothing, and the

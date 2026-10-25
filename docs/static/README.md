@@ -26,7 +26,8 @@ tech talk; a reviewer reads this package, an audience watches that one.
 
 1. **Order exists inside one partition and nowhere else.** Same key → same partition →
    ordered. `key=nil` → no ordering for that entity, and the failure is invisible at low
-   volume ([01](01-write-path.md), exp-01).
+   volume: 200 keyless events, ~34 KB, read back in perfect order; 500, ~85 KB, split every
+   payment ([01](01-write-path.md), exp-01).
 2. **One partition is served by one member of a group.** The partition count is a hard
    ceiling on consumers; extras idle ([03](03-read-path.md), exp-02). Adding partitions
    later breaks the existing key→partition mapping: on franz-go's default partitioner, going
@@ -80,7 +81,7 @@ the defaults that decide an outcome on their own.
 | `partition.assignment.strategy` | `[range, cooperative-sticky]` in Java — which negotiates down to eager `range` — **`CooperativeStickyBalancer` in franz-go** | the two clients rebalance differently out of the box, so eager has to be configured explicitly. exp-14: eager revoked all six partitions, and no gap outgrew the baseline poll cycle; cooperative stopped only the three that moved, for 0.51–0.68 s; KIP-848 for 4.9–6.5 s, around its heartbeat interval ([08](08-rebalance.md)) |
 | rebalance timeout | `max.poll.interval.ms` 5 min in Java, **`RebalanceTimeout` 60 s in franz-go** | the budget a slow handler gets before the group gives up on it differs by 5× ([03](03-read-path.md)) |
 | `linger.ms` / `batch.size` | 5 ms (0 before Kafka 4.0) / 16 KB in Java, **10 ms / ≈1 MB in franz-go** | franz-go has already traded latency for batching before any tuning happens: 34–37 records per batch and 8.5–10.2 ms median at 20 000 records/s, against 21–24 and 6.5–7.3 ms with franz-go set to Java's 5 ms (exp-17; no Java client was run) |
-| `segment.bytes` / `segment.ms` | 1 GB / 7 days | the active segment is never compacted or deleted |
+| `segment.bytes` / `segment.ms` | 1 GB / 7 days | the active segment is never compacted; retention deletes a segment only once its newest record has expired, so a record can outlive `retention.ms` by up to `segment.ms` (exp-03) |
 | `min.cleanable.dirty.ratio` | `0.5` | compaction does not start until half the log is superseded |
 | `delete.retention.ms` | 24 h | how long tombstones stay visible |
 | `unclean.leader.election.enable` | `false` | availability traded for not deleting acknowledged writes |

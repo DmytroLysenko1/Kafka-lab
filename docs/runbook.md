@@ -15,7 +15,12 @@ Look at these three, in this order:
    while 308 records waited — if the panel is ever flat while `published/s` is zero, check
    `SELECT count(*) FROM outbox WHERE published_at IS NULL` directly.)
 2. **`kafka_consumergroup_lag`** — read from the cluster by the exporter, not by the
-   consumer: a consumer that has stopped cannot report its own lag.
+   consumer: a consumer that has stopped cannot report its own lag. exp-13's cell C killed
+   the consumer under 10 payments/s and the dashboard's lag panel climbed 50 a scrape, to
+   405–445, while the group's members panel still read 1 — the dead member counts until its
+   45 s session expires, so **members cannot tell a dead consumer from a live one;
+   `up{service="payments-consumer"}` can**. Started again 30 s later, it caught up only once
+   that session had expired, 20–25 s on: a restart does not resume the group by itself.
 3. **`payment_events_dead_lettered_total`** — anything here is a record no retry will fix.
 
 And know which number lies. **Under-replicated partitions is not a health check.** If the

@@ -29,16 +29,21 @@ docker exec kafka-lab-kafka1 /opt/kafka/bin/kafka-configs.sh --bootstrap-server 
 # Two handlers. "instant" is franz-go's default, where a rebalance does not wait for the
 # handler. "blocking" holds rebalances off while a batch is handled, as the Java consumer
 # does, at a load one member can still keep up with.
-for mode in instant blocking; do
+# slow-member is the case the blocking runs cannot show: one member holds every batch 2 s, a
+# fast one runs beside it, and a third joins — under eager the fast member gives up all it
+# has and waits for the slow one to finish; under cooperative it keeps what does not move.
+for mode in ${MODES:-instant blocking slow-member}; do
   case "$mode" in
     instant) flags=() ;;
     blocking) flags=(-block -work 2ms -rate 400) ;;
+    slow-member) flags=(-block -with-peer -hold 2s -rate 400) ;;
+    *) echo "exp-14: unknown mode $mode"; exit 1 ;;
   esac
   for strategy in eager cooperative server; do
     make reset-topic TOPIC=exp14.payments
     log="$here/results/$strategy-$mode-$stamp.log"
     {
-      echo "exp-14 — a second consumer joins, strategy: $strategy, handler: $mode"
+      echo "exp-14 — a consumer joins, strategy: $strategy, handler: $mode"
       echo "date: $stamp"
       echo "client: franz-go $(go list -m github.com/twmb/franz-go | awk '{print $2}')"
       echo

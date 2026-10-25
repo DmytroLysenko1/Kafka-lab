@@ -32,10 +32,10 @@ const (
 
 // phases run in this order, each one a separate process so the shell can kill and restart a
 // broker between them and time the cluster's reaction from the failure itself.
-var phases = []string{"baseline", "degraded", "recovered", "elected", "readback"}
+var phases = []string{"baseline", "writer", "degraded", "recovered", "elected", "readback"}
 
 var (
-	errPhase    = errors.New("exp-04: -phase must be baseline, degraded, recovered, elected or readback")
+	errPhase    = errors.New("exp-04: -phase must be baseline, writer, degraded, recovered, elected or readback")
 	errShape    = errors.New("exp-04: -records out of range")
 	errNoShift  = errors.New("exp-04: the cluster never reached the expected state inside the deadline")
 	errNoConfig = errors.New("exp-04: the topic does not report the config the phase needs")
@@ -48,6 +48,10 @@ type settings struct {
 	expect  int
 	since   int64
 	timeout time.Duration
+
+	rate       int
+	duration   time.Duration
+	killedFile string
 }
 
 func main() {
@@ -60,11 +64,14 @@ func main() {
 func run() error {
 	var cfg settings
 	flag.StringVar(&cfg.brokers, "brokers", defaultBrokers, "comma-separated bootstrap brokers")
-	flag.StringVar(&cfg.phase, "phase", "", "baseline, degraded, recovered or elected")
+	flag.StringVar(&cfg.phase, "phase", "", "baseline, writer, degraded, recovered, elected or readback")
 	flag.IntVar(&cfg.records, "records", 300, "records to write in this phase")
 	flag.Int64Var(&cfg.since, "since", 0, "unix milliseconds of the event this phase reacts to, for timing")
 	flag.IntVar(&cfg.expect, "expect", 0, "readback: how many writes the earlier phases were told were accepted")
 	flag.DurationVar(&cfg.timeout, "timeout", 2*time.Minute, "deadline for this phase")
+	flag.IntVar(&cfg.rate, "rate", 50, "writer: records a second")
+	flag.DurationVar(&cfg.duration, "duration", 40*time.Second, "writer: how long to keep writing")
+	flag.StringVar(&cfg.killedFile, "killed-file", "", "writer: file the shell writes the kill's unix milliseconds to")
 	flag.Parse()
 
 	switch {
@@ -72,6 +79,8 @@ func run() error {
 		return errPhase
 	case cfg.records <= 0 || cfg.records > maxRecords:
 		return fmt.Errorf("%w: -records is %d", errShape, cfg.records)
+	case cfg.rate <= 0 || cfg.duration <= 0:
+		return fmt.Errorf("%w: -rate %d, -duration %s", errShape, cfg.rate, cfg.duration)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -102,6 +111,8 @@ func measure(ctx context.Context, cfg *settings, out io.Writer) error {
 		return recovered(ctx, admin, cfg, out)
 	case "readback":
 		return readback(ctx, cfg, out)
+	case "writer":
+		return writer(ctx, cfg, out)
 	default:
 		return elected(ctx, admin, cfg, out)
 	}

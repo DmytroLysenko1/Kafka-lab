@@ -1596,3 +1596,46 @@ exp-13 rerun shows the panel going 5, 10, 60 … 460 through the same outage.
 `acks=1` loss reproduced exactly, and its new control cell answered the hypothesis the
 first two cells could not: under the identical failure `acks=all` acknowledged none of the
 2 000 records and so lost none of what it had promised.
+
+## 2026-10-25 — controls for the claims the runs had stepped around
+
+Date: 2026-10-25 · runs between 17:13 and 18:07, `pmset` clean for the whole window
+
+A read of every experiment against what its write-up claimed found eight claims the code did
+not isolate. Each got the cell it was missing, three runs where a cell is timed.
+
+- **exp-12 had stopped reproducing.** The consumer since refuses an event too old for its
+  inbox to remember, and the hand-written records had no `occurred_at`, so even the v1
+  control would now be dead-lettered. Every record carries it now; the table reproduced.
+  Two registry rows were added for how the service's own schema grows, and the second was a
+  surprise: Apicurio accepts a message *inserted* before the first under `BACKWARD` and
+  `FULL`, although it shifts every index on the wire. Only the convention and the consumer's
+  `event_type` check stand in the way.
+- **exp-04 never wrote during the kill.** A writer now runs through it: 2 000 of 2 000
+  acknowledged, none failed or lost, the longest gap 10.3 s — 15.4 s with the controller —
+  which is the detection time, spent with records waiting.
+- **exp-03 counted keys, not values, and its retention cell could not tell segments from
+  records.** All 40 live keys hold their last update. The control kept 2 000 records
+  readable at three times their retention while their segment got younger records, and lost
+  them 15 s after it stopped. Its last phase found something else: once
+  the fresh records stopped, the batch was gone within 15 s although `segment.ms` was 7 days
+  and nothing had rolled the segment — the broker rolls an expired *active* segment and
+  deletes it, so "the active segment always survives" was true of compaction and wrong of
+  retention.
+- **exp-07's one-transaction claim had no control.** exp-07b splits it: 999 of 1 000 rows,
+  the claimed payment refused on redelivery and never written.
+- **exp-14 could not price eager.** With a member holding its batch 2 s, eager stopped the
+  fast member's partitions for 1.02–1.04 s against a 44–62 ms baseline; cooperative and
+  KIP-848 kept them at baseline.
+- **exp-17b never isolated the batch ceiling.** At 16 KiB every batch held 64 records and the
+  producer delivered 154 000–265 000 records/s; at the default, about 300 and 371 000–527 000.
+- **exp-01's "invisible at low volume" was arithmetic.** 200 keyless events, ~34 KB, read back
+  in order; 500, ~85 KB, split every payment. The knob table had the event size at 100 bytes;
+  it is 170.
+- **No run had moved the consumer-lag panel.** exp-13's cell C kills the consumer on the
+  service's own topic and group: the panel climbed to 405–445, while the members panel read 1
+  for a dead member until its 45 s session expired — which is also why the restarted consumer
+  waited 20–25 s before it drained anything.
+
+Two of the eight were findings, not confirmations: the active segment is not safe from
+retention, and the registry lets through the one schema change this service must never make.

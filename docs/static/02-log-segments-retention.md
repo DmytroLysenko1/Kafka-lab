@@ -12,7 +12,7 @@ partition directory: /var/lib/kafka/data/payments.main-3/
   00000000000000000000.log        closed segment  - retention and compaction may touch it
   00000000000000000000.index                      - offset -> byte position, sparse
   00000000000000000000.timeindex                  - timestamp -> offset
-  00000000000000001024.log        ACTIVE segment  - never compacted, never deleted
+  00000000000000001024.log        ACTIVE segment  - never compacted; deleted only once its newest record expires
   00000000000000001024.index
   00000000000000001024.timeindex
   leader-epoch-checkpoint                         - epoch -> start offset, used to truncate
@@ -27,8 +27,8 @@ the same partition as offsets - the file names above are the tick marks below:
   [===========================|=============|======|=========]
   ^                           ^
   |                           1024  first offset of the ACTIVE segment: never
-  |                                 compacted and never deleted, which is also
-  |                                 the floor on what retention is able to remove
+  |                                 compacted, and while any record in it is younger
+  |                                 than retention.ms, the floor on what retention removes
   0  oldest offset still on disk - retention drops whole segments, never records
 
                                       x  1043  committed offset of the group
@@ -76,13 +76,18 @@ why "seek to an arbitrary offset" is cheap without keeping an entry per record i
 
 ## Retention deletes whole segments
 
-There is no mechanism to delete part of a segment. A record survives until the segment
-containing it is **closed** and then fully aged out, so effective retention is always
-longer than `retention.ms` suggests. On a low-traffic topic with the default 1 GB
-segment the difference is weeks, not minutes — this is a capacity-planning surprise, not
-a trivia item. It is also the one claim on this page that exp-03 does **not** back: that
-run rolls segments every second, so nothing of its data ever sat in an open segment past
-its retention, and everything was duly dropped (exp-03d below).
+There is no mechanism to delete part of a segment, and a segment is judged by its **newest**
+record: a record survives as long as anything written after it into the same segment is
+still inside `retention.ms`. On a partition with a steady trickle and the default 7-day
+`segment.ms`, a record written as a segment opens can outlive its retention by most of a week
+— effective retention is up to `retention.ms` plus `segment.ms`, a capacity-planning surprise,
+not a trivia item. exp-03's control measured it: 2 000 records three times past a 5 s
+retention stayed readable while a fresh record went into their segment every 2 s, and were
+gone 15 s after the fresh records stopped (exp-03d below).
+
+The active segment is no refuge once it goes quiet. With nothing rolling it, the broker rolls
+an active segment whose newest record has expired and deletes it: the same run, without the
+fresh records, lost the batch inside 15 s with `segment.ms` at 7 days.
 
 Deleting by size (`retention.bytes`) works the same way and is per partition, not per
 topic: a topic with 6 partitions and `retention.bytes=1GB` holds up to 6 GB.
@@ -132,14 +137,11 @@ gone. A tombstone is a record saying "deleted", not an absence.
 
 ## Still to be measured
 
-The exp-03 row here originally promised three things this run does not deliver. They are
+The exp-03 row here originally promised three things the first runs did not deliver. They are
 listed rather than quietly dropped:
 
 | Run | What it shows | Status |
 |---|---|---|
 | exp-03b | **segment geometry from a real log dump** (`kafka-dump-log.sh`): base offsets, segment sizes, what the index files hold | TBD — exp-03 reads the log as a consumer, so it sees records, never segment boundaries |
 | exp-03c | **tombstone removal** after `delete.retention.ms` elapses — the second cleaner pass, not the one that compacts values | `exp03.compact.yaml` sets `delete.retention.ms: 1000` expecting them to vanish inside the run, and in every run so far all 10 survived — which is the expected outcome, not an open question: the clock does not start when the tombstone is written. A tombstone is removed by a *later* cleaner pass than the one that compacts the values, so a single-pass run cannot drop it whatever the setting says. Measuring it needs a second pass forced after the delay, which this run does not do |
-| exp-03d | **data outliving `retention.ms`** because it is trapped in an open segment | TBD — this is the "a topic holds more than its setting says" claim in the section above, and exp-03 showed the opposite: it rolls segments continuously, so aged data always lands in a closed segment and is always dropped |
-
-exp-03d is the one that matters for the retention section: until it runs, "effective
-retention is always longer than `retention.ms` suggests" is reasoning, not a measurement.
+| exp-03d | **data outliving `retention.ms`** because it shares a segment with younger records | **measured** 2026-10-25, the control cell of [exp-03](../../experiments/kafka_internals/exp-03-segments-retention/): 2 000 of 2 000 readable 15 s into a 5 s retention while the segment kept getting fresh records, 0 after 15 s without them, three runs |

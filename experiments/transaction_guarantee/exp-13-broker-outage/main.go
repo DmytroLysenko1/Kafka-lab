@@ -39,7 +39,11 @@ type settings struct {
 	killAfter time.Duration
 	downFor   time.Duration
 	victims   string
-	topic     string
+	// stopped names what the shell stops instead of brokers, at the same moments. With it set
+	// the run kills nothing itself: it takes the same payments and keeps the same clock, so
+	// the phases line up with whatever the shell took down.
+	stopped string
+	topic   string
 }
 
 // sample is one reading of what an operator would be watching: how much the outbox holds,
@@ -78,10 +82,11 @@ func run() error {
 	flag.DurationVar(&s.killAfter, "kill-after", 20*time.Second, "when to kill the brokers")
 	flag.DurationVar(&s.downFor, "down-for", 30*time.Second, "how long they stay dead")
 	flag.StringVar(&s.victims, "victims", "1", "broker ids to kill, comma separated")
+	flag.StringVar(&s.stopped, "stopped", "", "what the shell stops at -kill-after instead of brokers; no broker is killed")
 	flag.StringVar(&s.topic, "topic", "exp13.payments", "the topic whose replication this run watches")
 	flag.Parse()
 
-	if strings.TrimSpace(s.victims) == "" {
+	if s.stopped == "" && strings.TrimSpace(s.victims) == "" {
 		return errVictims
 	}
 	return measure(context.Background(), &s, os.Stdout)
@@ -145,7 +150,7 @@ func outage(ctx context.Context, s *settings, started time.Time) (killed, revive
 		return 0, 0, ctx.Err()
 	case <-time.After(s.killAfter):
 	}
-	if err := docker(ctx, "kill", s.victims); err != nil {
+	if err := s.takeDown(ctx, "kill"); err != nil {
 		return 0, 0, err
 	}
 	killed = time.Since(started)
@@ -155,10 +160,34 @@ func outage(ctx context.Context, s *settings, started time.Time) (killed, revive
 		return killed, 0, ctx.Err()
 	case <-time.After(s.downFor):
 	}
-	if err := docker(ctx, "start", s.victims); err != nil {
+	if err := s.takeDown(ctx, "start"); err != nil {
 		return killed, 0, err
 	}
 	return killed, time.Since(started), nil
+}
+
+// takeDown kills or restarts the victims, unless the shell is the one stopping something.
+func (s *settings) takeDown(ctx context.Context, action string) error {
+	if s.stopped != "" {
+		return nil
+	}
+	return docker(ctx, action, s.victims)
+}
+
+// cameBack is how the report says the outage ended.
+func (s *settings) cameBack() string {
+	if s.stopped != "" {
+		return "it was started again"
+	}
+	return "the brokers came back"
+}
+
+// outageName is what the middle phase is called in the report.
+func (s *settings) outageName() string {
+	if s.stopped != "" {
+		return s.stopped + " stopped"
+	}
+	return "brokers " + s.victims + " down"
 }
 
 func docker(ctx context.Context, action, victims string) error {

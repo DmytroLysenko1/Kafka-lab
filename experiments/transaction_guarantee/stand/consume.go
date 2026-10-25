@@ -197,10 +197,28 @@ func (c *consumer) shouldDie(lastOfBatch bool) bool {
 }
 
 func (c *consumer) write(ctx context.Context, handled Payment) error {
-	if c.cfg.Mode != Inbox {
+	switch c.cfg.Mode {
+	case Inbox:
+		return c.db.recordOnce(ctx, c.cfg.RunID, c.cfg.Mode, handled)
+	case InboxSplit:
+		return c.writeSplit(ctx, handled)
+	default:
 		return c.db.record(ctx, c.cfg.RunID, c.cfg.Mode, handled)
 	}
-	return c.db.recordOnce(ctx, c.cfg.RunID, c.cfg.Mode, handled)
+}
+
+// writeSplit claims and writes in two transactions, and the crash lands between them: the
+// claim is committed, the payment is not, and the redelivery after the restart finds the
+// claim taken and refuses the payment it never wrote.
+func (c *consumer) writeSplit(ctx context.Context, handled Payment) error {
+	claimed, err := c.db.claim(ctx, c.cfg.RunID, c.cfg.Mode, handled)
+	if err != nil || !claimed {
+		return err
+	}
+	if c.cfg.DieAfter > 0 && c.handled+1 >= c.cfg.DieAfter {
+		labkit.Crash(c.cfg.Name+": killing this consumer between the claim and the write", "mode", c.cfg.Mode, "handled", c.handled)
+	}
+	return c.db.record(ctx, c.cfg.RunID, c.cfg.Mode, handled)
 }
 
 func (c *consumer) commit(ctx context.Context, fetches kgo.Fetches) error {

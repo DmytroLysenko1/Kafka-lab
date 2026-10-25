@@ -1,0 +1,19 @@
+meta:
+  name: exp03.retention-open
+  cluster: kafka-lab
+  environment: lab
+  region: local
+  description: >-
+    exp-03, the control for exp03.retention: the same five-second retention, but segments
+    left to the broker's default segment.ms, so the one segment the run writes stays open
+    and nothing in it can be deleted however old it is.
+
+spec:
+  partitions: 1
+  replicationFactor: 3
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    cleanup.policy: delete
+    retention.ms: 5000

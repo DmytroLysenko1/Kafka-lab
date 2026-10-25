@@ -2,7 +2,7 @@
 
 Ten payments a second through the real API, with brokers killed underneath the relay for
 thirty seconds. Two cells: one broker down, which the cluster is configured to survive, and
-two, which it is not.
+two, which it is not — and a third that keeps the brokers and stops the consumer.
 
 ```
 make exp-13
@@ -25,6 +25,36 @@ last also dumping the dashboard's panels from Prometheus for each cell's window;
 fourth, [after the relay fix](results/run-2026-09-26-171149.log), which reproduced the
 cells (303 accepted, 0 refused, 308 during the outage, 458 at the peak, 17.3 s to catch up)
 and is the one where the backlog panel moved.
+
+The dump's `under-repl` column is the panel's metric, not the panel: cells A and B run on
+`exp13.payments`, which the dashboard's `topic=~"payments.*"` does not match (Prometheus
+anchors the pattern), so the column reads the same metric for this run's topic. The
+dashboard itself would have shown nothing for it at all.
+
+## Cell C — the consumer stopped instead, 2026-10-25
+
+Cells A and B never ran the consumer, and their topic is `exp13.payments`, which the
+dashboard's panels do not read — so no run had moved the consumer-lag panel. Cell C keeps
+every broker, runs the API, the relay and `payments-consumer` on the service's own
+`payments.main` and group, kills the consumer at 20 s and starts it again at 50 s, under the
+same 10 payments/s (`CELLS=C make exp-13`). The dump queries what panels 5 and 102 query.
+Three runs: [18:00](results/run-2026-10-25-180059.log) · [18:03](results/run-2026-10-25-180310.log) ·
+[18:05](results/run-2026-10-25-180519.log).
+
+| | while the consumer was dead | after it was started again |
+|---|---|---|
+| consumer-group lag, the panel's own query | **climbed 50 a scrape, to 445 · 405 · 445** | back to 0 by 75 s, 25 s after the restart |
+| members, panel 102 | **1** — the dead member | **2** for 10–15 s, then 1 |
+| `up{service="payments-consumer"}` | 0 | 1 |
+| payments accepted, refused | 300 · 0 in every run | 399 · 0 |
+
+**The lag panel is the one that moves, and the members panel lies for 45 s.** A killed
+member stays in the group until its session expires — franz-go's 45 s by default — so the
+members count read 1 throughout the outage, and 2 once the restarted process joined beside
+the corpse. Only the scrape target's `up` told dead from alive. The restart did not resume
+consumption at once either: the group rebalanced, and the lag drained, only when the dead
+member's session ran out, 20–25 s after the new process started. The front door and the
+relay never noticed; this is an outage only the consumer side's panels can show.
 
 ## What it shows
 

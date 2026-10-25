@@ -28,6 +28,7 @@ const (
 	maxRate        = 50_000
 	pollRecords    = 200
 	maxWork        = 50 * time.Millisecond
+	maxHold        = 5 * time.Second
 	flushTimeout   = 30 * time.Second
 	// perSecondPerTick is one record every tick: the rate must be a multiple of it, or the
 	// integer division that spreads it over ticks silently produces less than asked.
@@ -58,6 +59,11 @@ type settings struct {
 	static         bool
 	sessionTimeout time.Duration
 	duration       time.Duration
+	// hold makes member A a slow handler: after every batch it waits this long before it lets
+	// a rebalance through. withPeer starts a fast member B beside it, so the joiner is C and
+	// the run can watch what a slow member's batch costs a fast one under each strategy.
+	hold     time.Duration
+	withPeer bool
 }
 
 func main() {
@@ -80,6 +86,8 @@ func run() error {
 	flag.BoolVar(&cfg.static, "static", false, "static membership: give both members a group.instance.id")
 	flag.DurationVar(&cfg.sessionTimeout, "session-timeout", 12*time.Second, "how long a member may go unheard before the group drops it")
 	flag.DurationVar(&cfg.duration, "duration", 35*time.Second, "how long the whole run lasts")
+	flag.DurationVar(&cfg.hold, "hold", 0, "member A holds each batch this long before it allows a rebalance (needs -block)")
+	flag.BoolVar(&cfg.withPeer, "with-peer", false, "start a fast member B beside A, so the joiner is C")
 	flag.Parse()
 
 	if _, err := strategyOptions(cfg.strategy); err != nil {
@@ -102,6 +110,8 @@ func (cfg *settings) validate() error {
 		return fmt.Errorf("%w: -rate %d", errShape, cfg.rate)
 	case cfg.work < 0 || cfg.work > maxWork:
 		return fmt.Errorf("%w: -work %s", errShape, cfg.work)
+	case cfg.hold < 0 || cfg.hold > maxHold || (cfg.hold > 0 && !cfg.block):
+		return fmt.Errorf("%w: -hold %s needs -block and at most %s", errShape, cfg.hold, maxHold)
 	}
 	return cfg.validateSchedule()
 }
@@ -162,6 +172,9 @@ func describe(name string) string {
 }
 
 func describeHandler(cfg *settings) string {
+	if cfg.block && cfg.hold > 0 {
+		return fmt.Sprintf("%s a record, rebalances blocked while a batch of up to %d is handled; member A then holds each batch %s more", cfg.work, pollRecords, cfg.hold)
+	}
 	if cfg.block {
 		return fmt.Sprintf("%s a record, rebalances blocked while a batch of up to %d is handled", cfg.work, pollRecords)
 	}
@@ -184,6 +197,11 @@ func experiment(ctx context.Context, cfg *settings, out io.Writer) error {
 	g.Go(func() error {
 		return consume(gctx, cfg, group, "A", line)
 	})
+	if cfg.withPeer {
+		g.Go(func() error {
+			return consume(gctx, cfg, group, "B", line)
+		})
+	}
 	g.Go(func() error {
 		return second(gctx, cfg, group, line)
 	})
@@ -202,7 +220,7 @@ func second(ctx context.Context, cfg *settings, group string, line *timeline) er
 	}
 	if cfg.leaveAfter == 0 {
 		line.markMeasured()
-		return consume(ctx, cfg, group, "B", line)
+		return consume(ctx, cfg, group, cfg.joiner(), line)
 	}
 
 	member, leave := context.WithCancel(ctx)
@@ -213,7 +231,7 @@ func second(ctx context.Context, cfg *settings, group string, line *timeline) er
 			leave()
 		}
 	}()
-	if err := consume(member, cfg, group, "B", line); err != nil {
+	if err := consume(member, cfg, group, cfg.joiner(), line); err != nil {
 		return err
 	}
 	if cfg.rejoinAfter == 0 {
@@ -225,7 +243,15 @@ func second(ctx context.Context, cfg *settings, group string, line *timeline) er
 		return nil
 	}
 	// Back with the same identity if the run is static, a stranger if it is not.
-	return consume(ctx, cfg, group, "B", line)
+	return consume(ctx, cfg, group, cfg.joiner(), line)
+}
+
+// joiner names the member whose arrival the run measures.
+func (cfg *settings) joiner() string {
+	if cfg.withPeer {
+		return "C"
+	}
+	return "B"
 }
 
 // produce spreads records evenly over the partitions by number, so every partition has the
@@ -336,16 +362,27 @@ func consume(ctx context.Context, cfg *settings, group, member string, line *tim
 	// Runs before Close: a blocked rebalance would otherwise hold Close's leave forever.
 	defer client.AllowRebalance()
 
+	return poll(ctx, client, cfg, member, line)
+}
+
+// poll handles batch after batch until the run ends. Member A, when the run makes it slow,
+// holds each batch before it lets a waiting rebalance through.
+func poll(ctx context.Context, client *kgo.Client, cfg *settings, member string, line *timeline) error {
 	for {
 		fetches := client.PollRecords(ctx, pollRecords)
-		if ctx.Err() != nil {
+		select {
+		case <-ctx.Done():
 			return nil
+		default:
 		}
 		if err := fetches.Err(); err != nil {
 			return fmt.Errorf("exp-14: consumer %s: %w", member, err)
 		}
 		handle(ctx, fetches, cfg.work, member, line)
 		client.MarkCommitRecords(fetches.Records()...)
+		if member == "A" && !sleep(ctx, cfg.hold) {
+			return nil
+		}
 		client.AllowRebalance()
 	}
 }

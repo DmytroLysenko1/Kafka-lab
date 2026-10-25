@@ -1,0 +1,40 @@
+exp-13 — a broker outage under load: does the front door keep answering, and what piles up
+date: 2026-10-25-180519
+load: 10 payments/s for 90s; brokers killed at 20s for 30s
+
+== cell C: the consumer stopped — every broker up ==
+payments-consumer killed
+payments-consumer started again
+phase                    seconds        accepted    refused  backlog (max)   under-repl  no leader
+before the kill          0–20                200          0              1            0          0
+payments-consumer stopped 20–50               300          0              0            0          0
+after it was started again 50–90               399          0              0            0          0
+
+peak backlog: 1 records
+backlog back to its pre-outage level (1 records) 500ms after it was started again
+outbox drained 500ms after the run stopped taking payments
+grafana window: from=1792944342000 to=1792944444000
+dashboard, from Prometheus, every 5 s (a dash is a scrape that had no answer):
+  t(s)           lag      membersoffset 1m min    handled/s  published/s  consumer up
+     0           0.0          0.0         32.7            -            -          0.0
+     5           0.0          1.0         22.9            -            -          1.0
+    10           0.0          1.0         17.5            -          2.3          1.0
+    15           0.0          1.0         16.4          3.8          4.1          1.0
+    20           0.0          1.0         18.5          5.5          5.9          1.0
+    25           0.0          1.0         26.2          5.0          7.6          0.0
+    30          45.0          1.0         27.3          5.0          9.2          0.0
+    35          95.0          1.0         27.3          4.5         10.0          0.0
+    40         145.0          1.0         27.3          2.9         10.0          0.0
+    45         195.0          1.0         27.3            -         10.0          0.0
+    50         245.0          1.0         27.3            -         10.0          0.0
+    55         295.0          1.0         27.3            -         10.0          1.0
+    60         345.0          2.0         27.3            -         10.0          1.0
+    65         395.0          2.0         24.0            -         10.0          1.0
+    70         445.0          2.0         16.4            -         10.0          1.0
+    75           0.0          1.0         85.1         20.5         10.0          1.0
+    80           0.0          1.0         86.2         17.5         10.0          1.0
+    85           0.0          1.0         89.5         17.6         10.0          1.0
+    90           0.0          1.0         93.8         18.4         10.0          1.0
+    95           0.0          1.0        103.6         18.8         10.0          1.0
+   100           0.0          1.0        105.8          8.4          8.4          1.0
+

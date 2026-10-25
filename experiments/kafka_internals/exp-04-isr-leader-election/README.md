@@ -5,25 +5,25 @@ replica from the ISR takes over, `acks=all` keeps being honoured because two rep
 still in sync, and once the broker is back everything returns to how it was.
 
 **What this run can and cannot settle.** It measures how long the cluster takes to notice
-and where leadership lands, shows `acks=all` still being honoured afterwards, and reads the
-topic back to its end once the broker has recovered, so a new leader that had dropped
-acknowledged records would show as fewer readable than written. It does **not** price the
-pause: the degraded phase waits for the controller to finish re-electing before it writes,
-so its 300 of 300 describes a settled two-of-three cluster, not the moment of the kill, and
-nothing is in flight when the broker dies. That needs a continuous writer across the kill,
-which this experiment does not have.
+and where leadership lands, writes through the kill to the partition whose leader dies, and
+reads the topic back to its end once the broker has recovered — so it prices the pause a
+caller sees and checks that the new leader kept every acknowledged record, including those in
+flight when the broker died. What it cannot show is the unclean case: with
+`unclean.leader.election.enable=false` and two replicas left in sync, a truncating election is
+not on offer (exp-08 is the run where acknowledged records were lost).
 
 ```
 make exp-04
 ```
 
 One topic, 3 partitions, RF 3, `min.insync.replicas=2`,
-`unclean.leader.election.enable=false`. Four phases, each its own process so the shell can
+`unclean.leader.election.enable=false`. Five phases, each its own process so the shell can
 kill a broker between them and time the cluster's reaction from the failure itself:
 
 | Phase | What it does |
 |---|---|
 | `baseline` | writes with `acks=all`, records who leads what, names the leader of partition 0 |
+| `writer` | started 5 s before the kill, writes 50 records a second with `acks=all` to partition 0 for 40 s, and reports the longest gap between acknowledgements |
 | `degraded` | waits for the cluster to notice the kill, then writes again |
 | `recovered` | waits for the ISR to be whole again after the restart |
 | `elected` | what an explicit preferred election changes |
@@ -60,9 +60,31 @@ phase table is the 2026-09-26 run, the only one that also reads the topic back:
 | preferred election → leadership back | **0–0.1 s** | 0 s |
 
 **The degraded window was a pause, not data.** The readback reads the topic to its end after
-recovery and finds every one of the 600 acknowledged writes. It says that for writes made
-before the kill and after the re-election; the kill itself happens between the two write
-phases, so nothing was in flight when it landed — that case is exp-08.
+recovery and finds every one of the 600 acknowledged writes. Those were made before the kill
+and after the re-election; the writer below is the run with records in flight when it landed.
+
+## Writing through the kill — three runs, 2026-10-25
+
+[17:18](results/run-2026-10-25-171803.log) (kafka2 killed, and it was the active controller),
+[17:18:57](results/run-2026-10-25-171857.log) and [17:19:46](results/run-2026-10-25-171946.log)
+(kafka2 killed, kafka3 the controller):
+
+| | controller killed too | controller survived |
+|---|---|---|
+| writes to partition 0 acknowledged | 2 000 of 2 000 | 2 000 of 2 000 · 2 000 of 2 000 |
+| failed | 0 | 0 · 0 |
+| longest gap between acknowledgements | **15.4 s** | **10.3 s · 10.3 s** |
+| slowest single write, send to ack | 15.4 s | 10.3 s · 10.3 s |
+| readable afterwards, over every phase | 2 600 of 2 600 | 2 600 of 2 600 · 2 600 of 2 600 |
+
+**The pause is the detection time, and the producer rides it out.** Writes to the dead
+leader's partition stopped for as long as the cluster took to notice the death — the same
+10.3 s and 15.4 s the `degraded` phase timed — and resumed on the new leader with nothing
+failed and nothing lost. Nothing in the client had to retry by hand: franz-go's record retries
+are unbounded and it has no delivery timeout unless one is set, so a record sent into the gap
+simply waited. The service's relay does set one — 10 s (`internal/infrastructure/kafka/publisher.go`)
+— so a sweep caught in a gap this long fails and leaves its rows in the outbox for the next
+sweep; the pause is the same, only who waits through it changes.
 
 **Killing the controller costs about five seconds more.** In the 15.3 s run the killed
 broker was also the active KRaft controller. The [surviving brokers' logs](results/controller-failover-2026-09-26-034607.log)

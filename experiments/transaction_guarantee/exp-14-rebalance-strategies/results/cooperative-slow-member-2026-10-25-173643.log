@@ -1,0 +1,41 @@
+exp-14 — a consumer joins, strategy: cooperative, handler: slow-member
+date: 2026-10-25-173643
+client: franz-go v1.22.0
+
+strategy                  cooperative: CooperativeStickyBalancer, classic protocol, only moving partitions revoked
+group                     exp14-cooperative-1792942652597103000
+load                      400 records/s over 6 partitions
+handler                   0s a record, rebalances blocked while a batch of up to 200 is handled; member A then holds each batch 2s more
+membership                dynamic, A slow and B fast from the start, C joins; session timeout 12s
+third consumer joined at  15s
+
+assignment changes after the first
+  15.54s  B revoked []
+  16.04s  A revoked []
+  16.05s  C assigned []
+  16.05s  B revoked [4]
+  16.05s  B assigned []
+  16.05s  B revoked []
+  16.55s  C revoked []
+  18.04s  A revoked [5]
+  18.04s  A assigned []
+  20.04s  A revoked []
+  20.05s  B assigned []
+  20.05s  C assigned [4 5]
+  22.04s  A assigned []
+  35.01s  A revoked [1 2]
+  35.01s  C revoked [4 5]
+  35.01s  B revoked [0 3]
+
+partition  longest gap, 10s before the join  longest gap, from 2s before to 15s after
+  0        54ms                              55ms
+  1        2.96s                             5.955s
+  2        4.96s                             8.004s
+  3        49ms                              60ms
+  4        43ms                              4.017s
+  5        4s                                6.015s
+
+partitions stopped for more than 1s                4 of 6
+longest time the whole group handled nothing       50ms
+records handled twice                              0
+records missed between the first and last handled  0

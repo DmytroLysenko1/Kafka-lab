@@ -64,8 +64,35 @@ different question: six of the eight runs began within 40 ms of the join and two
 heartbeat — 3 s by default. Eager's stop lasts as long as the slowest
 member takes to rejoin; with two members, a fast handler, a local network and batches that
 never grew large even when blocking, that was tens of milliseconds. The cost the textbook
-warns about scales with what this run does not have — many members, slow handlers holding a
-rebalance, network round trips — and is not shown here.
+warns about scales with what these runs do not have — many members, slow handlers holding a
+rebalance, network round trips; the slow-member cell below adds the second, and the cost
+appears.
+
+## A slow member holding the rebalance — 2026-10-25, three runs of each
+
+The runs above could not price eager's stop: with two members and a fast handler there was
+nobody to wait for. This cell adds one. Member A holds every batch 2 s before it lets a
+rebalance through — a slow handler — a fast member B runs beside it from the start, and C
+joins at 15 s; everything else as in the blocking runs (`MODES=slow-member make exp-14`).
+The partitions to watch are B's: the fast member's, whose baseline is the poll cycle.
+
+| | B's partitions that stayed with B | B's partition that moved | B's partitions, baseline | whole group handled nothing | runs |
+|---|---|---|---|---|---|
+| eager | — all three revoked: **1.023–1.035 s** | — | 44–62 ms | **1.020–1.025 s** | [1](results/eager-slow-member-2026-10-25-173436.log) · [2](results/eager-slow-member-2026-10-25-173643.log) · [3](results/eager-slow-member-2026-10-25-173849.log) |
+| cooperative | **40–60 ms** | 2.03–4.02 s | 39–54 ms | 35–54 ms | [1](results/cooperative-slow-member-2026-10-25-173436.log) · [2](results/cooperative-slow-member-2026-10-25-173643.log) · [3](results/cooperative-slow-member-2026-10-25-173849.log) |
+| KIP-848 | **43–48 ms** | 4.9–14.9 s | 42–53 ms | 43–48 ms | [1](results/server-slow-member-2026-10-25-173436.log) · [2](results/server-slow-member-2026-10-25-173643.log) · [3](results/server-slow-member-2026-10-25-173849.log) |
+
+Nothing was handled twice or missed in any of the nine.
+
+**This is eager's cost, and it is the slowest member's batch.** Under eager, B revoked all of
+its partitions the moment the join was announced (15.03 s in every run) and then sat idle
+until A finished holding its batch and rejoined (16.04 s): every one of B's partitions
+stopped for a second, twenty times its baseline, and for that second the whole group handled
+nothing. B was fast; it paid for A. Under cooperative and KIP-848, B kept the partitions that
+were not moving and they never left their baseline — the group as a whole never stopped for
+longer than an ordinary poll cycle. What both incremental strategies pay instead is a longer
+wait on the one partition that moves, because its new owner can only take it once the slow
+member has let go.
 
 **Cooperative stopped the moved partitions for longer than eager stopped any.** It
 rebalances in two rounds: the first revokes what must move, the second assigns it. franz-go

@@ -25,6 +25,11 @@ const (
 	AtMostOnce  Mode = "at-most-once"
 	AtLeastOnce Mode = "at-least-once"
 	Inbox       Mode = "inbox"
+	// InboxSplit is the inbox done wrong on purpose: the claim commits in a transaction of its
+	// own and the payment is written in another, so a crash between them leaves a payment
+	// claimed and never written. It is the control for Inbox — the same claim, one boundary
+	// moved.
+	InboxSplit Mode = "inbox-split"
 	// AutoCommit is franz-go's default: a timer commits what the previous poll returned.
 	AutoCommit Mode = "autocommit"
 	// AutoCommitGreedy is GreedyAutoCommit: the timer commits what the last poll returned,
@@ -39,6 +44,11 @@ func (m Mode) CommitsFirst() bool {
 	return m == AtMostOnce
 }
 
+// Claims reports whether the mode deduplicates through the inbox table, rightly or not.
+func (m Mode) Claims() bool {
+	return m == Inbox || m == InboxSplit
+}
+
 // AutoCommits reports whether the client commits on its own timer rather than when the
 // handler tells it to.
 func (m Mode) AutoCommits() bool {
@@ -49,7 +59,7 @@ func (m Mode) AutoCommits() bool {
 // produces anything else has not proved its point, whatever the totals look like.
 func (m Mode) Expects() Outcome {
 	switch m {
-	case AtMostOnce, AutoCommitGreedy:
+	case AtMostOnce, AutoCommitGreedy, InboxSplit:
 		return OutcomeLost
 	case AtLeastOnce, AutoCommit:
 		return OutcomeDuplicate

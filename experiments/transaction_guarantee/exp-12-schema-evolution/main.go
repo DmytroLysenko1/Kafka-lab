@@ -17,6 +17,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/sr"
 	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/DmytroLysenko1/Kafka-lab/internal/application/merchants"
 	"github.com/DmytroLysenko1/Kafka-lab/internal/infrastructure/kafka"
@@ -46,6 +48,7 @@ const (
 	fieldMerchantID = 2
 	fieldAmount     = 3
 	fieldCurrency   = 4
+	fieldOccurredAt = 5
 	// Six, not five: five is occurred_at in the schema the consumer knows, and writing a
 	// string there would be a reused number rather than a new field — a different
 	// experiment, and the one this cell is supposed to be contrasted against.
@@ -104,6 +107,19 @@ var variants = []variant{
 			return appendString(body, fieldCurrency, "EUR")
 		},
 	},
+}
+
+// appendOccurredAt stamps a record with when it happened, in every generation alike. The
+// consumer refuses an event too old for its inbox to remember, and one without the field reads
+// as the zero time — so a record without it would be dead-lettered whatever its schema, and
+// the v1 control could no longer tell a schema change from everything being refused.
+func appendOccurredAt(body []byte, at time.Time) ([]byte, error) {
+	stamp, err := proto.Marshal(timestamppb.New(at))
+	if err != nil {
+		return nil, err
+	}
+	body = protowire.AppendTag(body, fieldOccurredAt, protowire.BytesType)
+	return protowire.AppendBytes(body, stamp), nil
 }
 
 func appendString(body []byte, field protowire.Number, value string) []byte {
@@ -182,24 +198,14 @@ func produce(ctx context.Context, s *settings, out io.Writer) error {
 	}
 	defer client.Close()
 
-	header := sr.ConfluentHeader{}
 	written := &lines{
 		out: out,
 	}
 
 	for _, generation := range variants {
-		prefix, err := header.AppendEncode(nil, registered.ID, []int{0})
+		record, err := recordOf(generation, registered.ID, s.merchant)
 		if err != nil {
 			return err
-		}
-		paymentID := generation.eventID + "-payment"
-		record := &kgo.Record{
-			Key:   []byte(paymentID),
-			Value: append(prefix, generation.body(paymentID, s.merchant)...),
-			Headers: []kgo.RecordHeader{
-				{Key: "event_id", Value: []byte(generation.eventID)},
-				{Key: "event_type", Value: []byte(outboxwire.EventTypeAuthorized)},
-			},
 		}
 		if err := client.ProduceSync(ctx, record).FirstErr(); err != nil {
 			return fmt.Errorf("produce %s: %w", generation.name, err)
@@ -207,6 +213,29 @@ func produce(ctx context.Context, s *settings, out io.Writer) error {
 		written.printf("produced: %s\n", generation.name)
 	}
 	return written.err
+}
+
+// recordOf frames one generation as the relay would: the schema id the service publishes
+// under, message index 0, and the headers the consumer reads the event by.
+func recordOf(generation variant, schemaID int, merchant string) (*kgo.Record, error) {
+	var header sr.ConfluentHeader
+	prefix, err := header.AppendEncode(nil, schemaID, []int{0})
+	if err != nil {
+		return nil, err
+	}
+	paymentID := generation.eventID + "-payment"
+	body, err := appendOccurredAt(generation.body(paymentID, merchant), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	return &kgo.Record{
+		Key:   []byte(paymentID),
+		Value: append(prefix, body...),
+		Headers: []kgo.RecordHeader{
+			{Key: "event_id", Value: []byte(generation.eventID)},
+			{Key: "event_type", Value: []byte(outboxwire.EventTypeAuthorized)},
+		},
+	}, nil
 }
 
 func consume(ctx context.Context, s *settings, out io.Writer) error {

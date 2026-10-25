@@ -92,7 +92,7 @@ func verify(ctx context.Context, cfg *Settings, db *store, out io.Writer) error 
 		fmt.Sprintf("  lost\t%d", counted.Lost()),
 		fmt.Sprintf("  duplicated\t%d", counted.Duplicated()),
 	}
-	if cfg.Mode == Inbox {
+	if cfg.Mode.Claims() {
 		lines = append(lines, fmt.Sprintf("  redelivered, refused by the inbox\t%d", counted.Refused))
 	}
 	verdict, held := cfg.Mode.Verdict(counted)

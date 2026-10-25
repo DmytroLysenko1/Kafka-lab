@@ -1,0 +1,21 @@
+meta:
+  name: exp07b.payments
+  cluster: kafka-lab
+  region: local
+  environment: lab
+  description: |
+    exp-07b: the control for exp-07 — the same 1000 payments, the same kill mid-batch,
+    with the inbox's claim and the payment's write in two transactions instead of one.
+    Its own topic for the reason exp-07 has one: the group resumes from committed offsets,
+    and another experiment's records would be replayed into this one's count. Three
+    partitions, RF 3 and min.insync.replicas 2, as exp-07.
+
+spec:
+  partitions: 3
+  replicationFactor: 3
+  retentionMinutes: 60
+  placement:
+    strategy: any
+  settings:
+    min.insync.replicas: 2
+    unclean.leader.election.enable: false

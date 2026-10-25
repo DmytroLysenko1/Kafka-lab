@@ -15,6 +15,7 @@ ceiling.
 | [exp-06](exp-06-at-least-once/) | offset committed **after** handling, same kill | **1 050 rows — 50 charged twice** |
 | [exp-06b](exp-06b-autocommit-default/) | franz-go's default autocommit, killed at the same moment | **nothing lost, 12 written twice — the default is at-least-once** |
 | [exp-07](exp-07-inbox/) | the same failure with an inbox | **1 000 rows, zero duplicates — the inbox refused the 50 redelivered** |
+| [exp-07b](exp-07b-split-inbox/) | the same, with the claim and the write in two transactions | **999 rows — the claimed payment was refused on its redelivery and never written** |
 | [exp-08](exp-08-acks/) | `acks=1` with the followers paused under a leader kill, against `acks=all` with `min.insync.replicas=3` | **`acks=all` refused all 2 000 with `NOT_ENOUGH_REPLICAS`; `acks=1` with the followers paused lost all 2 000 it had acknowledged; `acks=all` under that same pause acknowledged 0 and lost 0** |
 | [exp-09](exp-09-reordering/) | idempotence off, five requests in flight, repeated refusals | **0 reordered in five runs; 291, 80, 80, 80 and 191 duplicated, and in each of the three runs that counted retries the duplicates were exactly the records appended before a `REQUEST_TIMED_OUT` — a timeout duplicate, not a franz-go one; idempotent: zero of both** |
 | [exp-10a](exp-10a-rollback/) | a crash mid-transaction | **`read_committed` 1 000 of 1 000 — the killed batch's output aborted, its offsets never committed** |

@@ -58,3 +58,49 @@ func TestSummariseReadsTheLogTheWayAConsumerDoes(t *testing.T) {
 		})
 	}
 }
+
+func TestALiveKeyHoldsTheValueOfItsLastRecord(t *testing.T) {
+	tests := []struct {
+		name    string
+		records []record
+		want    map[string]string
+	}{
+		{
+			name:    "the last of several updates is what a reader ends up with",
+			records: []record{{Key: "state-1", Value: "v0"}, {Key: "state-1", Value: "v1"}, {Key: "state-1", Value: "v2"}},
+			want:    map[string]string{"state-1": "v2"},
+		},
+		{
+			name: "a log that kept an earlier update holds that one, not the last written",
+			// What a cleaner that kept the wrong record would leave: the count is right, the
+			// value is not, and only reading the value tells the two apart.
+			records: []record{{Key: "state-1", Value: "v0"}},
+			want:    map[string]string{"state-1": "v0"},
+		},
+		{
+			name:    "a deleted key holds nothing",
+			records: []record{{Key: "state-1", Value: "v0"}, {Key: "state-1", Tombstone: true}},
+			want:    map[string]string{},
+		},
+		{
+			name:    "segment-roll markers are not state",
+			records: []record{{Key: rollKey, Value: `{"roll":true}`}, {Key: "state-2", Value: "v5"}},
+			want:    map[string]string{"state-2": "v5"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if diff := cmp.Diff(tt.want, lastValues(tt.records)); diff != "" {
+				t.Errorf("lastValues mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestOnlyKeysHoldingTheExpectedValueAreCounted(t *testing.T) {
+	values := map[string]string{"state-1": `{"update":39}`, "state-2": `{"update":39}`, "state-3": `{"update":12}`}
+	if diff := cmp.Diff(2, holding(values, `{"update":39}`)); diff != "" {
+		t.Errorf("holding mismatch (-want +got):\n%s", diff)
+	}
+}

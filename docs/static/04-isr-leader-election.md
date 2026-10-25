@@ -135,6 +135,13 @@ The phase table is one run, [2026-09-26](../../experiments/kafka_internals/exp-0
 | after preferred election | `[3 1 2]` | 3 of 3 | — |
 | readback | — | — | **600 of 600 acknowledged writes readable, 0 lost** |
 
+What the kill costs a caller is measured separately, by a writer started 5 s before it and
+sending 50 records a second with `acks=all` to the dying leader's partition, three runs on
+2026-10-25 ([exp-04](../../experiments/kafka_internals/exp-04-isr-leader-election/#writing-through-the-kill--three-runs-2026-10-25)):
+**2 000 of 2 000 acknowledged in every run, none failed, 2 600 of 2 600 readable after**, and
+the longest gap between acknowledgements **10.3 s · 10.3 s**, or **15.4 s** with the controller
+killed too — the detection time, spent with records waiting rather than failing.
+
 The timings over the three runs that measured them — two on 2026-09-20, and the 2026-09-26
 run, whose killed broker was also the KRaft controller (the earlier two did not record it):
 

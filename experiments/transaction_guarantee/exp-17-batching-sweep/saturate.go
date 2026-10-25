@@ -38,22 +38,37 @@ type saturated struct {
 func saturationSweep(ctx context.Context, cfg *settings, out io.Writer) error {
 	pool := payloadPool(poolSize)
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', tabwriter.AlignRight)
-	if _, err := fmt.Fprintln(table, "linger\tbatch\tcodec\tacked/s\tMB/s in\tMB/s wire\twire ratio\tCPU ms/MB\tp50\tp99\tfailed\t"); err != nil {
+	if _, err := fmt.Fprintln(table, "linger\tbatch\tcodec\tacked/s\tMB/s in\tMB/s wire\twire ratio\tCPU ms/MB\trecords/batch\tp50\tp99\tfailed\t"); err != nil {
 		return fmt.Errorf("exp-17b: write report: %w", err)
 	}
-	for _, linger := range saturationLingers {
-		for _, c := range codecs {
-			cell := point{linger: linger, batch: defaultBatchBytes, codec: c}
-			got, err := saturate(ctx, cfg, cell, pool)
-			if err != nil {
-				return err
-			}
-			if _, err := fmt.Fprintln(table, saturationRow(cell, &got)); err != nil {
-				return fmt.Errorf("exp-17b: write report: %w", err)
-			}
+	for _, cell := range saturationCells() {
+		got, err := saturate(ctx, cfg, cell, pool)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(table, saturationRow(cell, &got)); err != nil {
+			return fmt.Errorf("exp-17b: write report: %w", err)
 		}
 	}
 	return table.Flush()
+}
+
+// saturationCells is linger × codec at the default batch ceiling, then the batch ceiling on its
+// own: no codec, so the only thing that differs between a pair of those rows is how many
+// records a request may carry.
+func saturationCells() []point {
+	cells := make([]point, 0, len(saturationLingers)*(len(codecs)+len(batches)))
+	for _, linger := range saturationLingers {
+		for _, c := range codecs {
+			cells = append(cells, point{linger: linger, batch: defaultBatchBytes, codec: c})
+		}
+	}
+	for _, linger := range saturationLingers {
+		for _, batch := range batches {
+			cells = append(cells, point{linger: linger, batch: batch, codec: codecs[0]})
+		}
+	}
+	return cells
 }
 
 func payloadPool(n int) []record {
@@ -147,10 +162,11 @@ func cpuTime() (time.Duration, error) {
 func saturationRow(cell point, got *saturated) string {
 	seconds := got.elapsed.Seconds()
 	in := float64(got.sentWire.Uncompressed) / 1e6
-	return fmt.Sprintf("%s\t%s\t%s\t%.0f\t%.1f\t%.1f\t%.2f\t%.1f\t%s\t%s\t%d\t",
+	return fmt.Sprintf("%s\t%s\t%s\t%.0f\t%.1f\t%.1f\t%.2f\t%.1f\t%.0f\t%s\t%s\t%d\t",
 		cell.linger, batchLabel(cell.batch), cell.codec.name,
 		float64(got.acked)/seconds, in/seconds, float64(got.sentWire.Compressed)/1e6/seconds,
 		got.sentWire.ratio(), float64(got.cpu.Milliseconds())/max(in, 1e-9),
+		float64(got.sentWire.Records)/max(float64(got.sentWire.Batches), 1),
 		got.lat.percentile(0.50).Round(100*time.Microsecond), got.lat.percentile(0.99).Round(100*time.Microsecond),
 		got.failed)
 }

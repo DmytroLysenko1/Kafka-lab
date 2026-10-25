@@ -62,6 +62,8 @@ func (m Mode) Verdict(t Tally) (string, bool) {
 		return fmt.Sprintf("EXPECTED %q — this run did not demonstrate what it exists to demonstrate", want), false
 	case m == Inbox && t.Refused == 0:
 		return "EXPECTED the inbox to refuse redeliveries — none arrived, so a clean table proves nothing", false
+	case m == InboxSplit && t.Refused == 0:
+		return "EXPECTED the claim to refuse the payment it never wrote — nothing was refused, so the loss is not the split transaction's", false
 	default:
 		return "as expected", true
 	}

@@ -69,7 +69,7 @@ func TestTallyNamesWhatTheRunDidToThePayments(t *testing.T) {
 }
 
 func TestEveryModeDeclaresWhatItMustDemonstrate(t *testing.T) {
-	for _, mode := range []Mode{AtMostOnce, AtLeastOnce, Inbox, AutoCommit, AutoCommitGreedy} {
+	for _, mode := range []Mode{AtMostOnce, AtLeastOnce, Inbox, InboxSplit, AutoCommit, AutoCommitGreedy} {
 		if mode.Expects() == "" {
 			t.Errorf("mode %q has no expected outcome, so its run could not fail", mode)
 		}
@@ -92,6 +92,16 @@ func TestVerdictRefusesARunThatDidNotExerciseItsMode(t *testing.T) {
 			name: "the inbox refused the replayed batch and the table is clean: deduplication shown",
 			args: args{mode: Inbox, tally: Tally{Produced: 1000, Rows: 1000, Distinct: 1000, Refused: 50}},
 			want: asExpected,
+		},
+		{
+			name: "the split inbox lost the payment it claimed and refused it on redelivery: the boundary shown",
+			args: args{mode: InboxSplit, tally: Tally{Produced: 1000, Rows: 999, Distinct: 999, Refused: 50}},
+			want: asExpected,
+		},
+		{
+			name: "a split inbox that lost a payment but refused nothing lost it some other way",
+			args: args{mode: InboxSplit, tally: Tally{Produced: 1000, Rows: 999, Distinct: 999}},
+			want: "EXPECTED the claim to refuse the payment it never wrote — nothing was refused, so the loss is not the split transaction's",
 		},
 		{
 			// The gap the audit found: without the refusal count this run printed "exactly

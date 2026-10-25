@@ -261,6 +261,9 @@ func render(out io.Writer, lines []string) error {
 }
 
 func describeMembership(cfg *settings) string {
+	if cfg.withPeer {
+		return fmt.Sprintf("dynamic, A slow and B fast from the start, C joins; session timeout %s", cfg.sessionTimeout)
+	}
 	if cfg.static {
 		return fmt.Sprintf("static, group.instance.id per member, session timeout %s", cfg.sessionTimeout)
 	}
@@ -270,6 +273,9 @@ func describeMembership(cfg *settings) string {
 func measuredEvent(cfg *settings) string {
 	if cfg.leaveAfter > 0 {
 		return "second consumer left at"
+	}
+	if cfg.withPeer {
+		return "third consumer joined at"
 	}
 	return "second consumer joined at"
 }

@@ -29,8 +29,8 @@ type phase struct {
 func report(out io.Writer, s *settings, samples []sample, attempts []attempt, killed, revived, drained time.Duration) error {
 	phases := []phase{
 		{name: "before the kill", from: 0, until: killed},
-		{name: "brokers " + s.victims + " down", from: killed, until: revived},
-		{name: "after they came back", from: revived, until: s.window},
+		{name: s.outageName(), from: killed, until: revived},
+		{name: "after " + s.cameBack(), from: revived, until: s.window},
 	}
 
 	written := &lines{
@@ -50,7 +50,7 @@ func report(out io.Writer, s *settings, samples []sample, attempts []attempt, ki
 	}
 
 	writePeak(written, samples)
-	writeCatchUp(written, worst(samples, phases[0]), samples, revived)
+	writeCatchUp(written, worst(samples, phases[0]), samples, revived, s.cameBack())
 	written.printf("outbox drained %s after the run stopped taking payments\n", drained.Round(100*time.Millisecond))
 	return written.err
 }
@@ -66,7 +66,7 @@ func writePeak(written *lines, samples []sample) {
 
 // writeCatchUp measures the catch-up against the backlog read before the kill. A run that
 // read none has no level to measure against, and says so rather than measuring against zero.
-func writeCatchUp(written *lines, before sample, samples []sample, revived time.Duration) {
+func writeCatchUp(written *lines, before sample, samples []sample, revived time.Duration, cameBack string) {
 	if !before.backlogKnown {
 		written.printf("no backlog was read before the kill, so there is no level to measure the catch-up against\n")
 		return
@@ -76,8 +76,8 @@ func writeCatchUp(written *lines, before sample, samples []sample, revived time.
 		written.printf("backlog never returned to its pre-outage level (%d records) while the run lasted\n", before.backlog)
 		return
 	}
-	written.printf("backlog back to its pre-outage level (%d records) %s after the brokers came back\n",
-		before.backlog, caught.Round(100*time.Millisecond))
+	written.printf("backlog back to its pre-outage level (%d records) %s after %s\n",
+		before.backlog, caught.Round(100*time.Millisecond), cameBack)
 }
 
 func countAttempts(attempts []attempt, span phase) (accepted, refused int) {
