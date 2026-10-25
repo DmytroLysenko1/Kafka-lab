@@ -49,9 +49,13 @@ load_name() { echo "load-$1-$$"; }
 # for $3 s and prints vegeta's report of type $5. The key reaches the targets from the host;
 # the pod spec holds none. The pod ends by itself: it waits at most 5 min for its targets and
 # lives at most the attack plus 10 min (activeDeadlineSeconds), so a drill interrupted before
-# its trap ran cannot leave it running. Resources from resources-20261025-224859.log: CPU p95
-# 289m at 800 req/s (load-03), memory at most 109Mi (load-06); the results go to an emptyDir
-# on disk, not into memory.
+# its trap ran cannot leave it running. CPU from resources-20261025-224859.log: p95 289m at
+# 800 req/s (load-03). Memory is not that log's 109Mi: that load went straight to the Service
+# and was answered fast. Through Traefik on 26.10 the API saturated, vegeta — which keeps
+# its rate by adding workers while answers are slow — reached 220Mi and the kernel killed it
+# at its 256Mi limit 64 s into drill 03 (the node's dmesg, seen in the session). Workers are
+# capped so a saturated API slows the attack, which the report shows, instead of growing it
+# without bound; the limit covers that cap. The results go to an emptyDir on disk.
 load_start() {
   local name=$1 load_rate=$2 load_seconds=$3 format=$4 report=$5
   require_image "$load_image" "make k8s-load-image"
@@ -80,7 +84,7 @@ spec:
       command: [sh, -c]
       args:
         - waited=0; until [ -f /work/ready ]; do sleep 1; waited=\$((waited + 1)); [ \$waited -lt 300 ] || exit 1; done;
-          vegeta attack -format=$format -targets=/work/targets -rate=$load_rate -duration=${load_seconds}s > /work/attack.bin &&
+          vegeta attack -format=$format -targets=/work/targets -rate=$load_rate -duration=${load_seconds}s -max-workers=1000 > /work/attack.bin &&
           vegeta report -type=$report < /work/attack.bin
       securityContext:
         allowPrivilegeEscalation: false
@@ -88,7 +92,7 @@ spec:
         capabilities: { drop: [ALL] }
       resources:
         requests: { cpu: 300m, memory: 128Mi }
-        limits: { memory: 256Mi }
+        limits: { memory: 768Mi }
       volumeMounts: [{ name: work, mountPath: /work }]
   volumes: [{ name: work, emptyDir: {} }]
 EOF
