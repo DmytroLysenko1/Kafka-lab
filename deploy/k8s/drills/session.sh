@@ -29,15 +29,26 @@ for command in payments-api outbox-relay payments-consumer migrate dlq-replayer 
   kind load docker-image "kafka-lab/$command:$next" --name kafka-lab >/dev/null
 done
 
+# Each drill starts on a settled stand: the API server answering and every Deployment in lab
+# at its desired count. After drill 03's load the control plane took minutes to answer again
+# on 25.10, and the next drill failed on its first helm call to a cluster that was not there.
+settle() {
+  until kubectl get --raw /readyz >/dev/null 2>&1; do sleep 5; done
+  kubectl wait deployment --all -n lab --for=condition=Available --timeout=10m >/dev/null
+}
+
 make image-measure
-IMAGE_TAG_NEXT=$next make k8s-drill-01
-make k8s-drill-02
-RATE=1200 make k8s-drill-03
-make k8s-drill-04
-make k8s-drill-04f
-make k8s-drill-05
-make k8s-drill-06
-make k8s-drill-07
+settle; IMAGE_TAG_NEXT=$next make k8s-drill-01
+settle; make k8s-drill-02
+# 800, not the 1 200 of the 28.09 sessions: on 25.10, 1 200 req/s took Docker Desktop's
+# daemon down twice in a row on this 8 GB VM, ending the session. 800 still drives the API's
+# two pods well past the HPA's 70% (drill 03's own log shows by how much).
+settle; RATE=800 make k8s-drill-03
+settle; make k8s-drill-04
+settle; make k8s-drill-04f
+settle; make k8s-drill-05
+settle; make k8s-drill-06
+settle; make k8s-drill-07
 
 minutes=$(( ($(date +%s) - started) / 60 + 5 ))
 WINDOW="${minutes}m" deploy/k8s/resources.sh
