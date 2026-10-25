@@ -30,7 +30,7 @@ IMAGE_TAG ?= $(shell deploy/docker/image-tag.sh)
 export IMAGE_TAG
 DOCKER_BUILD := DOCKER_BUILDKIT=1 docker build -f deploy/docker/Dockerfile
 
-.PHONY: up stop down logs proto topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag migrate prune build vet lint test test-race test-integration verify tidy images image-measure app-up app-down k8s-up k8s-down k8s-images k8s-secret k8s-verify k8s-deploy k8s-replay k8s-drill-% k8s-evidence k8s-resources
+.PHONY: up stop down logs proto topics exp-topics check exp-% exp-04c topic-lint reset-topic elect-preferred describe lag migrate prune build vet lint test test-race test-integration verify verify-askdocs ask ask-sources askdocs-binary ask-eval ask-log tidy images image-measure app-up app-down k8s-up k8s-down k8s-images k8s-secret k8s-verify k8s-deploy k8s-replay k8s-drill-% k8s-evidence k8s-resources
 
 up:
 	$(COMPOSE) up -d --wait
@@ -165,7 +165,42 @@ verify:
 	@packages="$$(go list ./... 2>/dev/null)"; status=$$?; \
 	if [ $$status -ne 0 ]; then go list ./...; exit $$status; \
 	elif [ -z "$$packages" ]; then echo "no Go packages yet: nothing to build, vet, lint or test"; \
-	else $(MAKE) build vet lint test-race; fi
+	else $(MAKE) build vet lint test-race verify-askdocs; fi
+
+# askdocs is its own module (the Anthropic SDK stays out of the payments service's go.mod), so
+# ./... above does not reach it.
+verify-askdocs:
+	cd askdocs && go build ./... && go vet ./... && golangci-lint run ./... && go test -race ./...
+
+# Answers a question from the lab's documentation with Claude; needs ANTHROPIC_API_KEY.
+#   make ask Q="What happens to the outbox while Kafka is down?"
+# make reports any failure as 2; the exit codes in askdocs/README.md are the binary's, so a
+# script runs askdocs/bin/askdocs itself. The question is read from the environment, so quotes
+# inside it reach the binary intact.
+ask: askdocs-binary
+	@test -n "$$Q" || { echo 'usage: make ask Q="your question"'; exit 64; }
+	cd askdocs && ./bin/askdocs -root .. "$$Q"
+
+# The sections the same question would be answered from, without calling the model.
+ask-sources: askdocs-binary
+	@test -n "$$Q" || { echo 'usage: make ask-sources Q="your question"'; exit 64; }
+	cd askdocs && ./bin/askdocs -root .. -retrieve-only "$$Q"
+
+askdocs-binary:
+	cd askdocs && go build -o bin/askdocs ./cmd/askdocs
+
+# Every question in askdocs/eval/questions.tsv through retrieval alone, with whether it found
+# the document labelled for it; no key needed. The log is askdocs/results/retrieval.log.
+ask-eval: askdocs-binary
+	askdocs/eval/run.sh retrieve > askdocs/results/retrieval.log
+	@tail -1 askdocs/results/retrieval.log
+
+# The same questions answered by the model, logged with tokens, stop reason and time. Run it
+# in your own terminal with ANTHROPIC_API_KEY set: only the SDK reads the key, and it never
+# reaches the log, so the log can be committed.
+ask-log: askdocs-binary
+	@test -n "$$ANTHROPIC_API_KEY" || { echo 'ask-log needs ANTHROPIC_API_KEY in the environment'; exit 78; }
+	askdocs/eval/run.sh answer > askdocs/results/answers-$$(date -u +%Y%m%d-%H%M%S).log
 
 tidy:
 	go mod tidy

@@ -1,0 +1,165 @@
+# askdocs eval (retrieve), 2026-10-25T15:06Z, commit d98e28f + uncommitted changes
+
+$ askdocs -retrieve-only "What happens to the outbox while Kafka is down?"
+time=2026-10-25T17:06:58.672+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- docs/static/README.md — The cases (1619 bytes)
+- docs/00-journal.md — exp-13 — the front door held, and the cluster lied about its own health (3998 bytes)
+- docs/static/06-transactional-outbox.md — What the relay must get right (1184 bytes)
+- README.md — Running the service (8666 bytes)
+- README.md — Documentation (3389 bytes)
+- docs/patterns.md — Transactional outbox (954 bytes)
+6 sections, 19810 bytes of text would be sent
+exit=0
+hit: docs/static/06-transactional-outbox.md
+
+$ askdocs -retrieve-only "Why is enable.auto.commit disabled in the consumer?"
+time=2026-10-25T17:06:58.753+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- docs/static/README.md — Defaults that decide the outcome (4719 bytes)
+- docs/tuning-checklist.md — 5. Consumer: offsets and the group (5052 bytes)
+- docs/static/03-read-path.md — What each step really is (5436 bytes)
+- docs/tuning-checklist.md — 7. Defaults that differ between the two clients (1113 bytes)
+- README.md — Running the cluster (3724 bytes)
+- docs/k8s/runbook.md — Kafka broker pod lost (2749 bytes)
+6 sections, 22793 bytes of text would be sent
+exit=0
+hit: docs/tuning-checklist.md
+
+$ askdocs -retrieve-only "How does the retry chain route a message to the DLQ?"
+time=2026-10-25T17:06:58.831+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- docs/static/07-retry-dlq.md — Case B — the wait happens in a topic (1358 bytes)
+- docs/static/07-retry-dlq.md — To be measured (1481 bytes)
+- docs/patterns.md — Retry topics and a dead letter queue (2169 bytes)
+- docs/static/README.md — The cases (1619 bytes)
+- docs/static/07-retry-dlq.md — What a dead letter must carry (2248 bytes)
+- README.md — Architecture (4515 bytes)
+6 sections, 13390 bytes of text would be sent
+exit=0
+hit: docs/static/07-retry-dlq.md
+
+$ askdocs -retrieve-only "What did the ISR leader election experiment measure?"
+time=2026-10-25T17:06:58.909+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- experiments/kafka_internals/exp-04-isr-leader-election/README.md — exp-04 — ISR, leader election and recovery (1868 bytes)
+- docs/static/04-isr-leader-election.md — Measured (5817 bytes)
+- docs/static/04-isr-leader-election.md — Still to be measured (1751 bytes)
+- docs/00-journal.md — exp-04 — what a dead broker costs, and what recovery does not do (5878 bytes)
+- experiments/kafka_internals/exp-04-isr-leader-election/README.md — Result — three runs (5776 bytes)
+- docs/static/04-isr-leader-election.md — 04 — ISR, leader election, and what "acknowledged" survives (2795 bytes)
+6 sections, 23885 bytes of text would be sent
+exit=0
+hit: experiments/kafka_internals/exp-04-isr-leader-election/README.md
+
+$ askdocs -retrieve-only "How do I roll back a Helm release on the kind cluster?"
+time=2026-10-25T17:06:58.991+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- askdocs/README.md — Running it (2631 bytes)
+- docs/k8s/runbook.md — On one page (1713 bytes)
+- docs/k8s/runbook.md — Roll back (4989 bytes)
+- docs/k8s/decisions.md — Lessons the stand taught (5209 bytes)
+- docs/k8s/runbook.md — Upgrade — rolling update (2672 bytes)
+- docs/k8s/runbook.md — Recovery times, measured (1063 bytes)
+6 sections, 18277 bytes of text would be sent
+exit=0
+hit: docs/k8s/runbook.md
+
+$ askdocs -retrieve-only "What happens when a broker goes down?"
+time=2026-10-25T17:06:59.075+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- askdocs/README.md — What is measured and what is not (879 bytes)
+- docs/00-journal.md — exp-13 — the front door held, and the cluster lied about its own health (3998 bytes)
+- docs/static/07-retry-dlq.md — Case B — the wait happens in a topic (1358 bytes)
+- README.md — The three rules this repository follows (550 bytes)
+- docs/static/01-write-path.md — What each step really is (5186 bytes)
+- docs/static/04-isr-leader-election.md — 04 — ISR, leader election, and what "acknowledged" survives (2795 bytes)
+6 sections, 14766 bytes of text would be sent
+exit=0
+miss: experiments/kafka_internals/exp-04-isr-leader-election/README.md is not in the evidence
+
+$ askdocs -retrieve-only "What does a poison pill do to a partition?"
+time=2026-10-25T17:06:59.157+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- docs/static/07-retry-dlq.md — Poison pills skip the queue (557 bytes)
+- experiments/transaction_guarantee/exp-11-poison-pill/README.md — What it shows (1029 bytes)
+- docs/static/07-retry-dlq.md — To be measured (1481 bytes)
+- docs/talk.md — 7. "One bad message is one bad message" (945 bytes)
+- experiments/transaction_guarantee/exp-11-poison-pill/README.md — exp-11 — a record nobody can decode (191 bytes)
+- docs/00-journal.md — exp-11 — what one unreadable record costs, and what the first run measured instead (3440 bytes)
+6 sections, 7643 bytes of text would be sent
+exit=0
+hit: experiments/transaction_guarantee/exp-11-poison-pill/README.md
+
+$ askdocs -retrieve-only "How much smaller is the distroless image?"
+time=2026-10-25T17:06:59.238+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- docs/k8s/cheatsheet.md — Troubleshooting — which command answers which question (889 bytes)
+- docs/k8s/talk.md — 0. The image, before any of it (767 bytes)
+- docs/k8s/01-docker.md — 01 — Docker images for the Go services (1290 bytes)
+- docs/k8s/01-docker.md — What distroless costs (483 bytes)
+- docs/k8s/01-docker.md — Before and after (960 bytes)
+- docs/k8s/01-docker.md — What each technique bought (2032 bytes)
+6 sections, 6421 bytes of text would be sent
+exit=0
+hit: docs/k8s/01-docker.md
+
+$ askdocs -retrieve-only "Why does liveness never check the database?"
+time=2026-10-25T17:06:59.321+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- docs/k8s/talk.md — 1. "Readiness and liveness are two names for a health check" (747 bytes)
+- docs/k8s/runbook.md — Troubleshooting — seven broken releases (7510 bytes)
+- docs/k8s/decisions.md — Decisions inside the chart (6060 bytes)
+- docs/k8s/talk.md — If the audience remembers three sentences (252 bytes)
+- docs/k8s/decisions.md — Lessons the stand taught (5209 bytes)
+- docs/k8s/decisions.md — Lab, not production (5108 bytes)
+6 sections, 24886 bytes of text would be sent
+exit=0
+hit: docs/k8s/decisions.md
+
+$ askdocs -retrieve-only "How long does a cooperative rebalance stop the moved partitions?"
+time=2026-10-25T17:06:59.405+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- docs/static/08-rebalance.md — Case B — cooperative: revoke only what moves (3330 bytes)
+- docs/static/08-rebalance.md — 08 — Rebalance: eager versus cooperative (394 bytes)
+- experiments/transaction_guarantee/exp-14-rebalance-strategies/README.md — Result — 2026-09-22 and 2026-09-26 (6377 bytes)
+- experiments/transaction_guarantee/exp-14-rebalance-strategies/README.md — exp-14 — what a consumer joining the group costs, by assignment strategy (1331 bytes)
+- docs/tuning-checklist.md — 5. Consumer: offsets and the group (5052 bytes)
+- docs/static/08-rebalance.md — What to measure, and what not to report (1800 bytes)
+6 sections, 18284 bytes of text would be sent
+exit=0
+hit: experiments/transaction_guarantee/exp-14-rebalance-strategies/README.md
+
+$ askdocs -retrieve-only "What does acks=1 lose when the leader dies?"
+time=2026-10-25T17:06:59.491+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- docs/tuning-checklist.md — 1. Durability: what survives a broker dying (2895 bytes)
+- docs/static/04-isr-leader-election.md — The three ways an acknowledged record dies (2279 bytes)
+- docs/static/04-isr-leader-election.md — 04 — ISR, leader election, and what "acknowledged" survives (2795 bytes)
+- experiments/transaction_guarantee/exp-08-acks/README.md — exp-08 — what `acks` promises, and what it only implies (1139 bytes)
+- docs/00-journal.md — exp-08 — what `acks` promises, and what it only implies (4955 bytes)
+- docs/static/04-isr-leader-election.md — Still to be measured (1751 bytes)
+6 sections, 15814 bytes of text would be sent
+exit=0
+hit: experiments/transaction_guarantee/exp-08-acks/README.md
+
+$ askdocs -retrieve-only "Which compatibility level does the relay set on its subject?"
+time=2026-10-25T17:06:59.571+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- docs/runbook.md — Planned: changing a schema (978 bytes)
+- docs/talk.md — 6. "The schema registry protects us" (1162 bytes)
+- docs/static/09-schema-evolution.md — The direction table — this is the part people get backwards (967 bytes)
+- experiments/transaction_guarantee/exp-12-schema-evolution/README.md — Two mistakes this experiment made first (697 bytes)
+- docs/static/09-schema-evolution.md — Subjects: one topic, one file, three event messages (2037 bytes)
+- docs/static/09-schema-evolution.md — Measured (2719 bytes)
+6 sections, 8560 bytes of text would be sent
+exit=0
+hit: docs/static/09-schema-evolution.md
+
+$ askdocs -retrieve-only "How are askdocs answers cited?"
+time=2026-10-25T17:06:59.654+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+- askdocs/README.md — askdocs — ask the lab, get the page it came from (2171 bytes)
+- askdocs/README.md — Tests (2607 bytes)
+- askdocs/README.md — How it works (1433 bytes)
+- docs/ai-learnings.md — Lessons from integrating the Claude API (2485 bytes)
+- askdocs/README.md — Decisions (5536 bytes)
+- docs/ai-learnings.md — Which AI tool for which task — what this repository taught (391 bytes)
+6 sections, 14623 bytes of text would be sent
+exit=0
+hit: askdocs/README.md
+
+$ askdocs -retrieve-only "What is the capital of France?"
+time=2026-10-25T17:06:59.737+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=321 bytes=546310
+time=2026-10-25T17:06:59.801+02:00 level=ERROR msg="no answer" error="docs: no section of the documentation matches the question"
+exit=66
+hit: nothing retrieved, as labelled
+
+recall@6: 12 of 13 labelled documents were in their question's evidence

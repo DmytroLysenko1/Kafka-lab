@@ -1,0 +1,15 @@
+# question<TAB>the document a correct answer cannot do without, labelled by hand; - for a question the docs do not cover
+What happens to the outbox while Kafka is down?	docs/static/06-transactional-outbox.md
+Why is enable.auto.commit disabled in the consumer?	docs/tuning-checklist.md
+How does the retry chain route a message to the DLQ?	docs/static/07-retry-dlq.md
+What did the ISR leader election experiment measure?	experiments/kafka_internals/exp-04-isr-leader-election/README.md
+How do I roll back a Helm release on the kind cluster?	docs/k8s/runbook.md
+What happens when a broker goes down?	experiments/kafka_internals/exp-04-isr-leader-election/README.md
+What does a poison pill do to a partition?	experiments/transaction_guarantee/exp-11-poison-pill/README.md
+How much smaller is the distroless image?	docs/k8s/01-docker.md
+Why does liveness never check the database?	docs/k8s/decisions.md
+How long does a cooperative rebalance stop the moved partitions?	experiments/transaction_guarantee/exp-14-rebalance-strategies/README.md
+What does acks=1 lose when the leader dies?	experiments/transaction_guarantee/exp-08-acks/README.md
+Which compatibility level does the relay set on its subject?	docs/static/09-schema-evolution.md
+How are askdocs answers cited?	askdocs/README.md
+What is the capital of France?	-

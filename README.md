@@ -251,6 +251,7 @@ lands in the topics the experiments count.
 | `internal/interfaces/http` | the HTTP front door and the one table that turns a domain refusal into a status | application, domain errors |
 | `cmd/*` | the three services and the two one-shot jobs — `migrate` and `prune` — each a `run` function handed to `lifecycle.Main`, and `dlq-replayer`, a one-shot tool that keeps its own `main` because it has three outcomes, not two — exit 2 when it never started, 1 when it failed part-way, 0 when done | everything |
 | `pkg/env`, `pkg/lifecycle`, `pkg/httpserve`, `pkg/telemetry` | what every process needs and no business rule touches: configuration that reports every problem at once, the signal-and-exit-code skeleton, graceful HTTP serving, tracing and trace-aware logs | the standard library, OpenTelemetry |
+| [`askdocs/`](askdocs/) | a module of its own, outside the payments service: a command that answers questions about this repository from its documentation with Claude (the AI block's LLM-integration KR) | its own `go.mod` |
 
 The same boundary is drawn twice on purpose: `payment.MerchantID` and `merchant.ID` have the
 same rule today, and belong to two contexts — the one that issues merchant ids and the one
@@ -352,6 +353,10 @@ Jobs say where they are not measured).
 walkthroughs: open `docs/dynamic/index.html` in a browser and step through with the arrow
 keys. Built for learning the mechanics and for presenting them; not a replacement for the
 static files.
+
+**[`docs/ai-learnings.md`](docs/ai-learnings.md)** — which AI tool fit which task while
+this lab was built and audited, and what integrating the Claude API in
+[`askdocs/`](askdocs/) taught.
 
 ## The three rules this repository follows
 
