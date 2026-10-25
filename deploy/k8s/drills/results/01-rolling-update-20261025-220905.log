@@ -1,0 +1,39 @@
+drill 01 started 2026-10-25T20:09:05Z, rolling 7f89d22 -> 7f89d22-next under 20 req/s for 90s
+REVISION	UPDATED                 	STATUS  	CHART         	APP VERSION	DESCRIPTION  
+115     	Sun Oct 25 21:58:49 2026	deployed	payments-0.1.0	dev        	image 7f89d22
+before:
+POD                                  NODE                IMAGE                                    READY
+migrate-rd5m8                        kafka-lab-worker2   kafka-lab/migrate:7f89d22                false
+outbox-relay-7cb5b64885-fgnz9        kafka-lab-worker2   kafka-lab/outbox-relay:7f89d22           true
+payments-api-7d78b77d48-lss8h        kafka-lab-worker2   kafka-lab/payments-api:7f89d22           true
+payments-api-7d78b77d48-pln66        kafka-lab-worker2   kafka-lab/payments-api:7f89d22           true
+payments-consumer-7c68f748bb-ckwtw   kafka-lab-worker    kafka-lab/payments-consumer:7f89d22      true
+payments-consumer-7c68f748bb-k9sl4   kafka-lab-worker2   kafka-lab/payments-consumer:7f89d22      true
+prune-29865437-7rl2m                 kafka-lab-worker2   kafka-lab/prune:e628bfc-dirty-a4463bf2   false
+prune-29882477-5ltdk                 kafka-lab-worker2   kafka-lab/prune:88ab9c5                  false
+prune-29882537-hq4t5                 kafka-lab-worker2   kafka-lab/prune:5b4bd73                  false
+prune-29882597-cv5kr                 kafka-lab-worker2   kafka-lab/prune:badd205                  false
+rollout to 7f89d22-next took 16s (helm --wait, migrate hook included)
+after:
+POD                                 NODE                IMAGE                                      READY
+migrate-bng99                       kafka-lab-worker2   kafka-lab/migrate:7f89d22-next             false
+outbox-relay-997885b5c-fq7zm        kafka-lab-worker2   kafka-lab/outbox-relay:7f89d22-next        true
+payments-api-575c447448-99pkj       kafka-lab-worker2   kafka-lab/payments-api:7f89d22-next        true
+payments-api-575c447448-x4z2c       kafka-lab-worker    kafka-lab/payments-api:7f89d22-next        true
+payments-api-7d78b77d48-pln66       kafka-lab-worker2   kafka-lab/payments-api:7f89d22             true
+payments-consumer-cc68975cd-nmcbp   kafka-lab-worker2   kafka-lab/payments-consumer:7f89d22-next   true
+payments-consumer-cc68975cd-nn222   kafka-lab-worker    kafka-lab/payments-consumer:7f89d22-next   true
+prune-29865437-7rl2m                kafka-lab-worker2   kafka-lab/prune:e628bfc-dirty-a4463bf2     false
+prune-29882477-5ltdk                kafka-lab-worker2   kafka-lab/prune:88ab9c5                    false
+prune-29882537-hq4t5                kafka-lab-worker2   kafka-lab/prune:5b4bd73                    false
+prune-29882597-cv5kr                kafka-lab-worker2   kafka-lab/prune:badd205                    false
+REVISION	UPDATED                 	STATUS  	CHART         	APP VERSION	DESCRIPTION       
+116     	Sun Oct 25 22:09:20 2026	deployed	payments-0.1.0	dev        	image 7f89d22-next
+Requests      [total, rate, throughput]         1800, 20.01, 20.01
+Duration      [total, attack, wait]             1m30s, 1m30s, 2.562ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  2ms, 12.234ms, 6.728ms, 26.889ms, 37.141ms, 75.197ms, 240.508ms
+Bytes In      [total, mean]                     97200, 54.00
+Bytes Out     [total, mean]                     135000, 75.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      201:1800  
+Error Set:

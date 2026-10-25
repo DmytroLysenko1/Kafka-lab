@@ -94,15 +94,16 @@ components:
     # 20 s of in-flight requests (shutdownTimeout in internal/interfaces/http/server.go)
     # after the preStop pause, then a 1 s trace flush, plus headroom.
     terminationGracePeriodSeconds: 30
-    # Idle a pod uses a few millicores. Under drill 03's 1200 req/s the HPA read 109–160% of
+    # Idle a pod uses a few millicores. Under drill 03's 1200 req/s (from the host) the HPA read 109–160% of
     # this request on two to four pods and 64–66% on five (03-autoscaling-20260927-211420.log;
     # 60–67% in 03-autoscaling-20260928-044933.log; 72–78% in …-040732.log, on a stand still
     # busy with the platform's rollout — at its max, above the target),
     # i.e. well over 100m of work per pod before the scale-out. The CPU request is what the HPA's
     # percentage is taken of, so it is set as a round share of a loaded pod, not at idle
     # use. Calibrated on reads (drill 03 sends GETs). Writes: drill 06 took 400 payments/s on
-    # two pods at 60% of this request (06-write-throughput-20260928-043357.log), below the
-    # target, so the HPA does not move for them at that rate. Memory: figures in
+    # two pods at 60% of this request when sent from the host through Traefik
+    # (06-write-throughput-20260928-043357.log), and moved the HPA to five pods at 74–98% when
+    # sent from inside the cluster (06-write-throughput-20261025-231555.log). Memory: figures in
     # deploy/k8s/drills/results/resources-20260927-175351.log.
     resources:
       requests: { cpu: 100m, memory: 32Mi }
@@ -110,10 +111,13 @@ components:
     # min 2: one pod can go and one keeps serving (the PDB holds that line); the spread
     # constraint prefers one per worker but does not guarantee it. Target 70%:
     # the headroom that absorbs a surge during the ~15 s HPA sync plus the ~5 s a new pod
-    # needs to become ready. max 5: in drill 03 five pods held 1200 req/s at 60–67%, so at the
-    # target they cover ~1300 req/s — just above the heaviest load the drills generate. On a
-    # machine busy with something else they did not (72–78%, ~1120 req/s at the target, drill
-    # 03 in the 28.09 evidence session). More load needs a higher max and more nodes.
+    # needs to become ready. max 5: in drill 03 from the host five pods held 1200 req/s at
+    # 60–67%, so at the target they covered ~1300 req/s; on a machine busy with something
+    # else they did not (72–78%, drill 03 in the 28.09 evidence session). Sent from inside the
+    # cluster on 25.10, both heavy drills ran at the max and above the target on it — 800 GETs/s
+    # at 61–103%, 400 payments/s at 77–98% (03-autoscaling-20261025-221137.log,
+    # 06-write-throughput-20261025-231555.log) — and every request was answered: five is the
+    # edge of what this stand gives the API. More load needs a higher max and more nodes.
     autoscaling:
       minReplicas: 2
       maxReplicas: 5

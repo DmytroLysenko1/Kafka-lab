@@ -1,0 +1,68 @@
+measured 2026-10-25T19:59:52Z on arm64, docker 29.8.2, go1.26.4 on the host
+
+rebuild after editing one .go file — each Dockerfile warmed up first, the warm-up not reported:
+  naive      136.5s, 1 steps CACHED
+  real       14.6s, 4 steps CACHED, module download CACHED
+  no-split   14.3s, 2 steps CACHED
+  no-mounts  49.5s, 4 steps CACHED, module download CACHED
+  neither    68.1s, 2 steps CACHED
+  (real = go.mod split + cache mounts; no-split and no-mounts take one away; neither, both)
+
+image sizes (docker image ls, unpacked) and the same in bytes (docker image inspect .Size):
+  naive  1.92GB  1924669463 bytes
+  real   33.7MB  33713303 bytes
+  the real image's base alone, gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab: 6177026 bytes
+
+layers of the naive image (docker history):
+0B	ENTRYPOINT ["/service"]
+487MB	RUN |1 SERVICE=payments-api /bin/sh -c go build -o /service ./cmd/${SERVICE} # buildkit
+0B	ARG SERVICE=payments-api
+19.2MB	COPY . . # buildkit
+8.19kB	WORKDIR /src
+4.1kB	WORKDIR /go
+16.4kB	RUN /bin/sh -c mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 1777 "$GOPATH" # buildkit
+277MB	COPY /target/ / # buildkit
+0B	ENV PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+0B	ENV GOPATH=/go
+0B	ENV GOTOOLCHAIN=local
+0B	ENV GOLANG_VERSION=1.26.4
+280MB	RUN /bin/sh -c set -eux;  apt-get update;  apt-get install -y --no-install-recommends   g++   gcc   libc6-dev   make   pkg-config  ;  dpkgArch="
+208MB	RUN /bin/sh -c set -eux;  apt-get update;  apt-get install -y --no-install-recommends   git   mercurial   openssh-client   subversion     procps
+63.7MB	RUN /bin/sh -c set -eux;  apt-get update;  apt-get install -y --no-install-recommends   ca-certificates   curl   gnupg   netbase   sq   wget  ;
+156MB	# debian.sh --arch 'arm64' out/ 'trixie' '@1782172800'
+
+layers of the real image (docker history):
+0B	ENTRYPOINT ["/service"]
+0B	USER nonroot:nonroot
+20.6MB	COPY /out/service /service # buildkit
+0B	LABEL org.opencontainers.image.source=https://github.com/DmytroLysenko1/Kafka-lab org.opencontainers.image.title=payments-api
+0B	ARG SERVICE=payments-api
+319kB	bazel build //common:cacerts_debian12_arm64_tar
+16.4kB	bazel build //common:os_release_debian12
+12.3kB	bazel build //static:nsswitch
+8.19kB	bazel build //common:tmp
+12.3kB	bazel build //common:group
+16.4kB	bazel build //common:home
+12.3kB	bazel build //common:passwd
+4.1kB	bazel build //common:rootfs
+152kB	bazel build @bookworm//media-types/arm64:data_statusd
+4.24MB	bazel build @bookworm//tzdata/arm64:data_statusd
+86kB	bazel build @bookworm//netbase/arm64:data_statusd
+582kB	bazel build @bookworm//base-files/arm64:data_statusd
+
+the same binary with and without -s -w, both -trimpath, linux/arm64, host go1.26.4 (bytes):
+  plain 29797405  stripped 20578466
+
+every command's image at IMAGE_TAG=7f89d22 (make images):
+kafka-lab/payments-api:7f89d22  33.7MB
+kafka-lab/outbox-relay:7f89d22  38.4MB
+kafka-lab/payments-consumer:7f89d22  38.4MB
+kafka-lab/migrate:7f89d22  28.3MB
+kafka-lab/dlq-replayer:7f89d22  30.1MB
+kafka-lab/prune:7f89d22  30.1MB
+
+who the real image runs as, and a shell in it:
+  User: nonroot:nonroot
+  docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: "sh": executable file not found in $PATH
+  
+  the naive image runs as: '' (empty is root)

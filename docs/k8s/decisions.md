@@ -15,7 +15,7 @@ without a log are marked as such.
 | **CloudNativePG** for Postgres | a hand-written StatefulSet, a Bitnami chart | the operator writes the connection secret (`payments-db-app`) — no password in the repository — and handles failover if instances go above 1 |
 | **Traefik** as the ingress controller | ingress-nginx | ingress-nginx was retired by Kubernetes SIG Network in March 2026: no more releases, security fixes included. The `Ingress` objects stay standard, so the controller is swappable in one values file |
 | **Helm** for the service | Kustomize | the migration has to run *before* the rollout and fail it if it fails — a Helm pre-upgrade hook is exactly that; `helm rollback` and `helm history` are the upgrade/rollback story the PDP asks about |
-| one image per command, one Dockerfile | one image with all binaries | 19–29 MB each (see [01-docker.md](01-docker.md)); a component's image changes only when its code does |
+| one image per command, one Dockerfile | one image with all binaries | 28–39 MB each (see [01-docker.md](01-docker.md)); a component's image changes only when its code does |
 | Loki + Alloy for logs | ELK/EFK | one small binary each; Grafana already exists for metrics |
 | **kube-prometheus-stack** for metrics | a bare Prometheus with hand-written scrape configs | the Prometheus operator reads `ServiceMonitor`/`PodMonitor` objects, so the chart declares its own scraping next to its Deployments; cAdvisor and kube-state-metrics come with it, and every resource figure on this stand is read from them |
 
@@ -36,8 +36,8 @@ without a log are marked as such.
   reconnects with nothing stale in it. With no records arriving it has nothing to fail on:
   in drill 04f the database was gone for about 100 s, the API went unready and took no
   payments, and neither the consumer nor the relay restarted once; the first payment was
-  accepted 3 s after the database pod was ready again and counted 3 s after that
-  (`04f-database-outage-20260928-210123.log`). A consumer that does meet a record during the
+  accepted 4 s after the database pod was ready again and counted 1 s after that
+  (`04f-database-outage-20261025-223219.log`; 3 s and 6 s in `…-20260928-210123.log`). A consumer that does meet a record during the
   outage pays the kubelet's back-off — restarts 10 s, 20 s, 40 s apart, up to five minutes —
   on top of it; that case needs records already published while the database is down, and
   the drill does not produce it. Pausing the partitions and polling until the database answers,
@@ -110,29 +110,35 @@ The rule: memory request ≈ typical working set, memory limit ≈ 1.5–2× the
 typical use except where an HPA takes its percentage of it, no CPU limit. What changed along
 the way ("first pass" figures are session observations; "logged" are from the files above):
 
-| Container | Before | Seen | Now | Logged (typical / peak) |
-|---|---|---|---|---|
-| Grafana | 128Mi / 256Mi | first pass: **OOM-killed 7×**, pinned at 251–255Mi | 336Mi / 832Mi (640Mi until the day's peak of 544Mi, 1.18× under it) | 326 / 413Mi; 544Mi peak over the day |
-| Kafka broker ×3 | 1Gi / 1Gi | first pass: 760–790Mi, 918Mi when drill 05's admin JVM ran inside | 800Mi / 1400Mi, the admin JVM gets 96m | 801–820 / 813–827Mi; 895Mi peak in a later session (`resources-20260927-214046.log`), 919Mi in the one after, drills 01–06 (`resources-20260928-043718.log`), hence 1400Mi |
-| Prometheus | 384Mi / 768Mi | first pass: 607Mi and growing | 640Mi / 1152Mi, on a 4Gi volume | 480 / 558Mi, then 587 / 680Mi, then 628 / 701Mi as retention filled |
-| Traefik | 64Mi / 128Mi | — | 64Mi / 192Mi | 41 / 63Mi, then 54 / 117Mi over drills 01–06 (`resources-20260928-043718.log`) |
-| Strimzi operator | 256Mi / 384Mi, CPU limit 1 | first pass: 280Mi, 405 throttled periods; 18 restarts from lost leader elections while the Mac slept | 320Mi / 448Mi, no CPU limit, no leader election | 276 / 283Mi |
-| Apicurio | 384Mi / 768Mi, heap 80% of limit | first pass: ~190Mi | 224Mi / 512Mi, heap 50% of limit, JDBC pool fixed at 20 | 187 / 195Mi, then 211 / 220Mi |
-| Loki, Alloy | 128 / 384Mi, 96 / 192Mi | logged: both above their requests; Alloy 1.39× under its limit | 160 / 384Mi, 112 / 320Mi (224Mi, then 256Mi, until the day's peak of 208Mi) | 162 / 222Mi, 102 / 138Mi; Alloy 170Mi, 208Mi over the day |
-| relay, consumer | 50m / 128Mi | — | 10–15m / 64Mi | 14–21 / 18–24Mi |
-| sidecars, kube-state-metrics, config-reloader | none | ~270Mi together, invisible to the scheduler | requests set; Loki's rules sidecar removed (no rules) | 20–79Mi each |
+| Container | Before | Seen | Now | Logged when sized (typical / peak) | 25.10 session (avg / max) |
+|---|---|---|---|---|---|
+| Grafana | 128Mi / 256Mi | first pass: **OOM-killed 7×**, pinned at 251–255Mi | 336Mi / 832Mi (640Mi until a 544Mi peak read from Prometheus over a day, not logged) | 326 / 413Mi | 327 / 505Mi |
+| Kafka broker ×3 | 1Gi / 1Gi | first pass: 760–790Mi, 918Mi when drill 05's admin JVM ran inside | 800Mi / 1400Mi, the admin JVM gets 96m | 801–820 / 813–827Mi; 895Mi peak in a later session (`resources-20260927-214046.log`), 919Mi in the one after, drills 01–06 (`resources-20260928-043718.log`), hence 1400Mi | 655–777 / 731–837Mi |
+| Prometheus | 384Mi / 768Mi | first pass: 607Mi and growing | 640Mi / 1152Mi, on a 4Gi volume | 480 / 558Mi, then 587 / 680Mi, then 628 / 701Mi as retention filled | 653 / 842Mi |
+| Traefik | 64Mi / 128Mi | — | 64Mi / 192Mi | 41 / 63Mi, then 54 / 117Mi over drills 01–06 (`resources-20260928-043718.log`) | 36 / 141Mi |
+| Strimzi operator | 256Mi / 384Mi, CPU limit 1 | first pass: 280Mi, 405 throttled periods; 18 restarts from lost leader elections while the Mac slept | 320Mi / 448Mi, no CPU limit, no leader election | 276 / 283Mi | 271 / 287Mi |
+| Apicurio | 384Mi / 768Mi, heap 80% of limit | first pass: ~190Mi | 224Mi / 512Mi, heap 50% of limit, JDBC pool fixed at 20 | 187 / 195Mi, then 211 / 220Mi | 190 / 214Mi |
+| Loki, Alloy | 128 / 384Mi, 96 / 192Mi | logged: both above their requests; Alloy 1.39× under its limit | 160 / 384Mi, 112 / 320Mi (224Mi, then 256Mi, until a 208Mi Alloy peak read from Prometheus over a day, not logged) | 162 / 222Mi, 102 / 138Mi; Alloy 170Mi | 107 / 189Mi, 90 / 214Mi |
+| relay, consumer | 50m / 128Mi | — | 10–15m / 64Mi | 14–21 / 18–24Mi | 19–21 / 36–37Mi |
+| sidecars, kube-state-metrics, config-reloader | none | ~270Mi together, invisible to the scheduler | requests set; Loki's rules sidecar removed (no rules) | 20–79Mi each | 13–72 / 45–86Mi |
 
-**Capacity** (the latest log, `resources-20260928-043718.log`, the 40-minute evidence session
-of 28.09). Every kind node reports the whole Docker VM (7836Mi, 10 CPU) as allocatable, so the
-scheduler believes in three times the memory that exists; requests do not protect the VM.
-Memory requests 5678Mi (72% of the VM); sum of limits 10116Mi (129% — and the kube-apiserver,
-1069Mi typical and 1152Mi at peak in that log, has none); node usage by `kubectl top` 6681Mi
-at the end. The container working set peaked at 7423Mi — 95% of the VM — while the session
-re-applied the platform and two Grafana pods ran side by side for the rollout (both appear in
-the log); at the session's end it was 6135Mi, and the previous session, which did not re-apply
-the platform, peaked at 5990Mi (`resources-20260927-214046.log`). About 1 GB of real headroom in steady state, and almost none
-during a platform rollout: that margin, not the scheduler, is what the stand runs on, and why
-a third worker was not added.
+The last column is `resources-20261025-224859.log`, the current session. Its `oom` column
+counts the kubelet's `OOMKilled` reason, which drill 04's case d did not get on 25.10 (runbook,
+case d): a 0 there does not rule out an OOM kill, and the restarts column is the one to read.
+Every peak is under its limit, the nearest Traefik (141 of 192Mi) and Prometheus (842 of
+1152Mi), both at 73%. It was not used to resize anything.
+
+**Capacity** (the latest log, `resources-20261025-224859.log`, the 58-minute evidence session
+of 25.10). Every kind node reports the whole Docker VM (7934Mi, 10 CPU) as allocatable — the
+log lists all three at 8124516Ki — so the scheduler believes in three times the memory that
+exists; requests do not protect the VM. Memory requests 5870Mi (74% of the VM); sum of limits
+10812Mi (136% — and the kube-apiserver, 1006Mi on average and 1116Mi at peak in that log, has
+none). The container working set peaked at 6391Mi (80%) and was 6164Mi at the end. In the
+session of 28.09 it peaked at 7423Mi — 95% of the VM — while the session re-applied the
+platform and two Grafana pods ran side by side for the rollout (both appear in
+`resources-20260928-043718.log`). About 1.5–1.8 GB of real headroom in steady state, and almost
+none during a platform rollout: that margin, not the scheduler, is what the stand runs on,
+and why a third worker was not added.
 
 ## Lab, not production
 
@@ -152,7 +158,7 @@ What this stand leaves out on purpose, so that nothing in it reads as a producti
 | PodSecurity | `restricted` warns and audits, does not enforce: Strimzi's pods do not meet it | enforce, with the operator's pods exempted by namespace | the payments pods meet it (drill output), the platform's do not |
 | Images | built locally and loaded with `kind load`, no registry, no signature | a registry, signed images, an SBOM | nothing leaves the machine |
 | Storage | local-path volumes, `deleteClaim: true` | a CSI driver with quotas, claims that outlive the cluster | `make k8s-down` should leave nothing behind |
-| A lost database | the API goes unready, the relay retries every tick, the consumer exits on the first record it cannot count and is restarted | a breaker that pauses the partitions instead of the restart | a decision, above; drill 04f measured 3 s from the database pod ready to the first accepted payment, 6 s to it counted |
+| A lost database | the API goes unready, the relay retries every tick, the consumer exits on the first record it cannot count and is restarted | a breaker that pauses the partitions instead of the restart | a decision, above; drill 04f measured 3–4 s from the database pod ready to the first accepted payment, 5–6 s to it counted, over two runs |
 | Platform upgrades | Kafka, Strimzi and CloudNativePG versions pinned, never upgraded on the stand: not rehearsed | a written procedure; Strimzi rolls brokers one at a time within `min.insync.replicas`, CNPG switches over to an upgraded replica | nothing on the stand needed it; say "not rehearsed" rather than guess |
 | Restoring Postgres from a backup | not rehearsed; there is no backup | restore, then move the consumer group to the restore point before starting it | `event_id` is `outbox.id`, and payments, outbox, inbox and totals live in one database, so a restore rolls all four back together and new events reuse ids from the restore point on. The inbox stays consistent with the totals; what falls out is the group's offset, which still points past events the restore erased. Kafka offsets and the database must be restored as a pair, never one alone |
 | Kafka disaster recovery | none: a lost cluster loses the topics' 7 and 30 days | MirrorMaker 2 or tiered storage to object storage, by the RPO | Postgres is the system of record; the outbox can republish what it still holds (7 days) |
@@ -184,24 +190,32 @@ What this stand leaves out on purpose, so that nothing in it reads as a producti
   that way, past the migration hook that had stopped the same tag on upgrade. A remembered
   revision number is not safe either: `--history-max 10` pruned it. Restoring to known-good
   now means rolling forward to the chart in git.
-- **A green rollout can ship a lethal memory limit.** With 8Mi the API was OOM-killed once at
-  start, then idled under the limit, passed readiness, and the rollout completed. The only
-  trace was `RESTARTS 1` and `lastState: OOMKilled`.
+- **A green rollout can ship a lethal memory limit.** With 8Mi the API was OOM-killed at
+  start, then idled under the limit long enough to pass readiness and replace a working pod
+  (on 28.09 the rollout completed). The traces were the restart count and `lastState` — exit
+  137, whose reason read `OOMKilled` on 28.09 and `Error` on 25.10, when the kernel's log
+  shows it was the OOM killer all the same (runbook, case d). The resource log's `oom`
+  column counts the `OOMKilled` reason, so it shows those pods with 0 OOMs and 2 restarts.
 - **Readiness did exactly its job in a database outage — and a third-party liveness did not.**
   API pods unready, zero restarts, ingress 503 instead of hanging requests, back by
   themselves when the database was. Apicurio, whose `/health/live` includes its datasource,
   was restarted by its liveness probe in the same outage; it now has a TCP liveness. Checking
   our own probes was not enough — every probe in the namespace needed the same question.
 - **`*.localtest.me` also resolves to `::1`.** Under 1200 req/s the load generator sometimes
-  dialled IPv6, where nothing was published: 0.66% of requests failed client-side. Measured
-  traffic now goes to `127.0.0.1` with a `Host` header.
+  dialled IPv6, where nothing was published: 0.66% of requests failed client-side. Traffic
+  that still goes through the ingress goes to `127.0.0.1` with a `Host` header.
+- **A load sent through the laptop's port forward measures the port forward.** At 1200 and
+  then 800 req/s from the host, four sessions in a row ended early; in the one whose logs
+  survive, Docker Desktop's port forward shut down 11 s into the load and the VM stopped a
+  minute later. The heavy loads (drills 03 and 06) are now sent by a pod in the cluster to the
+  API's Service — past Traefik as well, which those drills do not test (runbook, Scale).
 - **Load that feels high may not move an HPA.** 400 req/s kept the API at 51–62% of its
   request (one sample at 70%), at or below the 70% target, so the desired count stayed 2. The
   drill needed 1200 req/s to show a scale-out; plan the load from the request, not from a
   round number.
 - **A broker pod that dies comes back.** Compose kept a killed broker dead (`restart: "no"`, on
-  purpose); Strimzi recreated it and under-replicated partitions were back to 0 within 11–15 s
-  over four runs — before the pod reported Ready (22–23 s) — with all 2400 payments of each run
+  purpose); Strimzi recreated it and under-replicated partitions were back to 0 within 11–19 s
+  over five runs — before the pod reported Ready (22–25 s) — with all 2400 payments of each run
   accounted for.
 - **A kubectl edit of a Helm release is a delayed failure.** Helm 4 uses server-side apply,
   so `kubectl set image` / `rollout undo` (drill 04, a2) made kubectl the owner of the image

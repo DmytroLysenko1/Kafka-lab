@@ -1,0 +1,30 @@
+drill 07 started 2026-10-25T20:50:52Z, images 7f89d22
+
+every payments target, as Prometheus scrapes it (up{job="payments"}, 1 = scraped):
+  outbox-relay outbox-relay-7cb5b64885-rzmgk 1
+  payments-consumer payments-consumer-7c68f748bb-dr8cb 1
+  payments-consumer payments-consumer-7c68f748bb-lj2hw 1
+  payments-api payments-api-7d78b77d48-468vd 1
+  payments-api payments-api-7d78b77d48-7vnlb 1
+  payments-api payments-api-7d78b77d48-krhtq 1
+  payments-api payments-api-7d78b77d48-ngksg 1
+  payments-api payments-api-7d78b77d48-4zffn 1
+
+sent 300 payments at 20/s, 300 accepted; waiting 30 s for the pipeline and the scrapes
+the service's own counters, summed over its pods, before and after:
+  http_requests_total{route="POST /payments"}: 61623 -> 61923
+  outbox_records_published_total:                62178 -> 62478
+  payment_events_handled_total:                  62119 -> 62419
+
+each running pod's start line in Loki, by {namespace="lab", app, pod}:
+  payments-api-7d78b77d48-468vd (started 2026-10-25T20:10:50Z): {"time":"2026-10-25T20:10:52.619740587Z","level":"INFO","msg":"payments api started","service":"payments-api","address":"0.0.0.0:8081","metrics":"0.0.
+  payments-api-7d78b77d48-4zffn (started 2026-10-25T20:46:29Z): {"time":"2026-10-25T20:46:31.593784881Z","level":"INFO","msg":"payments api started","service":"payments-api","address":"0.0.0.0:8081","metrics":"0.0.
+  payments-api-7d78b77d48-7vnlb (started 2026-10-25T20:26:32Z): {"time":"2026-10-25T20:26:33.282771841Z","level":"INFO","msg":"payments api started","service":"payments-api","address":"0.0.0.0:8081","metrics":"0.0.
+  payments-api-7d78b77d48-krhtq (started 2026-10-25T20:41:58Z): {"time":"2026-10-25T20:41:58.814724422Z","level":"INFO","msg":"payments api started","service":"payments-api","address":"0.0.0.0:8081","metrics":"0.0.
+  payments-api-7d78b77d48-ngksg (started 2026-10-25T20:46:29Z): {"time":"2026-10-25T20:46:30.988192839Z","level":"INFO","msg":"payments api started","service":"payments-api","address":"0.0.0.0:8081","metrics":"0.0.
+  outbox-relay-7cb5b64885-rzmgk (started 2026-10-25T20:10:48Z): {"time":"2026-10-25T20:10:50.033532294Z","level":"INFO","msg":"outbox relay started","service":"outbox-relay","topic":"payments.main","batch":100,"int
+  payments-consumer-7c68f748bb-dr8cb (started 2026-10-25T20:10:48Z): {"time":"2026-10-25T20:10:49.489415044Z","level":"INFO","msg":"payments consumer started","service":"payments-consumer","topic":"payments.main","group
+  payments-consumer-7c68f748bb-lj2hw (started 2026-10-25T20:10:50Z): {"time":"2026-10-25T20:10:52.619330837Z","level":"INFO","msg":"payments consumer started","service":"payments-consumer","topic":"payments.main","group
+  outbox-relay "outbox published" lines in the last 2 minutes, the load's included: 16
+
+drill 07 done 2026-10-25T20:51:50Z

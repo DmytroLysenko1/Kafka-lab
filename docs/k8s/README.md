@@ -14,7 +14,7 @@ measure.
 | Docker for Go services (5%) | optimized Dockerfile(s), before/after image size, local Compose | [01-docker.md](01-docker.md), `deploy/docker/`, the `app` profile in `deploy/docker-compose.yml` |
 | Kubernetes fundamentals (5%) | notes / cheat sheet + a Go service on local Kubernetes with manifests | [cheatsheet.md](cheatsheet.md), `deploy/k8s/`, `deploy/helm/payments/` |
 | Deploy and operate end-to-end (5%) | manifests / Helm chart + runbook: deploy, upgrade, rollback, troubleshooting | `deploy/helm/payments/`, [runbook.md](runbook.md), `deploy/k8s/drills/` |
-| Share learnings (0%) | write-up or tech talk | [talk.md](talk.md) — seven things the stand did that the manifests did not say, with the decisions table; the reference behind it is [decisions.md](decisions.md) |
+| Share learnings (0%) | write-up or tech talk | [talk.md](talk.md) — eight things the stand did that the manifests did not say, with the decisions table; the reference behind it is [decisions.md](decisions.md) |
 
 ## Running it
 
@@ -49,10 +49,13 @@ Installed with Homebrew (`brew install kind helm kubectl kubeconform vegeta jq`)
 by the repository: kind v0.33.0 (node image pinned by digest in `deploy/k8s/kind.yaml`,
 Kubernetes v1.37.0), Helm v4.3.0 (server-side apply — see the field-ownership note in the
 runbook), kubectl v1.37.1 (Docker Desktop ships v1.34.1, one minor version too far from the
-1.37 server; the earliest drill logs were made with it), kubeconform v0.8.0, vegeta 12.13.0,
+1.37 server; the earliest drill logs were made with it), kubeconform v0.8.0, vegeta 12.13.0
+(on the host, and the same version built into `kafka-lab/vegeta:12.13.0`, the in-cluster load
+generator of drills 03 and 06 — `make k8s-load-image`),
 jq 1.7.1 (the drills read Helm and vegeta output with it), openssl (`make k8s-secret` draws the
 API key with it), python3 (`deploy/k8s/resources.sh` and `deploy/docker/measure.sh` format their
-tables with it), Docker 29.3.1 with 8 GB of memory for its VM. A different Helm major changes
+tables with it), Docker 29.8.2 with 8 GB of memory for its VM (29.3.1 for the logs of
+September). A different Helm major changes
 how upgrades and conflicts behave; the other versions only change output formats.
 `make k8s-verify` downloads the CRD schemas it validates against from GitHub, pinned to one
 commit of the catalog, so it needs the network.
@@ -67,6 +70,7 @@ power. Its duration is in the session's resource log header.
 | Path | What |
 |---|---|
 | `deploy/docker/Dockerfile` | one multi-stage file for all six commands (`--build-arg SERVICE=…`) |
+| `deploy/docker/Dockerfile.vegeta` | the drills' in-cluster load generator, never deployed by the chart |
 | `deploy/k8s/kind.yaml` | 1 control plane + 2 workers, host port 8800 → ingress |
 | `deploy/k8s/up.sh` | idempotent bring-up, every chart pinned |
 | `deploy/k8s/platform/` | Helm values of the platform charts and the operators' custom resources |

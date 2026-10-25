@@ -1,0 +1,39 @@
+drill 06 started 2026-10-25T21:15:55Z: rates 50 100 200 400 payments/s, 30s each, 50 merchants per step
+  rate     sent accepted   stored    p50_ms    p99_ms    max_ms  outbox_left   drain_s counted_s
+    50     1500     1500     1500         4        58       153           26         1         1
+{"status_codes":{"201":1500},"errors":[]}
+  step held 30s; the API's autoscaler during it:
+    hpa t=0s cpu=16% desired=2 current=2
+    hpa t=10s cpu=16% desired=2 current=2
+    hpa t=20s cpu=21% desired=2 current=2
+    hpa t=31s cpu=43% desired=2 current=2
+   100     3000     3000     3000         4       392       739            0         1         2
+{"status_codes":{"201":3000},"errors":[]}
+  step held 30s; the API's autoscaler during it:
+    hpa t=0s cpu=36% desired=2 current=2
+    hpa t=10s cpu=11% desired=2 current=2
+    hpa t=23s cpu=43% desired=2 current=2
+   200     6000     6000     6000         3        73       125            0         2         3
+{"status_codes":{"201":6000},"errors":[]}
+  step held 30s; the API's autoscaler during it:
+    hpa t=0s cpu=19% desired=2 current=2
+    hpa t=10s cpu=4% desired=2 current=2
+    hpa t=20s cpu=4% desired=2 current=2
+    hpa t=31s cpu=49% desired=2 current=2
+   400    48000    48000    48000         4       339       700           71         2         4
+{"status_codes":{"201":48000},"errors":[]}
+  step held 120s; the API's autoscaler during it:
+    hpa t=0s cpu=2% desired=4 current=4
+    hpa t=11s cpu=2% desired=4 current=4
+    hpa t=21s cpu=2% desired=4 current=4
+    hpa t=32s cpu=74% desired=4 current=4
+    hpa t=42s cpu=74% desired=4 current=4
+    hpa t=53s cpu=96% desired=5 current=4
+    hpa t=63s cpu=98% desired=5 current=5
+    hpa t=74s cpu=98% desired=5 current=5
+    hpa t=84s cpu=93% desired=5 current=5
+    hpa t=94s cpu=77% desired=5 current=5
+    hpa t=105s cpu=82% desired=5 current=5
+    hpa t=115s cpu=82% desired=5 current=5
+api after the last step: cpu=81% replicas=5
+drill 06 done 2026-10-25T21:25:19Z

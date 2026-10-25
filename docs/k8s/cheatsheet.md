@@ -40,7 +40,7 @@ in `deploy/helm/payments/templates/`.
 | Term | What it actually is | Here |
 |---|---|---|
 | request | what the scheduler reserves on a node. A pod whose requests fit no node stays `Pending` | api: 100m CPU, 32Mi |
-| limit (memory) | the cgroup ceiling. Exceeding it = the kernel kills the process: `OOMKilled`, exit 137 | api: 64Mi |
+| limit (memory) | the cgroup ceiling. Exceeding it = the kernel kills the process: exit 137, usually reported as `OOMKilled` — not always (runbook, case d) | api: 64Mi |
 | limit (CPU) | throttling, not killing. Deliberately **not set** here: a CPU limit throttles a Go service's GC and tail latency while the node has idle cores | none |
 | QoS class | Guaranteed (requests = limits), Burstable (some set), BestEffort (none). Decides who is evicted first under node pressure | Burstable |
 

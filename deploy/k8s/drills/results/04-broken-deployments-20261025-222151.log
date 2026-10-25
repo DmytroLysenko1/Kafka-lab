@@ -1,0 +1,104 @@
+
+==== a1. A tag that was never built, through helm — stopped at the migration hook — 2026-10-25T20:21:51Z
+level=WARN msg="upgrade failed" name=payments error="pre-upgrade hooks failed: resource Job/lab/migrate not ready. status: InProgress, message: Job in progress\ncontext deadline exceeded"
+POD             WAITING
+migrate-gmbpq   ErrImagePull
+POD                             READY   STATE                                              RESTARTS   PHASE
+payments-api-7d78b77d48-468vd   true    map[running:map[startedAt:2026-10-25T20:10:52Z]]   0          Running
+payments-api-7d78b77d48-ddklj   true    map[running:map[startedAt:2026-10-25T20:10:49Z]]   0          Running
+API through the ingress while broken: 200
+restored: the chart from git, image tag 7f89d22
+
+==== a2. The same tag set on the Deployment directly — ImagePullBackOff — 2026-10-25T20:22:57Z
+POD                             READY   STATE                                                                                                                                                                                                                                                                                                                                                                                                                                    RESTARTS   PHASE
+payments-api-5dcd6569c7-zrgvq   false   map[waiting:map[message:Back-off pulling image "kafka-lab/payments-api:does-not-exist": ErrImagePull: failed to pull and unpack image "docker.io/kafka-lab/payments-api:does-not-exist": failed to resolve reference "docker.io/kafka-lab/payments-api:does-not-exist": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed reason:ImagePullBackOff]]   0          Pending
+payments-api-7d78b77d48-468vd   true    map[running:map[startedAt:2026-10-25T20:10:52Z]]                                                                                                                                                                                                                                                                                                                                                                                         0          Running
+payments-api-7d78b77d48-ddklj   true    map[running:map[startedAt:2026-10-25T20:10:49Z]]                                                                                                                                                                                                                                                                                                                                                                                         0          Running
+  Warning  Failed     16s (x2 over 43s)  kubelet            spec.containers{payments-api}: Error: ImagePullBackOff
+  Normal   Pulling    4s (x3 over 45s)   kubelet            spec.containers{payments-api}: Pulling image "kafka-lab/payments-api:does-not-exist"
+  Warning  Failed     2s (x3 over 44s)   kubelet            spec.containers{payments-api}: Failed to pull image "kafka-lab/payments-api:does-not-exist": failed to pull and unpack image "docker.io/kafka-lab/payments-api:does-not-exist": failed to resolve reference "docker.io/kafka-lab/payments-api:does-not-exist": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+  Warning  Failed     2s (x3 over 44s)   kubelet            spec.containers{payments-api}: Error: ErrImagePull
+API through the ingress while broken: 200
+rolled back with kubectl rollout undo; field managers now:
+  helm Apply
+  kube-controller-manager Update
+  kubectl Update
+restored: the chart from git, image tag 7f89d22
+field managers after dropping kubectl's entries and the restore:
+  helm Apply
+  kube-controller-manager Update
+
+==== b. CrashLoopBackOff — the process starts and exits — 2026-10-25T20:23:47Z
+POD                             READY   STATE                                                                                                                                                                                 RESTARTS   PHASE
+payments-api-5c87d9fcd8-dmkb6   false   map[waiting:map[message:back-off 40s restarting failed container=payments-api pod=payments-api-5c87d9fcd8-dmkb6_lab(e6d673ac-f2fd-4e8e-8046-c1a3169662f8) reason:CrashLoopBackOff]]   3          Running
+payments-api-7d78b77d48-468vd   true    map[running:map[startedAt:2026-10-25T20:10:52Z]]                                                                                                                                      0          Running
+payments-api-7d78b77d48-ddklj   true    map[running:map[startedAt:2026-10-25T20:10:49Z]]                                                                                                                                      0          Running
+{"time":"2026-10-25T20:24:31.364990132Z","level":"ERROR","msg":"service stopped","service":"payments-api","error":"httpserve: cannot listen on 0.0.0.0:99999: listen tcp: address 99999: invalid port"}
+API through the ingress while broken: 200
+restored: the chart from git, image tag 7f89d22
+
+==== c. CreateContainerConfigError — the Secret has no such key — 2026-10-25T20:24:42Z
+POD                             READY   STATE                                                                                                                      RESTARTS   PHASE
+payments-api-75475d6bb5-cbzlt   false   map[waiting:map[message:couldn't find key NO_SUCH_KEY in Secret lab/payments-api-key reason:CreateContainerConfigError]]   0          Pending
+payments-api-7d78b77d48-468vd   true    map[running:map[startedAt:2026-10-25T20:10:52Z]]                                                                           0          Running
+payments-api-7d78b77d48-ddklj   true    map[running:map[startedAt:2026-10-25T20:10:49Z]]                                                                           0          Running
+  Normal   Scheduled  45s                default-scheduler  Successfully assigned lab/payments-api-75475d6bb5-cbzlt to kafka-lab-worker2
+  Normal   Pulled     10s (x5 over 46s)  kubelet            spec.containers{payments-api}: Container image "kafka-lab/payments-api:7f89d22" already present on machine and can be accessed by the pod
+  Warning  Failed     10s (x5 over 46s)  kubelet            spec.containers{payments-api}: Error: couldn't find key NO_SUCH_KEY in Secret lab/payments-api-key
+API through the ingress while broken: 200
+restored: the chart from git, image tag 7f89d22
+
+==== d. OOMKilled — a memory limit below what the process needs — 2026-10-25T20:25:37Z
+POD                             READY   STATE                                                                                                                                                                                 RESTARTS   PHASE
+payments-api-6b85596d89-pbnh6   true    map[running:map[startedAt:2026-10-25T20:26:21Z]]                                                                                                                                      2          Running
+payments-api-6b85596d89-tj676   false   map[waiting:map[message:back-off 20s restarting failed container=payments-api pod=payments-api-6b85596d89-tj676_lab(0559670d-9957-47e9-af5f-4eceeb457730) reason:CrashLoopBackOff]]   2          Running
+payments-api-7d78b77d48-468vd   true    map[running:map[startedAt:2026-10-25T20:10:52Z]]                                                                                                                                      0          Running
+last state: Error exit 137
+API through the ingress while broken: 200
+restored: the chart from git, image tag 7f89d22
+
+==== e. Pending — requests no node can satisfy — 2026-10-25T20:26:34Z
+POD                             READY    STATE                                              RESTARTS   PHASE
+payments-api-56dfbcff79-lnsvd   <none>   <none>                                             <none>     Pending
+payments-api-7d78b77d48-468vd   true     map[running:map[startedAt:2026-10-25T20:10:52Z]]   0          Running
+payments-api-7d78b77d48-7vnlb   true     map[running:map[startedAt:2026-10-25T20:26:33Z]]   0          Running
+LAST SEEN   TYPE      REASON             OBJECT                              MESSAGE
+45s         Warning   FailedScheduling   pod/payments-api-56dfbcff79-lnsvd   0/3 nodes are available: 1 node(s) had untolerated taint(s), 2 Insufficient cpu. preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.
+API through the ingress while broken: 200
+restored: the chart from git, image tag 7f89d22
+
+==== f. Not ready — the database is down, the pods are fine — 2026-10-25T20:27:29Z
+database pod gone 2026-10-25T20:30:33Z
+POD                             READY   STATE                                              RESTARTS   PHASE
+payments-api-7d78b77d48-468vd   false   map[running:map[startedAt:2026-10-25T20:10:52Z]]   0          Running
+payments-api-7d78b77d48-7vnlb   false   map[running:map[startedAt:2026-10-25T20:26:33Z]]   0          Running
+payments-api-7d78b77d48-468vd ready=false
+payments-api-7d78b77d48-7vnlb ready=false
+API through the ingress while broken: 503
+database back, API ready again
+
+==== g. Debugging a distroless container — no shell, so an ephemeral one — 2026-10-25T20:31:04Z
+error: Internal error occurred: Internal error occurred: error executing command in container: failed to exec in container: failed to start exec "7e67a70124b2a4f82bc81b5c929609e006ddd1b81d0bc25ee501d52e0cd3f219": OCI runtime exec failed: exec failed: unable to start container process: exec: "sh": executable file not found in $PATH
+Warning: Non-root user is configured for the entire target Pod, and some capabilities granted by debug profile may not work. Please consider using "--custom" with a custom profile that specifies "securityContext.runAsUser: 0".
+Warning: would violate PodSecurity "restricted:latest": allowPrivilegeEscalation != false (container "debugger-1792960265" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container "debugger-1792960265" must set securityContext.capabilities.drop=["ALL"]; container "debugger-1792960265" must not include "SYS_PTRACE" in securityContext.capabilities.add)
+PID   USER     COMMAND
+    1 65532    /service
+   31 65532    sh -c ps -o pid,user,args; echo "--- the service image, seen from the debugger:"; ls /proc/1/root/
+   41 65532    ps -o pid,user,args
+--- the service image, seen from the debugger:
+bin
+boot
+dev
+etc
+home
+lib
+proc
+product_uuid
+root
+run
+sbin
+service
+sys
+tmp
+usr
+var

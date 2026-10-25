@@ -1,0 +1,51 @@
+drill 04f started 2026-10-25T20:32:19Z
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            true    39         <none>    Error
+outbox-relay-7cb5b64885-rzmgk        true    0          <none>    <none>
+payments-api-7d78b77d48-468vd        true    0          <none>    <none>
+payments-api-7d78b77d48-7vnlb        true    0          <none>    <none>
+payments-consumer-7c68f748bb-dr8cb   true    0          <none>    <none>
+payments-consumer-7c68f748bb-lj2hw   true    0          <none>    <none>
+database pod gone 2026-10-25T20:35:23Z; sampling every 30 s for 90 s, more than three 20 s liveness periods
+--- 2026-10-25T20:35:53Z
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            false   39         <none>    Error
+outbox-relay-7cb5b64885-rzmgk        true    0          <none>    <none>
+payments-api-7d78b77d48-468vd        false   0          <none>    <none>
+payments-api-7d78b77d48-7vnlb        false   0          <none>    <none>
+payments-consumer-7c68f748bb-dr8cb   true    0          <none>    <none>
+payments-consumer-7c68f748bb-lj2hw   true    0          <none>    <none>
+--- 2026-10-25T20:36:23Z
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            false   39         <none>    Error
+outbox-relay-7cb5b64885-rzmgk        true    0          <none>    <none>
+payments-api-7d78b77d48-468vd        false   0          <none>    <none>
+payments-api-7d78b77d48-7vnlb        false   0          <none>    <none>
+payments-consumer-7c68f748bb-dr8cb   true    0          <none>    <none>
+payments-consumer-7c68f748bb-lj2hw   true    0          <none>    <none>
+--- 2026-10-25T20:36:54Z
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            false   39         <none>    Error
+outbox-relay-7cb5b64885-rzmgk        true    0          <none>    <none>
+payments-api-7d78b77d48-468vd        false   0          <none>    <none>
+payments-api-7d78b77d48-7vnlb        false   0          <none>    <none>
+payments-consumer-7c68f748bb-dr8cb   true    0          <none>    <none>
+payments-consumer-7c68f748bb-lj2hw   true    0          <none>    <none>
+database back 2026-10-25T20:37:06Z, 12 s after the hibernation was lifted
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            false   39         <none>    Error
+outbox-relay-7cb5b64885-rzmgk        true    0          <none>    <none>
+payments-api-7d78b77d48-468vd        false   0          <none>    <none>
+payments-api-7d78b77d48-7vnlb        false   0          <none>    <none>
+payments-consumer-7c68f748bb-dr8cb   true    0          <none>    <none>
+payments-consumer-7c68f748bb-lj2hw   true    0          <none>    <none>
+first payment accepted 4 s after the database was back
+that payment counted 5 s after the database was back
+every watched pod ready 6 s after the database was back (2026-10-25T20:37:12Z)
+POD                                  READY   RESTARTS   WAITING   LAST
+apicurio-6f4bcbb954-n4dgg            true    39         <none>    Error
+outbox-relay-7cb5b64885-rzmgk        true    0          <none>    <none>
+payments-api-7d78b77d48-468vd        true    0          <none>    <none>
+payments-api-7d78b77d48-7vnlb        true    0          <none>    <none>
+payments-consumer-7c68f748bb-dr8cb   true    0          <none>    <none>
+payments-consumer-7c68f748bb-lj2hw   true    0          <none>    <none>

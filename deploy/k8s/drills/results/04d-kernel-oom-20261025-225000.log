@@ -1,0 +1,15 @@
+# drill 04 case d (04-broken-deployments-20261025-222151.log, 20:25:37Z) printed 'last state: Error exit 137'.
+# The kernel's side, taken after the session from the Docker VM's kernel, which every kind node shares:
+# docker exec kafka-lab-worker sh -c 'dmesg -T | grep "Memory cgroup out of memory"'   (dmesg -T prints the node clock, UTC: the first kill is 9 s after case d began)
+[Sun Oct 25 20:25:46 2026] Memory cgroup out of memory: Killed process 95789 (service) total-vm:1279672kB, anon-rss:3956kB, file-rss:7856kB, shmem-rss:0kB, UID:65532 pgtables:136kB oom_score_adj:999
+[Sun Oct 25 20:25:46 2026] Memory cgroup out of memory: Killed process 95789 (service) total-vm:1279672kB, anon-rss:3956kB, file-rss:7856kB, shmem-rss:0kB, UID:65532 pgtables:136kB oom_score_adj:999
+[Sun Oct 25 20:25:51 2026] Memory cgroup out of memory: Killed process 95996 (service) total-vm:1279096kB, anon-rss:3740kB, file-rss:6428kB, shmem-rss:0kB, UID:65532 pgtables:128kB oom_score_adj:999
+[Sun Oct 25 20:25:51 2026] Memory cgroup out of memory: Killed process 96013 (service) total-vm:1279096kB, anon-rss:3740kB, file-rss:6428kB, shmem-rss:0kB, UID:65532 pgtables:128kB oom_score_adj:999
+[Sun Oct 25 20:26:06 2026] Memory cgroup out of memory: Killed process 96410 (service) total-vm:1278836kB, anon-rss:2824kB, file-rss:7164kB, shmem-rss:0kB, UID:65532 pgtables:124kB oom_score_adj:999
+[Sun Oct 25 20:26:06 2026] Memory cgroup out of memory: Killed process 96430 (service) total-vm:1278836kB, anon-rss:2824kB, file-rss:7164kB, shmem-rss:0kB, UID:65532 pgtables:124kB oom_score_adj:999
+[Sun Oct 25 20:26:07 2026] Memory cgroup out of memory: Killed process 96185 (service) total-vm:1346376kB, anon-rss:5592kB, file-rss:7900kB, shmem-rss:0kB, UID:65532 pgtables:144kB oom_score_adj:999
+[Sun Oct 25 20:26:07 2026] Memory cgroup out of memory: Killed process 96204 (service) total-vm:1346376kB, anon-rss:5592kB, file-rss:7900kB, shmem-rss:0kB, UID:65532 pgtables:144kB oom_score_adj:999
+[Sun Oct 25 20:26:09 2026] Memory cgroup out of memory: Killed process 96522 (service) total-vm:1278836kB, anon-rss:3000kB, file-rss:6980kB, shmem-rss:0kB, UID:65532 pgtables:128kB oom_score_adj:999
+[Sun Oct 25 20:26:09 2026] Memory cgroup out of memory: Killed process 96550 (service) total-vm:1278836kB, anon-rss:3000kB, file-rss:6980kB, shmem-rss:0kB, UID:65532 pgtables:128kB oom_score_adj:999
+[Sun Oct 25 20:26:32 2026] Memory cgroup out of memory: Killed process 97028 (service) total-vm:1280448kB, anon-rss:5824kB, file-rss:4196kB, shmem-rss:0kB, UID:65532 pgtables:144kB oom_score_adj:999
+[Sun Oct 25 20:26:32 2026] Memory cgroup out of memory: Killed process 97048 (service) total-vm:1280448kB, anon-rss:5824kB, file-rss:4196kB, shmem-rss:0kB, UID:65532 pgtables:144kB oom_score_adj:999

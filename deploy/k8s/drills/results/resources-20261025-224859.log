@@ -1,0 +1,90 @@
+resources over the last 58m, 2026-10-25T20:49:01Z
+docker VM: 7934Mi, 10 CPU
+what each node tells the scheduler it has (allocatable) — on kind, every node reports the whole VM:
+  kafka-lab-control-plane   10    8124516Ki
+  kafka-lab-worker          10    8124516Ki
+  kafka-lab-worker2         10    8124516Ki
+oom = an OOMKilled termination was seen in the window; restarts = restarts in the window
+
+namespace/pod/container                                                  req cpu  req mem  lim mem  avg mem  max mem  p95 cpu  max cpu  oom restarts
+cnpg-system/cnpg-cloudnative-pg-65d4578976-z8768/manager                     20m     64Mi    128Mi     41Mi     85Mi      20m      43m    0        1
+kube-system/coredns-559f6c778d-2rt2j/coredns                                100m     70Mi    170Mi     33Mi     61Mi       9m      15m    0        0
+kube-system/coredns-559f6c778d-cmf7m/coredns                                100m     70Mi    170Mi     34Mi     75Mi       8m      18m    0        0
+kube-system/etcd-kafka-lab-control-plane/etcd                               100m    100Mi        -    106Mi    168Mi      66m      86m    0        0
+kube-system/kindnet-djz7n/kindnet-cni                                       100m     50Mi        -     23Mi     57Mi       9m      17m    0        0
+kube-system/kindnet-kh5rm/kindnet-cni                                       100m     50Mi        -     21Mi     49Mi       7m       9m    0        0
+kube-system/kindnet-skcfx/kindnet-cni                                       100m     50Mi        -     21Mi     62Mi       5m      11m    0        0
+kube-system/kube-apiserver-kafka-lab-control-plane/kube-apiserver           250m        -        -   1006Mi   1116Mi     226m     410m    0        0
+kube-system/kube-controller-manager-kafka-lab-control-plane/kube-controller-manager    200m        -        -    141Mi    186Mi      73m      76m    0        2
+kube-system/kube-proxy-66wlj/kube-proxy                                        -        -        -     19Mi     47Mi       7m      13m    0        0
+kube-system/kube-proxy-cmlkg/kube-proxy                                        -        -        -     20Mi     58Mi       6m      12m    0        0
+kube-system/kube-proxy-kldpp/kube-proxy                                        -        -        -     20Mi     50Mi       6m      14m    0        0
+kube-system/kube-scheduler-kafka-lab-control-plane/kube-scheduler           100m        -        -     40Mi     68Mi      26m      27m    0        2
+kube-system/metrics-server-7b7449949c-zg94d/metrics-server                   10m     48Mi    128Mi     34Mi     89Mi      14m      19m    0        0
+lab/apicurio-6f4bcbb954-n4dgg/apicurio                                       50m    224Mi    512Mi    190Mi    214Mi      16m      22m    0        0
+lab/kafka-lab-dual-0/kafka                                                  100m    800Mi   1400Mi    777Mi    837Mi      98m     391m    0        0
+lab/kafka-lab-dual-1/kafka                                                  100m    800Mi   1400Mi    681Mi    731Mi     384m     425m    0        0
+lab/kafka-lab-dual-2/kafka                                                  100m    800Mi   1400Mi    655Mi    735Mi      60m     100m    0        0
+lab/kafka-lab-entity-operator-5c57844759-tckff/topic-operator                20m    192Mi    320Mi    155Mi    168Mi      11m      23m    0        0
+lab/kafka-lab-kafka-exporter-7889d97b45-qxtdq/kafka-lab-kafka-exporter       10m     24Mi     64Mi     15Mi     25Mi      11m      16m    0        0
+lab/load-03/vegeta                                                             -        -        -     35Mi     35Mi     289m     291m    0        0
+lab/load-06/vegeta                                                             -        -        -     30Mi    109Mi     188m     188m    0        0
+lab/outbox-relay-7cb5b64885-fgnz9/outbox-relay                                 -        -        -     17Mi     29Mi       5m       7m    0        0
+lab/outbox-relay-7cb5b64885-rzmgk/outbox-relay                               10m     32Mi     64Mi     19Mi     36Mi      11m      21m    0        0
+lab/outbox-relay-7fbc4c6bc7-dcwpf/outbox-relay                                 -        -        -     17Mi     34Mi       6m       9m    0        0
+lab/outbox-relay-997885b5c-fq7zm/outbox-relay                                  -        -        -     18Mi     22Mi       6m       6m    0        0
+lab/payments-api-575c447448-99pkj/payments-api                                 -        -        -     13Mi     16Mi      14m      14m    0        0
+lab/payments-api-575c447448-x4z2c/payments-api                                 -        -        -     12Mi     16Mi      13m      13m    0        0
+lab/payments-api-598b459cd4-44zs4/payments-api                                 -        -        -     18Mi     26Mi      64m     187m    0        0
+lab/payments-api-598b459cd4-4zmdk/payments-api                                 -        -        -     20Mi     27Mi      70m     100m    0        0
+lab/payments-api-598b459cd4-h52j8/payments-api                                 -        -        -     13Mi     22Mi      14m      37m    0        0
+lab/payments-api-598b459cd4-wjlq4/payments-api                                 -        -        -     20Mi     27Mi      14m      18m    0        0
+lab/payments-api-598b459cd4-xs94q/payments-api                                 -        -        -     12Mi     16Mi      28m      40m    0        0
+lab/payments-api-6b85596d89-pbnh6/payments-api                                 -        -        -      6Mi      6Mi        -        -    0        2
+lab/payments-api-6b85596d89-tj676/payments-api                                 -        -        -      5Mi      5Mi        -        -    0        2
+lab/payments-api-7d78b77d48-468vd/payments-api                              100m     32Mi     64Mi     19Mi     31Mi      53m     208m    0        0
+lab/payments-api-7d78b77d48-4zffn/payments-api                              100m     32Mi     64Mi     13Mi     19Mi      10m      10m    0        0
+lab/payments-api-7d78b77d48-5bsxd/payments-api                                 -        -        -     15Mi     28Mi     168m     185m    0        0
+lab/payments-api-7d78b77d48-6h9dv/payments-api                                 -        -        -     13Mi     23Mi       2m       2m    0        0
+lab/payments-api-7d78b77d48-7vnlb/payments-api                              100m     32Mi     64Mi     19Mi     30Mi     112m     153m    0        0
+lab/payments-api-7d78b77d48-8gfts/payments-api                                 -        -        -     16Mi     32Mi       2m       2m    0        0
+lab/payments-api-7d78b77d48-ddklj/payments-api                                 -        -        -     20Mi     35Mi     207m     308m    0        0
+lab/payments-api-7d78b77d48-krhtq/payments-api                              100m     32Mi     64Mi     14Mi     27Mi     133m     141m    0        0
+lab/payments-api-7d78b77d48-lnd52/payments-api                                 -        -        -     15Mi     26Mi      44m      48m    0        0
+lab/payments-api-7d78b77d48-lss8h/payments-api                                 -        -        -     15Mi     24Mi       6m       7m    0        0
+lab/payments-api-7d78b77d48-ngksg/payments-api                              100m     32Mi     64Mi     13Mi     21Mi      13m      13m    0        0
+lab/payments-api-7d78b77d48-pln66/payments-api                                 -        -        -     13Mi     28Mi       6m       6m    0        0
+lab/payments-api-7d78b77d48-sv798/payments-api                                 -        -        -     14Mi     18Mi      77m      96m    0        0
+lab/payments-consumer-5d78b8b8c8-8vltb/payments-consumer                       -        -        -     20Mi     30Mi      23m      45m    0        0
+lab/payments-consumer-5d78b8b8c8-vhwhp/payments-consumer                       -        -        -     19Mi     31Mi      29m      45m    0        0
+lab/payments-consumer-7c68f748bb-ckwtw/payments-consumer                       -        -        -     17Mi     31Mi       8m      10m    0        0
+lab/payments-consumer-7c68f748bb-dr8cb/payments-consumer                     15m     32Mi     64Mi     21Mi     37Mi      77m     139m    0        0
+lab/payments-consumer-7c68f748bb-k9sl4/payments-consumer                       -        -        -     18Mi     36Mi      10m      11m    0        0
+lab/payments-consumer-7c68f748bb-lj2hw/payments-consumer                     15m     32Mi     64Mi     20Mi     37Mi      64m     134m    0        0
+lab/payments-consumer-cc68975cd-nmcbp/payments-consumer                        -        -        -     14Mi     21Mi      13m      13m    0        0
+lab/payments-consumer-cc68975cd-nn222/payments-consumer                        -        -        -     16Mi     23Mi      13m      13m    0        0
+lab/payments-db-1/postgres                                                  100m    160Mi    384Mi    151Mi    235Mi     497m     516m    0        0
+local-path-storage/local-path-provisioner-75f7fc7dc5-bsxp8/local-path-provisioner       -        -        -     11Mi     52Mi       3m       7m    0        0
+monitoring/alloy-7479f5f49-cv55z/alloy                                       50m    112Mi    320Mi     90Mi    214Mi      45m      78m    0        0
+monitoring/alloy-7479f5f49-cv55z/config-reloader                             10m     24Mi     64Mi     13Mi     45Mi       1m       2m    0        0
+monitoring/loki-0/loki                                                       20m    160Mi    384Mi    107Mi    189Mi      32m      44m    0        0
+monitoring/monitoring-grafana-5c5df6fb7c-hdlrx/grafana                       50m    336Mi    832Mi    327Mi    505Mi      62m     105m    0        0
+monitoring/monitoring-grafana-5c5df6fb7c-hdlrx/grafana-sc-dashboard          10m     80Mi    128Mi     72Mi     80Mi       3m       5m    0        0
+monitoring/monitoring-grafana-5c5df6fb7c-hdlrx/grafana-sc-datasources        10m     80Mi    128Mi     71Mi     79Mi       2m       4m    0        0
+monitoring/monitoring-kube-prometheus-operator-84b7b98985-4xlf7/kube-prometheus-stack     20m     48Mi     96Mi     38Mi     86Mi      17m      43m    0        0
+monitoring/monitoring-kube-state-metrics-8c5bfd887-4c645/kube-state-metrics     10m     48Mi     96Mi     32Mi     69Mi      13m      28m    0        0
+monitoring/prometheus-monitoring-kube-prometheus-prometheus-0/config-reloader     10m     40Mi     64Mi     24Mi     49Mi       4m       7m    0        0
+monitoring/prometheus-monitoring-kube-prometheus-prometheus-0/prometheus    100m    640Mi   1152Mi    653Mi    842Mi     148m     291m    0        0
+strimzi/strimzi-cluster-operator-5b8f657979-n8pzd/strimzi-cluster-operator     50m    320Mi    448Mi    271Mi    287Mi      43m      50m    0        0
+traefik/traefik-76c95c6b85-qtb8g/traefik                                     50m     64Mi    192Mi     36Mi    141Mi      34m      47m    0        0
+
+capacity (whole cluster):
+  memory requests   5870Mi
+  memory limits     10812Mi
+  cpu requests      2840m
+  working set now   6164Mi
+  working set peak  6391Mi
+  node usage now (kubectl top, includes what cAdvisor does not attribute to containers):
+    kafka-lab-control-plane 1456Mi
+    kafka-lab-worker 2834Mi
+    kafka-lab-worker2 2247Mi
