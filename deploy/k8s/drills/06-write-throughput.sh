@@ -48,10 +48,16 @@ printf '%6s %8s %8s %9s %9s %9s %12s %9s %9s\n' rate sent accepted p50_ms p99_ms
 # step is held longer for the same reason.
 watch_hpa() {
   local began=$1
+  local t reading
   while true; do
-    kubectl get hpa payments-api -n "$namespace" --no-headers \
-      -o custom-columns=CPU:.status.currentMetrics[0].resource.current.averageUtilization,DESIRED:.status.desiredReplicas,CURRENT:.status.currentReplicas 2>/dev/null |
-      awk -v t=$(( $(date +%s) - began )) '{printf "    hpa t=%ss cpu=%s%% desired=%s current=%s\n", t, $1, $2, $3}'
+    t=$(( $(date +%s) - began ))
+    # A reading the API server did not answer is logged as unread; the watcher keeps going.
+    if reading=$(kubectl get hpa payments-api -n "$namespace" --no-headers \
+      -o custom-columns=CPU:.status.currentMetrics[0].resource.current.averageUtilization,DESIRED:.status.desiredReplicas,CURRENT:.status.currentReplicas 2>&1); then
+      awk -v t="$t" '{printf "    hpa t=%ss cpu=%s%% desired=%s current=%s\n", t, $1, $2, $3}' <<<"$reading"
+    else
+      printf '    hpa t=%ss unread: %s\n' "$t" "$(head -1 <<<"$reading")"
+    fi
     sleep 10
   done
 }

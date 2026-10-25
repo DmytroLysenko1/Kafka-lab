@@ -17,10 +17,17 @@ attack=$!
 
 started=$(date +%s)
 end=$((started + duration + tail_seconds))
+# Under this load the laptop is saturated, and the API server sometimes misses a TLS
+# handshake (it did, on 25.10): a reading that could not be taken is logged as unread and the
+# drill goes on, rather than ending it with the load still running and nothing measured.
 while [ "$(date +%s)" -lt "$end" ]; do
-  kubectl get hpa payments-api -n "$namespace" --no-headers \
-    -o custom-columns=CPU:.status.currentMetrics[0].resource.current.averageUtilization,DESIRED:.status.desiredReplicas,CURRENT:.status.currentReplicas |
-    awk -v t=$(( $(date +%s) - started )) '{printf "t=%4ss cpu=%s%% desired=%s current=%s\n", t, $1, $2, $3}' | tee -a "$log"
+  t=$(( $(date +%s) - started ))
+  if reading=$(kubectl get hpa payments-api -n "$namespace" --no-headers \
+    -o custom-columns=CPU:.status.currentMetrics[0].resource.current.averageUtilization,DESIRED:.status.desiredReplicas,CURRENT:.status.currentReplicas 2>&1); then
+    awk -v t="$t" '{printf "t=%4ss cpu=%s%% desired=%s current=%s\n", t, $1, $2, $3}' <<<"$reading" | tee -a "$log"
+  else
+    printf 't=%4ss unread: %s\n' "$t" "$(head -1 <<<"$reading")" | tee -a "$log"
+  fi
   sleep 10
 done
 
