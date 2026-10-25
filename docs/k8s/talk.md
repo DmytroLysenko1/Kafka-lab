@@ -3,7 +3,8 @@
 A write-up for the team, and the script of a 25-minute talk, built out of the Kubernetes half
 of this repository: the payments service in Docker images, on kind, with Kafka on Strimzi,
 deployed by a Helm chart and broken on purpose by scripted drills. Every number below is from
-a log committed under `deploy/k8s/drills/results/` or `deploy/docker/results/`; the decisions
+a log committed under `deploy/k8s/drills/results/` or `deploy/docker/results/`, except where a
+section says it was seen in the session; the decisions
 behind the stand, and what it leaves out on purpose, are in [decisions.md](decisions.md).
 
 Each section has the same shape: what the manifest or the tutorial says, what the stand did
@@ -74,11 +75,12 @@ non-2xx, 6 s.
 ## 4. "Load that feels high moves the autoscaler"
 
 **What the stand did.** At 400 req/s the API sat at 51–62% of its 100m CPU request, one sample
-at 70% — at or below the 70% target, so the HPA kept 2 replicas. It took 1200 req/s: 109% at
+at 70% — at or below the 70% target, so the HPA kept 2 replicas; 1200 req/s did it: 109% at
 30 s, desired 4; 160% at 40 s, desired 5; 216 000 requests, none failed. Scale-in waited out
 the 300 s stabilisation window, as documented. In a run right after the platform was
-re-applied, the same load needed 72–78% of the request on five pods and p99 rose from 3.3 ms
-to 182 ms — the busy stand is the likely cause, inferred from the timing, not measured.
+re-applied, the same load needed 72–88% of the request on five pods and its p99 was 182 ms,
+against 3.3 ms in a rerun once the stand had settled — the busy stand is the likely cause,
+inferred from the timing, not measured.
 
 **What to do.** Plan the load from the request, not from a round number: the HPA sees a
 percentage of what the pod asked for. And what the machine gives the pods shows in that
@@ -90,7 +92,9 @@ percentage and in the tail latency, long before it shows in errors.
 allocatable, so the scheduler believes in three times the memory that exists. In the 25.10
 session memory requests came to 74% of the VM and the sum of limits to 136%; the container
 working set peaked at 80% (`resources-20261025-224859.log`), and at **95%** in the 28.09
-session, while the platform was re-applied and two Grafana pods overlapped. Requests and limits were sized from a logged
+session, while the platform was re-applied and two Grafana pods overlapped. An hour after the
+25.10 session, with more load since, the VM was out of memory and swap
+(`vm-memory-20261025-220007.log`), and both workers had gone `NotReady` (seen in the session). Requests and limits were sized from a logged
 measurement of the running stand, twice; the first pass was read off Prometheus without a log,
 and a Prometheus restart erased it.
 
@@ -127,16 +131,22 @@ conflict and the rollout both.
 ## 8. "The load test measures the service"
 
 **What the stand did.** Drill 03 sent 1200, then 800 GET/s from the laptop to the ingress on
-`127.0.0.1:8800`. Four sessions in a row ended early. In the one whose Docker logs survive,
-Docker Desktop's port forward — the path from the host into every container, the kind API
-server's port included — shut down 11 s into the load: kubectl lost the cluster, 137 102 of
-144 000 requests got no answer, and the VM stopped 72 s later. The API was not what broke.
-Sent from a pod inside the cluster to the Service, the same 800 req/s gave 144 000 of 144 000
-answered, p99 15.6 ms, and a scale-out to five pods.
+`127.0.0.1:8800`. Four attempts at the session ended early, two of them during that load. In
+the one whose Docker logs survive, Docker Desktop's port forward — the path from the host into
+every container, the kind API server's port included — shut down 11 s into the load: kubectl
+lost the cluster, 137 102 of 144 000 requests got no answer (that run's log was deleted with
+the failed attempt; the figure is from the session's output), and the VM stopped 72 s later.
+The API was not what broke.
 
-**What to do.** Put the load generator where the clients are, or at least past the parts of
-the path that are not under test. A load test that runs through a laptop's port forward
-measures the port forward, and on a laptop that is the weakest link in the chain.
+Moved into the cluster and sent straight to the API's Service, the same 800 req/s was answered
+in full — and was wrong the other way. vegeta keeps its connections open, and kube-proxy pins
+each connection to one pod when it opens: one API pod ran at 191m of CPU while another sat at
+19m, and the HPA scaled on their average. Traefik, which the earlier runs went through, picks a
+pod per request.
+
+**What to do.** Send the load the way the clients come: past the parts of the path that are not
+under test, through the parts that are. A load test that runs through a laptop's port forward
+measures the port forward; one that skips the load balancer measures its connections.
 
 ---
 
@@ -163,7 +173,7 @@ listed with the production equivalent in [decisions.md](decisions.md#lab-not-pro
 | A live drill — `make k8s-drill-04` breaking a release while `kubectl get pods -w` runs | 3 min |
 | Questions | 2 min |
 
-A plan, not a timing: the whole file is about 1 800 words, 10–12 minutes spoken at 130–150
+A plan, not a timing: the whole file is about 1 950 words, 13–15 minutes spoken at 130–150
 words a minute, and the stories are told around the drill logs on screen. The first time it is given,
 its real timings replace this table.
 

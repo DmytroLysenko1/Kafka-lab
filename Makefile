@@ -242,10 +242,12 @@ k8s-images: images
 	done
 
 # The in-cluster load generator of drills 03 and 06 (deploy/docker/Dockerfile.vegeta); no
-# build context, the Dockerfile copies nothing from the repository.
+# build context, the Dockerfile copies nothing from the repository. The version is the one
+# on the host (docs/k8s/README.md); deploy/k8s/drills/lib.sh names the same tag.
+VEGETA_VERSION = 12.13.0
 k8s-load-image:
-	docker build -t kafka-lab/vegeta:12.13.0 - < deploy/docker/Dockerfile.vegeta
-	kind load docker-image kafka-lab/vegeta:12.13.0 --name kafka-lab
+	docker build --build-arg VEGETA_VERSION=v$(VEGETA_VERSION) -t kafka-lab/vegeta:$(VEGETA_VERSION) - < deploy/docker/Dockerfile.vegeta
+	kind load docker-image kafka-lab/vegeta:$(VEGETA_VERSION) --name kafka-lab
 
 # Generated once and never printed; an existing key is left alone, so a rerun does not
 # lock out the callers that hold it.

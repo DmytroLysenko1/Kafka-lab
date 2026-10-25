@@ -38,11 +38,28 @@ witness_memory() {
 
 # What the relay still owes Kafka, read from the outbox itself: the API answers from Postgres
 # and never calls Kafka, so 2xx alone cannot say that publishing went on while a broker was
-# gone. A backlog that stays near zero through the kill says it did.
-outbox_left() {
-  kubectl exec -n "$namespace" payments-db-1 -c postgres -- \
-    psql -d payments -Atc "SELECT count(*) FROM outbox WHERE published_at IS NULL" 2>/dev/null || echo error
+# gone. A backlog that stays near zero through the kill says it did. Sampled every 2 s by a
+# loop of its own: in the main loop, next to the admin JVM and kubectl top, it stretched the
+# replication samples to 6–13 s apart (25.10).
+watch_outbox() {
+  local t left
+  while true; do
+    t=$(( $(date +%s) - killed ))
+    left=$(kubectl exec -n "$namespace" payments-db-1 -c postgres -- \
+      psql -d payments -Atc "SELECT count(*) FROM outbox WHERE published_at IS NULL" 2>/dev/null || echo error)
+    echo "  outbox t=${t}s left=$left"
+    sleep 2
+  done
 }
+scratch=$(mktemp -d)
+watcher=""
+attack=""
+cleanup() {
+  [ -z "$watcher" ] || kill "$watcher" 2>/dev/null || true
+  [ -z "$attack" ] || kill "$attack" 2>/dev/null || true
+  rm -rf "$scratch" "$results_dir/.targets" "$results_dir/.attack.bin"
+}
+trap cleanup EXIT
 
 payment_targets $((rate * duration)) "$run" > "$results_dir/.targets"
 echo "drill 05 started $(stamp), killing $victim under $rate payments/s" | tee "$log"
@@ -54,13 +71,17 @@ sleep 15
 killed=$(date +%s)
 kubectl delete pod -n "$namespace" "$victim" --grace-period=0 --force >/dev/null 2>&1
 echo "t=0 $victim deleted (no grace period)" | tee -a "$log"
+watch_outbox > "$scratch/outbox" &
+watcher=$!
 
 ready_at="" healed_at="" degraded=""
 while true; do
-  t=$(( $(date +%s) - killed ))
   urp=$(under_replicated)
+  # Stamped after the replication read, which takes seconds: a 0 is then known to hold at t,
+  # so the healing time is an upper bound, never early.
+  t=$(( $(date +%s) - killed ))
   ready=$(kubectl get pod -n "$namespace" "$victim" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || echo false)
-  echo "t=${t}s pod_ready=${ready:-false} under_replicated=$urp outbox_left=$(outbox_left) witness_memory=$(witness_memory)" | tee -a "$log"
+  echo "t=${t}s pod_ready=${ready:-false} under_replicated=$urp witness_memory=$(witness_memory)" | tee -a "$log"
   if [ -z "$ready_at" ] && [ "$ready" = "true" ]; then ready_at=$t; fi
   # Healing is counted on its own: the first run tied it to readiness and reported 22 s for
   # partitions its own samples showed back in sync at 15 s.
@@ -73,11 +94,15 @@ while true; do
   sleep 2
 done
 echo "pod ready after ${ready_at}s, no under-replicated partition after ${healed_at}s" | tee -a "$log"
+kill "$watcher" 2>/dev/null || true
+watcher=""
+echo "the outbox's unpublished rows, every 2 s from the kill (20 new rows a second arrive):" | tee -a "$log"
+tee -a "$log" < "$scratch/outbox"
 
 wait "$attack"
+attack=""
 vegeta report < "$results_dir/.attack.bin" | tee -a "$log"
 sleep 20
 key=$(api_key)
 echo "merchant total for the run: $(curl -s "$api/merchants/m-drill-$run/total" -H "Host: $api_host" -H "X-API-Key: $key")" | tee -a "$log"
 echo "payments accepted (2xx): $(vegeta report -type=json < "$results_dir/.attack.bin" | jq '.status_codes["201"] // 0')" | tee -a "$log"
-rm -f "$results_dir/.targets" "$results_dir/.attack.bin"

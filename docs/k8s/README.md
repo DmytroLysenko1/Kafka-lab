@@ -63,7 +63,8 @@ commit of the catalog, so it needs the network.
 The whole evidence set — Docker measurement, every drill, the resource log — is one command:
 `make k8s-evidence`. It runs under macOS's `caffeinate` (a Mac that slept mid-drill spoiled a
 run), so elsewhere run the steps in `deploy/k8s/drills/session.sh` by hand; keep the machine on
-power. Its duration is in the session's resource log header.
+power. Its length is in the session's resource log header, plus 5 minutes: the window starts
+before the session, so the log also catches what was running when it began.
 
 ## Layout
 

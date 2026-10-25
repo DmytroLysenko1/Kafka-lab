@@ -15,7 +15,7 @@ without a log are marked as such.
 | **CloudNativePG** for Postgres | a hand-written StatefulSet, a Bitnami chart | the operator writes the connection secret (`payments-db-app`) — no password in the repository — and handles failover if instances go above 1 |
 | **Traefik** as the ingress controller | ingress-nginx | ingress-nginx was retired by Kubernetes SIG Network in March 2026: no more releases, security fixes included. The `Ingress` objects stay standard, so the controller is swappable in one values file |
 | **Helm** for the service | Kustomize | the migration has to run *before* the rollout and fail it if it fails — a Helm pre-upgrade hook is exactly that; `helm rollback` and `helm history` are the upgrade/rollback story the PDP asks about |
-| one image per command, one Dockerfile | one image with all binaries | 28–39 MB each (see [01-docker.md](01-docker.md)); a component's image changes only when its code does |
+| one image per command, one Dockerfile | one image with all binaries | 28–38 MB each (see [01-docker.md](01-docker.md)); a component's image changes only when its code does |
 | Loki + Alloy for logs | ELK/EFK | one small binary each; Grafana already exists for metrics |
 | **kube-prometheus-stack** for metrics | a bare Prometheus with hand-written scrape configs | the Prometheus operator reads `ServiceMonitor`/`PodMonitor` objects, so the chart declares its own scraping next to its Deployments; cAdvisor and kube-state-metrics come with it, and every resource figure on this stand is read from them |
 
@@ -120,25 +120,35 @@ the way ("first pass" figures are session observations; "logged" are from the fi
 | Apicurio | 384Mi / 768Mi, heap 80% of limit | first pass: ~190Mi | 224Mi / 512Mi, heap 50% of limit, JDBC pool fixed at 20 | 187 / 195Mi, then 211 / 220Mi | 190 / 214Mi |
 | Loki, Alloy | 128 / 384Mi, 96 / 192Mi | logged: both above their requests; Alloy 1.39× under its limit | 160 / 384Mi, 112 / 320Mi (224Mi, then 256Mi, until a 208Mi Alloy peak read from Prometheus over a day, not logged) | 162 / 222Mi, 102 / 138Mi; Alloy 170Mi | 107 / 189Mi, 90 / 214Mi |
 | relay, consumer | 50m / 128Mi | — | 10–15m / 64Mi | 14–21 / 18–24Mi | 19–21 / 36–37Mi |
-| sidecars, kube-state-metrics, config-reloader | none | ~270Mi together, invisible to the scheduler | requests set; Loki's rules sidecar removed (no rules) | 20–79Mi each | 13–72 / 45–86Mi |
+| sidecars, kube-state-metrics, config-reloader, prometheus-operator | none | ~270Mi together, invisible to the scheduler | requests set; Loki's rules sidecar removed (no rules) | 20–79Mi each | 13–72 / 45–86Mi |
 
 The last column is `resources-20261025-224859.log`, the current session. Its `oom` column
 counts the kubelet's `OOMKilled` reason, which drill 04's case d did not get on 25.10 (runbook,
 case d): a 0 there does not rule out an OOM kill, and the restarts column is the one to read.
-Every peak is under its limit, the nearest Traefik (141 of 192Mi) and Prometheus (842 of
-1152Mi), both at 73%. It was not used to resize anything.
+Every peak is under its limit; the nearest are the prometheus-operator (86 of 96Mi, 90%) and
+Prometheus's config-reloader (49 of 64Mi, 77%), then Traefik and Prometheus at 73%. Postgres
+peaked at 235 of 384Mi but ran at a CPU p95 of 497m against its 100m request through the write
+drills — the request follows its idle use, and the HPA does not read it. The log was not used to
+resize anything; the operator's 90% is the first candidate when it is.
 
-**Capacity** (the latest log, `resources-20261025-224859.log`, the 58-minute evidence session
-of 25.10). Every kind node reports the whole Docker VM (7934Mi, 10 CPU) as allocatable — the
+**Capacity** (the latest log, `resources-20261025-224859.log`: a 58-minute window, the
+~53-minute evidence session of 25.10 and the 5 minutes before it, so it also lists pods left
+from the failed attempt before the session). Every kind node reports the whole Docker VM (7934Mi, 10 CPU) as allocatable — the
 log lists all three at 8124516Ki — so the scheduler believes in three times the memory that
 exists; requests do not protect the VM. Memory requests 5870Mi (74% of the VM); sum of limits
 10812Mi (136% — and the kube-apiserver, 1006Mi on average and 1116Mi at peak in that log, has
 none). The container working set peaked at 6391Mi (80%) and was 6164Mi at the end. In the
 session of 28.09 it peaked at 7423Mi — 95% of the VM — while the session re-applied the
 platform and two Grafana pods ran side by side for the rollout (both appear in
-`resources-20260928-043718.log`). About 1.5–1.8 GB of real headroom in steady state, and almost
-none during a platform rollout: that margin, not the scheduler, is what the stand runs on,
-and why a third worker was not added.
+`resources-20260928-043718.log`). That left 1.5–1.8 GB at the session's end, and it did not last.
+An hour later, after the reruns of drill 06 at up to 400 payments/s, the VM had 69 MiB free
+and its 1 GiB of swap full, load average 145 with 70% of the CPU in the kernel
+(`vm-memory-20261025-220007.log`); both workers had gone `NotReady` ("PLEG is not healthy"),
+and minutes later the scheduler, the CNPG operator and API pods were crash-looping — those two
+seen in the session, not logged. What grew is not measured: the resource log's window had
+closed. That margin, not the scheduler, is what the stand runs on: it
+holds a session, not a session and an hour of load after it, and it is why a third worker was
+not added.
 
 ## Lab, not production
 
@@ -204,15 +214,19 @@ What this stand leaves out on purpose, so that nothing in it reads as a producti
 - **`*.localtest.me` also resolves to `::1`.** Under 1200 req/s the load generator sometimes
   dialled IPv6, where nothing was published: 0.66% of requests failed client-side. Traffic
   that still goes through the ingress goes to `127.0.0.1` with a `Host` header.
-- **A load sent through the laptop's port forward measures the port forward.** At 1200 and
-  then 800 req/s from the host, four sessions in a row ended early; in the one whose logs
-  survive, Docker Desktop's port forward shut down 11 s into the load and the VM stopped a
-  minute later. The heavy loads (drills 03 and 06) are now sent by a pod in the cluster to the
-  API's Service — past Traefik as well, which those drills do not test (runbook, Scale).
-- **Load that feels high may not move an HPA.** 400 req/s kept the API at 51–62% of its
-  request (one sample at 70%), at or below the 70% target, so the desired count stayed 2. The
-  drill needed 1200 req/s to show a scale-out; plan the load from the request, not from a
-  round number.
+- **A load sent through the laptop's port forward measures the port forward.** Four attempts
+  at the 25.10 session ended early, two during drill 03's load from the host; in the one whose
+  Docker logs survive, Docker Desktop's port forward shut down 11 s into 800 req/s and the VM
+  stopped a minute later.
+- **A load sent straight to a Service measures its connections.** Moved into the cluster and
+  pointed at the API's Service, vegeta's keep-alive connections were each pinned to one pod by
+  kube-proxy: one pod at 191m while another sat at 19m (`api-cpu-per-pod-20261025-220313.log`),
+  and the HPA's average described neither. Traefik picks a pod per request, so the heavy drills
+  now send from the pod through Traefik's Service, the path every earlier run took (runbook,
+  Scale).
+- **Load that feels high may not move an HPA.** 400 req/s from the host kept the API at 51–62%
+  of its request (one sample at 70%), at or below the 70% target, so the desired count stayed
+  2; 1200 req/s scaled it out. Plan the load from the request, not from a round number.
 - **A broker pod that dies comes back.** Compose kept a killed broker dead (`restart: "no"`, on
   purpose); Strimzi recreated it and under-replicated partitions were back to 0 within 11–19 s
   over five runs — before the pod reported Ready (22–25 s) — with all 2400 payments of each run

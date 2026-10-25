@@ -64,7 +64,8 @@ for app in payments-api outbox-relay payments-consumer; do
   kubectl get pods -n "$namespace" -l "app.kubernetes.io/name=$app" --field-selector=status.phase=Running \
     -o jsonpath='{range .items[*]}{.metadata.name} {.status.startTime}{"\n"}{end}' |
     while read -r pod started; do
-      from=$(( $(date -ju -f %Y-%m-%dT%H:%M:%SZ "$started" +%s) - 60 ))
+      # python3, not date: parsing a given time takes -j -f on BSD and -d on GNU.
+      from=$(( $(python3 -c 'import sys, datetime; print(int(datetime.datetime.strptime(sys.argv[1], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()))' "$started") - 60 ))
       selector="{namespace=\"lab\", app=\"$app\", pod=\"$pod\"} |= \"started\""
       answer=$(kubectl get --raw "$loki/loki/api/v1/query_range?query=$(jq -rn --arg q "$selector" '$q|@uri')&start=${from}000000000&end=${now}000000000&limit=10")
       line=$(jq -r '[.data.result[].values[]] | sort_by(.[0]) | first | .[1] // "NONE FOUND"' <<<"$answer" | cut -c1-150)

@@ -1,0 +1,25 @@
+# Each API pod's CPU at three moments of the 25.10 session's drills 03 and 06, which sent their load
+# from a pod straight to the payments-api Service, read back from Prometheus on 2026-10-25T22:03:13Z:
+# kubectl get --raw '/api/v1/namespaces/monitoring/services/monitoring-kube-prometheus-prometheus:9090/proxy/api/v1/query?query=<q>&time=<t>'
+# q = sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="lab",container="payments-api"}[1m]))
+# The CPU request is 100m. Drill 03 (03-autoscaling-20261025-221137.log) started 20:11:37Z, so the
+# first two are its t≈113 s and t≈163 s (its log: cpu=103% and 61%); the third falls in the 400/s
+# step of drill 06's rerun (06-write-throughput-20261025-231555.log, 21:15:55-21:25:19Z).
+t=2026-10-25T20:13:30Z
+  payments-api-7d78b77d48-ddklj 191m
+  payments-api-7d78b77d48-5bsxd 73m
+  payments-api-7d78b77d48-sv798 37m
+  payments-api-7d78b77d48-468vd 37m
+  payments-api-7d78b77d48-lnd52 19m
+t=2026-10-25T20:14:20Z
+  payments-api-7d78b77d48-5bsxd 177m
+  payments-api-7d78b77d48-sv798 66m
+  payments-api-7d78b77d48-468vd 27m
+  payments-api-7d78b77d48-lnd52 23m
+  payments-api-7d78b77d48-ddklj 23m
+t=2026-10-25T21:24:30Z
+  payments-api-7d78b77d48-7vnlb 237m
+  payments-api-7d78b77d48-c9vwj 94m
+  payments-api-7d78b77d48-crt95 22m
+  payments-api-7d78b77d48-468vd 18m
+  payments-api-7d78b77d48-6kpdp 0m

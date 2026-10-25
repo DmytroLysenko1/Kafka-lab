@@ -11,9 +11,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 binary="$here/../bin/askdocs"
 root="$here/../.."
 
-# The results directory is left out of the check: make has already truncated the log this
-# run writes into, so counting it would mark every run as made from uncommitted changes.
-echo "# askdocs eval ($mode), $(date -u +%Y-%m-%dT%H:%MZ), commit $(git -C "$root" rev-parse --short HEAD)$(git -C "$root" diff --quiet -- . ':!askdocs/results' || echo ' + uncommitted changes')"
+# Against HEAD, so staged changes count too; the run's own log is left out, as make has
+# already truncated it, which would mark every run as made from uncommitted changes.
+echo "# askdocs eval ($mode), $(date -u +%Y-%m-%dT%H:%MZ), commit $(git -C "$root" rev-parse --short HEAD)$(git -C "$root" diff --quiet HEAD -- . ':!askdocs/results/retrieval.log' || echo ' + uncommitted changes')"
 asked=0 found=0
 while IFS=$'\t' read -r question expected; do
   [[ -z "$question" || "$question" == \#* ]] && continue

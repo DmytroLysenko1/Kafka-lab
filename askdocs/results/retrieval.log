@@ -1,4 +1,4 @@
-# askdocs eval (retrieve), 2026-10-25T21:30Z, commit 1f1f8b6
+# askdocs eval (retrieve), 2026-10-25T21:30Z, commit 025e343
 
 $ askdocs -retrieve-only "What happens to the outbox while Kafka is down?"
 time=2026-10-25T23:30:02.321+02:00 level=INFO msg="documentation indexed" root=/Users/dmitrolisenko/GolandProjects/Kafka-lab/askdocs/eval/../.. sections=333 bytes=582406

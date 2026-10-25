@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The whole evidence set in one run: platform applied, images built and deployed, the Docker
-# measurement, every drill, and the resource log that the "Figures:" comments cite. Runs
-# under caffeinate, because a Mac that sleeps mid-drill (it did, on battery, every ~15 min)
-# leaves a log whose tail measures the sleep. Keep the lid open; on battery caffeinate -i
+# measurement, every drill, and the resource log that the resource figures cite. Runs
+# under caffeinate, because a Mac that sleeps mid-drill (it did, on battery, every ~15 min —
+# pmset's log, seen in the session) leaves a log whose tail measures the sleep. Keep the lid open; on battery caffeinate -i
 # holds off idle sleep only.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
@@ -32,7 +32,8 @@ done
 
 # Each drill starts on a settled stand: the API server answering and every Deployment in lab
 # at its desired count. After drill 03's load the control plane took minutes to answer again
-# on 25.10, and the next drill failed on its first helm call to a cluster that was not there.
+# on 25.10 (seen in the session; that attempt's logs were deleted), and the next drill failed
+# on its first helm call to a cluster that was not there.
 settle() {
   until kubectl get --raw /readyz >/dev/null 2>&1; do sleep 5; done
   kubectl wait deployment --all -n lab --for=condition=Available --timeout=10m >/dev/null
@@ -41,11 +42,11 @@ settle() {
 make image-measure
 settle; IMAGE_TAG_NEXT=$next make k8s-drill-01
 settle; make k8s-drill-02
-# 800, not the 1 200 of the 28.09 sessions. On 25.10, sent from the host, this load ended the
-# session three times with Docker Desktop down; in the one whose logs survive (800 req/s,
-# 18:40 UTC) its port forward on 127.0.0.1:8800 shut down 11 s into the load, and the VM
-# stopped a minute later. Drills 03 and 06 now send from a pod in the cluster (lib.sh); 800
-# still drives the API well past the HPA's 70%, as drill 03's own log shows.
+# 800, not the 1 200 of the 28.09 sessions. On 25.10, sent from the host, drill 03's load was
+# running when two attempts at this session ended; in the one whose Docker logs survive (800
+# req/s, 18:40 UTC) Docker Desktop's port forward on 127.0.0.1:8800 shut down 11 s into the
+# load, and the VM stopped a minute later. Drills 03 and 06 now send from a pod in the cluster
+# through Traefik (lib.sh).
 settle; RATE=800 make k8s-drill-03
 settle; make k8s-drill-04
 settle; make k8s-drill-04f

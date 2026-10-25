@@ -19,12 +19,15 @@ rsync -a --exclude .git ./ "$context/"
 dockerfiles="$context/deploy/docker"
 
 # The real Dockerfile's two caching techniques, removed one at a time. Without the split the
-# modules are downloaded by the same RUN that builds, after COPY . . — so any edit downloads
-# them again; without the cache mounts the module and build caches live in no layer at all.
+# modules are fetched by the build's own RUN, after COPY . ., so an edit invalidates the step
+# that holds them — they are then downloaded again unless the module cache mount still has
+# them, which it does in no-split. Without the mounts the module and build caches live only
+# in layers: a layer that survives the edit, or none. Removing a mount leaves an empty
+# continuation line, which the last expression drops.
+readonly unmount='s/--mount=type=cache,target=[^ ]* //g'
 sed -e '/^COPY go.mod go.sum/d' -e '/go mod download$/d' "$dockerfiles/Dockerfile" > "$dockerfiles/Dockerfile.no-split"
-sed -e 's/--mount=type=cache,target=[^ ]* //g' -e '/^    --mount=type=cache/d' -e 's/^RUN \\$/RUN \\/' \
-  "$dockerfiles/Dockerfile" > "$dockerfiles/Dockerfile.no-mounts"
-sed -e 's/--mount=type=cache,target=[^ ]* //g' -e '/^    --mount=type=cache/d' "$dockerfiles/Dockerfile.no-split" > "$dockerfiles/Dockerfile.neither"
+sed -e "$unmount" -e '/^ *\\$/d' "$dockerfiles/Dockerfile" > "$dockerfiles/Dockerfile.no-mounts"
+sed -e "$unmount" -e '/^ *\\$/d' "$dockerfiles/Dockerfile.no-split" > "$dockerfiles/Dockerfile.neither"
 
 # build prints the wall-clock seconds and how many steps BuildKit reused, and keeps the plain
 # progress output, so the log can name the layer that was or was not taken from cache.
@@ -32,8 +35,14 @@ build() {
   local dockerfile=$1 tag=$2 started output
   output="$context/build-$tag.out"
   started=$(python3 -c 'import time; print(time.time())')
-  docker build --progress=plain -f "$dockerfiles/$dockerfile" --build-arg SERVICE=$service \
-    -t "kafka-lab/$service:measure-$tag" "$context" >"$output" 2>&1
+  # Checked by hand: errexit does not reach into the $(build …) that reports a time, and a
+  # failed build would print the time it took to fail.
+  if ! docker build --progress=plain -f "$dockerfiles/$dockerfile" --build-arg SERVICE=$service \
+    -t "kafka-lab/$service:measure-$tag" "$context" >"$output" 2>&1; then
+    echo "build of $dockerfile failed:" >&2
+    tail -20 "$output" >&2
+    exit 1
+  fi
   python3 -c "import time; print(f'{time.time() - $started:.1f}s', end='')"
   printf ', %s steps CACHED' "$(grep -c ' CACHED$' "$output")"
   if grep -q 'go mod download' "$output"; then

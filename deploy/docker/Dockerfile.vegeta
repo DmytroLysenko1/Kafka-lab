@@ -1,9 +1,10 @@
 # The load generator of drills 03 and 06, run as a pod inside the cluster. From the host, their
 # load went through Docker Desktop's port forward on 127.0.0.1:8800, which on 25.10 shut down
-# under it and took the VM with it (deploy/k8s/drills/session.sh) — the drills measured the
-# forward, not the API. The same vegeta as on the host (README's tool
-# versions), on busybox rather than distroless: the pod waits for its targets and pipes the
-# attack into the report, which takes a shell.
+# under drill 03's and took the VM with it (deploy/k8s/drills/lib.sh) — such a drill would
+# measure the forward, not the API. The same vegeta version as on the host (README's tool
+# versions; the host's binary was built by another Go), on busybox rather than distroless: the
+# pod waits for its targets, then runs the attack and the report one after the other, which
+# takes a shell. The version comes from VEGETA_VERSION in the Makefile.
 ARG GO_VERSION=1.26.4
 ARG GO_DIGEST=sha256:3ad57304ad93bbec8548a0437ad9e06a455660655d9af011d58b993f6f615648
 ARG VEGETA_VERSION=v12.13.0

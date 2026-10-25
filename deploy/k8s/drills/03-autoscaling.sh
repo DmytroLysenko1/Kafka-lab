@@ -11,10 +11,12 @@ readonly log="$results_dir/03-autoscaling-$(date +%Y%m%d-%H%M%S).log"
 mkdir -p "$results_dir"
 
 echo "drill 03 started $(stamp), $rate req/s for ${duration}s, watching ${tail_seconds}s after" | tee "$log"
-# From a pod in the cluster to the Service (lib.sh says why): the load reaches the API pods
-# without passing through the host's port forward.
-printf 'GET %s/merchants/m-drill-hpa/total\nX-API-Key: %s\n' "$api_in_cluster" "$(api_key)" |
-  load_start load-03 "$rate" "$duration" http text
+# From a pod in the cluster through Traefik (lib.sh says why), with the Host the Ingress
+# routes by. The trap ends the load with the drill, however the drill ends.
+pod=$(load_name 03)
+trap 'load_stop "$pod"' EXIT
+printf 'GET %s/merchants/m-drill-hpa/total\nHost: %s\nX-API-Key: %s\n' "$api_in_cluster" "$api_host" "$(api_key)" |
+  load_start "$pod" "$rate" "$duration" http text
 
 started=$(date +%s)
 end=$((started + duration + tail_seconds))
@@ -32,4 +34,4 @@ while [ "$(date +%s)" -lt "$end" ]; do
   sleep 10
 done
 
-load_report load-03 | tee -a "$log"
+load_report "$pod" "$duration" | tee -a "$log"

@@ -33,7 +33,7 @@ never deployed), [`.dockerignore`](../../.dockerignore),
 
 Where the size goes, by `docker history`:
 
-- **naive** — the `golang:1.26.4` base is five layers, 156 + 63.7 + 208 + 280 + 277 MB (the
+- **naive** — the `golang:1.26.4` base is five large layers, 156 + 63.7 + 208 + 280 + 277 MB (and two of a few kB) (the
   Debian root, three `apt-get install` layers — compilers, VCS tools — and the Go toolchain);
   `COPY . .` adds 19.2 MB of sources and the `go build` layer 487 MB, the build and module
   caches written into the image along with the binary.
@@ -45,7 +45,8 @@ The layers listed add up to less than `docker image ls` shows for either image (
 and 26 MB); the log has both, and the headline quotes `docker image ls`, which is what a
 reader running `make image-measure` sees.
 
-All six images built by `make images`, at the session's tag:
+All six images built by `make images`, at the session's tag (`measure.sh` lists them but does
+not build them: run `make images` first, as the session does):
 
 | image | size |
 |---|---|

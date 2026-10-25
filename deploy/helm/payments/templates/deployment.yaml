@@ -78,6 +78,14 @@ spec:
                 name: payments-config
           env:
             {{- include "payments.databaseURL" $ | nindent 12 }}
+            # The addresses the process listens on, from the ports the Service and the probes
+            # use, so the three cannot disagree.
+            - name: METRICS_ADDR
+              value: "0.0.0.0:{{ $component.metricsPort }}"
+            {{- with $component.http }}
+            - name: PAYMENTS_API_ADDR
+              value: "0.0.0.0:{{ .port }}"
+            {{- end }}
             {{- with $component.http }}{{ if .apiKey }}
             - name: PAYMENTS_API_KEY
               valueFrom:

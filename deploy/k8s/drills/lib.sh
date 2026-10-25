@@ -29,23 +29,32 @@ payment_targets() {
 
 stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
-# The heavy loads (drills 03 and 06) are sent from a pod in the cluster straight to the API's
-# Service, not from the host through 127.0.0.1:8800: Docker Desktop's port forward shut down
-# 11 s into 800 req/s on 25.10, taking the VM with it (session.sh), and a load that measures
-# the forward measures nothing about the API. These loads skip the Ingress; the light
-# ones (drills 01, 02, 05 and 07, 20 req/s each) still go through it. Port 8081 is payments-api's http.port in values.yaml.
-readonly api_in_cluster=http://payments-api.$namespace.svc.cluster.local:8081
-readonly load_image=kafka-lab/vegeta:12.13.0
+# The heavy loads (drills 03 and 06) are sent from a pod in the cluster, not from the host
+# through 127.0.0.1:8800: on 25.10 Docker Desktop's port forward shut down 11 s into 800 req/s
+# from the host and took the VM with it (Docker's own logs, not committed; runbook.md, Scale).
+# The pod sends to Traefik's Service with the Ingress's Host, so the load takes the same
+# Ingress path as before and Traefik spreads it per request. Sent to the API's Service
+# instead, vegeta's keep-alive connections were each pinned by kube-proxy to one pod when
+# opened: one API pod ran at 191–237% of its request while others idled
+# (results/api-cpu-per-pod-20261025-220313.log), and the HPA's average measured that skew.
+# The light loads (drills 01, 02, 05 and 07, 20 req/s each) still go through the forward.
+readonly api_in_cluster=http://traefik.traefik.svc.cluster.local
+readonly load_image=kafka-lab/vegeta:12.13.0   # VEGETA_VERSION in the Makefile
+
+# load_name is unique to one run of one drill, so two runs cannot delete each other's pod.
+load_name() { echo "load-$1-$$"; }
 
 # load_start starts one attack in a pod of its own and returns once the attack has begun:
 # the pod waits for the targets (stdin, vegeta's format given as $4), then attacks at $2 req/s
 # for $3 s and prints vegeta's report of type $5. The key reaches the targets from the host;
-# the pod spec holds none. CPU is requested so the scheduler counts the load generator, whose
-# own CPU the HPA does not see. The results go to an emptyDir on disk, not into memory; the
-# memory limit is a ceiling for vegeta itself, not a measured figure.
+# the pod spec holds none. The pod ends by itself: it waits at most 5 min for its targets and
+# lives at most the attack plus 10 min (activeDeadlineSeconds), so a drill interrupted before
+# its trap ran cannot leave it running. Resources from resources-20261025-224859.log: CPU p95
+# 289m at 800 req/s (load-03), memory at most 109Mi (load-06); the results go to an emptyDir
+# on disk, not into memory.
 load_start() {
   local name=$1 load_rate=$2 load_seconds=$3 format=$4 report=$5
-  kubectl delete pod "$name" -n "$namespace" --ignore-not-found --wait >/dev/null
+  require_image "$load_image" "make k8s-load-image"
   kubectl apply -n "$namespace" -f - >/dev/null <<EOF
 apiVersion: v1
 kind: Pod
@@ -55,8 +64,9 @@ metadata:
 spec:
   restartPolicy: Never
   # sh as PID 1 passes SIGTERM on to no one, so a deleted pod would keep attacking for the
-  # default 30 s grace period: an interrupted drill would leave its load running.
+  # default 30 s grace period.
   terminationGracePeriodSeconds: 1
+  activeDeadlineSeconds: $((load_seconds + 600))
   automountServiceAccountToken: false
   securityContext:
     runAsNonRoot: true
@@ -69,7 +79,7 @@ spec:
       imagePullPolicy: Never
       command: [sh, -c]
       args:
-        - until [ -f /work/ready ]; do sleep 0.2; done;
+        - waited=0; until [ -f /work/ready ]; do sleep 1; waited=\$((waited + 1)); [ \$waited -lt 300 ] || exit 1; done;
           vegeta attack -format=$format -targets=/work/targets -rate=$load_rate -duration=${load_seconds}s > /work/attack.bin &&
           vegeta report -type=$report < /work/attack.bin
       securityContext:
@@ -77,8 +87,8 @@ spec:
         readOnlyRootFilesystem: true
         capabilities: { drop: [ALL] }
       resources:
-        requests: { cpu: 500m, memory: 128Mi }
-        limits: { memory: 512Mi }
+        requests: { cpu: 300m, memory: 128Mi }
+        limits: { memory: 256Mi }
       volumeMounts: [{ name: work, mountPath: /work }]
   volumes: [{ name: work, emptyDir: {} }]
 EOF
@@ -86,17 +96,44 @@ EOF
   kubectl exec -i "$name" -n "$namespace" -- sh -c 'cat > /work/targets && touch /work/ready'
 }
 
-# load_report waits for the attack to end and prints its report. A status the API server did
-# not answer is asked again, so a slow control plane under load cannot end the drill.
+# load_report waits for the attack to end and prints its report; a failed attack prints what
+# vegeta said and fails. A status the API server did not answer is asked again, so a slow
+# control plane under load cannot end the drill — but a pod that is gone, or an attack that
+# outlives its deadline, does.
 load_report() {
-  local name=$1 phase=""
+  local name=$1 load_seconds=$2 phase="" started
+  started=$(date +%s)
   until [ "$phase" = Succeeded ] || [ "$phase" = Failed ]; do
-    sleep 5
-    phase=$(kubectl get pod "$name" -n "$namespace" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    sleep 2
+    if ! phase=$(kubectl get pod "$name" -n "$namespace" -o jsonpath='{.status.phase}' 2>&1); then
+      case $phase in *NotFound*) echo "load pod $name is gone" >&2; return 1 ;; esac
+      phase=""
+    fi
+    if [ $(( $(date +%s) - started )) -gt $((load_seconds + 600)) ]; then
+      echo "load pod $name did not finish" >&2
+      return 1
+    fi
   done
   kubectl logs "$name" -n "$namespace"
-  kubectl delete pod "$name" -n "$namespace" --wait=false >/dev/null
+  # Waited for: the next step of a drill starts a pod of the same name.
+  kubectl delete pod "$name" -n "$namespace" --wait >/dev/null
   [ "$phase" = Succeeded ]
+}
+
+# load_stop is the drills' exit trap: the load ends with the drill, however the drill ends.
+load_stop() {
+  kubectl delete pod "$1" -n "$namespace" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+}
+
+# A local image loaded into kind, or the command that loads it: without it the pod waits two
+# minutes in ErrImageNeverPull and the drill fails with only "timed out".
+require_image() {
+  local image=$1 fix=$2
+  if ! docker exec kafka-lab-worker crictl images -o json |
+    jq -e --arg ref "docker.io/$image" '.images[].repoTags[] | select(. == $ref)' >/dev/null; then
+    echo "$image is not loaded into kind: $fix" >&2
+    exit 1
+  fi
 }
 
 deployed_tag() {

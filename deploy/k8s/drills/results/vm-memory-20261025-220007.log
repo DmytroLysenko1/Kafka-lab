@@ -1,0 +1,22 @@
+# The Docker VM after the session and the two drill 06 reruns, when both workers went NotReady
+# (kubelet: "PLEG is not healthy"). Taken with docker exec kafka-lab-worker top -bn1 at 22:00:07Z
+# (every kind node shares the VM's kernel, so this is the whole VM), from the session's output:
+top - 22:00:07 up  2:13,  0 users,  load average: 144.72, 145.81, 120.51
+Tasks:  97 total,   1 running,  96 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 10.2 us, 70.1 sy,  0.0 ni,  1.0 id, 11.7 wa,  0.0 hi,  7.1 si,  0.0 st 
+MiB Mem :   7934.1 total,     68.9 free,   6779.5 used,   1420.1 buff/cache     
+MiB Swap:   1024.0 total,      0.5 free,   1023.5 used.   1154.6 avail Mem 
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+   3176 472       20   0 1741688 204252  10192 D  33.3   2.5  14:19.43 grafana
+    122 root      20   0 3348656  27904   6296 S  16.7   0.3  15:14.20 contain+
+   3355 1000      20   0 2528428 718500   8180 S  16.7   8.8  27:19.17 prometh+
+   4882 nobody    20   0 1384808  26676   3152 S  16.7   0.3   3:28.77 kube-st+
+  51527 nobody    20   0 1338020  36512  12684 S  16.7   0.4   2:19.35 operator
+    205 root      20   0 3129216 104552  11652 D   8.3   1.3  20:29.26 kubelet
+  52654 26        20   0  224916  11968   8680 D   8.3   0.1   0:02.01 postgres
+      1 root      20   0   32256   4160   2092 S   0.0   0.1   0:12.08 systemd
+
+# and docker exec kafka-lab-worker free -m at 22:03:39Z, the nodes Ready again but pods crash-looping:
+               total        used        free      shared  buff/cache   available
+Mem:            7934        6497          84         146        1686        1436
+Swap:           1023         665         358
