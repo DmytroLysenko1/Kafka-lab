@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Drill 07 — the logging and metrics wiring, shown working rather than configured: every
 # payments target scraped (up{job="payments"}), the service's own counters moving by what a
-# known load sent, and each component's log lines arriving in Loki under the labels the
+# known load sent, and each pod's log lines arriving in Loki under the labels the
 # runbook queries by. Prometheus and Loki are asked through the API server's service proxy,
 # so the drill needs no port-forward and reads what an operator's Grafana would.
 set -euo pipefail
@@ -52,17 +52,28 @@ echo "  outbox_records_published_total:                $published_before -> $(co
 echo "  payment_events_handled_total:                  $handled_before -> $(counter "$handled")"
 echo
 
-# The last ten minutes of each component's lines, by the labels Alloy puts on them
-# (platform/values/alloy.yaml) — the selector the runbook gives, {namespace="lab", app="…"}.
-echo "log lines in Loki over the last 10 minutes, by component (the runbook's selector):"
+# Every running pod's start line, looked up in Loki by the labels Alloy puts on it
+# (platform/values/alloy.yaml), from the pod's start on. A recent window would not do: the
+# API and the consumer log at start and on errors, not per request, and on 25.10 a 10-minute
+# window held no consumer line at all although its lines were in Loki. A start line found
+# for each pod shows every pod's output reaching Loki; the relay's per-batch line, that it
+# keeps arriving.
+echo "each running pod's start line in Loki, by {namespace=\"lab\", app, pod}:"
 now=$(date +%s)
 for app in payments-api outbox-relay payments-consumer; do
-  selector="{namespace=\"lab\", app=\"$app\"}"
-  answer=$(kubectl get --raw "$loki/loki/api/v1/query_range?query=$(jq -rn --arg q "$selector" '$q|@uri')&start=$((now - 600))000000000&end=${now}000000000&limit=1000&direction=backward")
-  lines=$(jq '[.data.result[].values[]] | length' <<<"$answer")
-  latest=$(jq -r '[.data.result[].values[]] | sort_by(.[0]) | last | .[1] // "none"' <<<"$answer" | cut -c1-180)
-  echo "  $app: $lines lines (limit 1000); latest: $latest"
+  kubectl get pods -n "$namespace" -l "app.kubernetes.io/name=$app" --field-selector=status.phase=Running \
+    -o jsonpath='{range .items[*]}{.metadata.name} {.status.startTime}{"\n"}{end}' |
+    while read -r pod started; do
+      from=$(( $(date -ju -f %Y-%m-%dT%H:%M:%SZ "$started" +%s) - 60 ))
+      selector="{namespace=\"lab\", app=\"$app\", pod=\"$pod\"} |= \"started\""
+      answer=$(kubectl get --raw "$loki/loki/api/v1/query_range?query=$(jq -rn --arg q "$selector" '$q|@uri')&start=${from}000000000&end=${now}000000000&limit=10")
+      line=$(jq -r '[.data.result[].values[]] | sort_by(.[0]) | first | .[1] // "NONE FOUND"' <<<"$answer" | cut -c1-150)
+      echo "  $pod (started $started): $line"
+    done
 done
+selector='{namespace="lab", app="outbox-relay"} |= "outbox published"'
+answer=$(kubectl get --raw "$loki/loki/api/v1/query_range?query=$(jq -rn --arg q "$selector" '$q|@uri')&start=$((now - 120))000000000&end=${now}000000000&limit=1000")
+echo "  outbox-relay \"outbox published\" lines in the last 2 minutes, the load's included: $(jq '[.data.result[].values[]] | length' <<<"$answer")"
 echo
 echo "drill 07 done $(stamp)"
 rm -f "$results_dir/.targets" "$results_dir/.attack.bin"

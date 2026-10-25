@@ -42,7 +42,7 @@ seconds_until() {
 }
 
 echo "drill 06 started $(stamp): rates $rates payments/s, ${step}s each, $merchants merchants per step"
-printf '%6s %8s %8s %9s %9s %9s %12s %9s %9s\n' rate sent accepted p50_ms p99_ms max_ms outbox_left drain_s counted_s
+printf '%6s %8s %8s %8s %9s %9s %9s %12s %9s %9s\n' rate sent accepted stored p50_ms p99_ms max_ms outbox_left drain_s counted_s
 # The HPA every 10 s while a step runs: it takes 30–40 s to raise its desired count even far
 # above target (drill 03), so one reading after a 30 s step could not show it moving. The last
 # step is held longer for the same reason.
@@ -68,8 +68,12 @@ for rate in $rates; do
   seconds=$step
   [ "$rate" = "$last_rate" ] && seconds=$last_step
   # Sent from a pod in the cluster to the Service (lib.sh says why). The step's end is its start
-  # plus its length, and the backlog is read then, not when the pod is seen done: that is
-  # polled, and would shrink outbox_left, drain_s and counted_s by up to the polling interval.
+  # plus its length, and everything timed from it is read before anything else is waited for:
+  # the report comes from a polled pod, and the HPA watcher dies only once its `sleep 10`
+  # returns — waiting on either first put a floor of 4–8 s under drain_s and counted_s on
+  # 25.10. counted_s is the time until the run's merchants hold as many minor units as the
+  # database holds payments for them (each is 1 minor unit), so it needs no number from the
+  # report; the report's accepted count is then printed next to the database's.
   targets $((rate * seconds)) "$run_id" | load_start load-06 "$rate" "$seconds" json json
   ended=$(( $(date +%s) + seconds ))
   # Started with the attack, not before the targets are made and copied, so t=0 is its start.
@@ -77,17 +81,19 @@ for rate in $rates; do
   watcher=$!
   sleep "$seconds"
   left=$(sql "SELECT count(*) FROM outbox WHERE published_at IS NULL")
-  report=$(load_report load-06)
+  drained=$(seconds_until "SELECT count(*) FROM outbox WHERE published_at IS NULL" 0 "$ended")
+  run="merchant_id LIKE 'm-$run_id-%'"
+  counted=$(seconds_until "SELECT (SELECT count(*) FROM payments WHERE $run) = (SELECT coalesce(sum(authorized_minor), 0) FROM merchant_currency_totals WHERE $run)" t "$ended")
   kill "$watcher" 2>/dev/null || true
   wait "$watcher" 2>/dev/null || true
+  report=$(load_report load-06)
+  stored=$(sql "SELECT count(*) FROM payments WHERE $run")
   sent=$(jq '.requests' <<<"$report")
   accepted=$(jq '(.status_codes["201"] // 0) + (.status_codes["200"] // 0)' <<<"$report")
   p50=$(jq '.latencies["50th"] / 1e6 | floor' <<<"$report")
   p99=$(jq '.latencies["99th"] / 1e6 | floor' <<<"$report")
   max=$(jq '.latencies.max / 1e6 | floor' <<<"$report")
-  drained=$(seconds_until "SELECT count(*) FROM outbox WHERE published_at IS NULL" 0 "$ended")
-  counted=$(seconds_until "SELECT coalesce(sum(authorized_minor), 0) FROM merchant_currency_totals WHERE merchant_id LIKE 'm-$run_id-%'" "$accepted" "$ended")
-  printf '%6s %8s %8s %9s %9s %9s %12s %9s %9s\n' "$rate" "$sent" "$accepted" "$p50" "$p99" "$max" "$left" "$drained" "$counted"
+  printf '%6s %8s %8s %8s %9s %9s %9s %12s %9s %9s\n' "$rate" "$sent" "$accepted" "$stored" "$p50" "$p99" "$max" "$left" "$drained" "$counted"
   jq -c '{status_codes, errors: (.errors // [] | .[:3])}' <<<"$report"
   echo "  step held ${seconds}s; the API's autoscaler during it:"
   cat "$results_dir/.hpa"

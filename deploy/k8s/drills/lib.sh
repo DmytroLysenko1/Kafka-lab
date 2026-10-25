@@ -33,7 +33,7 @@ stamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # Service, not from the host through 127.0.0.1:8800: Docker Desktop's port forward shut down
 # 11 s into 800 req/s on 25.10, taking the VM with it (session.sh), and a load that measures
 # the forward measures nothing about the API. These loads skip the Ingress; the light
-# ones (drills 02 and 07) still go through it. Port 8081 is payments-api's http.port in values.yaml.
+# ones (drills 01, 02, 05 and 07, 20 req/s each) still go through it. Port 8081 is payments-api's http.port in values.yaml.
 readonly api_in_cluster=http://payments-api.$namespace.svc.cluster.local:8081
 readonly load_image=kafka-lab/vegeta:12.13.0
 
@@ -54,6 +54,9 @@ metadata:
   labels: { app: load-generator }
 spec:
   restartPolicy: Never
+  # sh as PID 1 passes SIGTERM on to no one, so a deleted pod would keep attacking for the
+  # default 30 s grace period: an interrupted drill would leave its load running.
+  terminationGracePeriodSeconds: 1
   automountServiceAccountToken: false
   securityContext:
     runAsNonRoot: true
