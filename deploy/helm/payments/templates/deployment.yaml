@@ -79,13 +79,17 @@ spec:
           env:
             {{- include "payments.databaseURL" $ | nindent 12 }}
             # The addresses the process listens on, from the ports the Service and the probes
-            # use, so the three cannot disagree.
+            # use, so the three cannot disagree — unless the component's env sets one itself,
+            # which wins (drill 04's case b sets an address no process can listen on).
+            {{- $env := $component.env | default dict }}
+            {{- if not (hasKey $env "METRICS_ADDR") }}
             - name: METRICS_ADDR
               value: "0.0.0.0:{{ $component.metricsPort }}"
-            {{- with $component.http }}
+            {{- end }}
+            {{- with $component.http }}{{ if not (hasKey $env "PAYMENTS_API_ADDR") }}
             - name: PAYMENTS_API_ADDR
               value: "0.0.0.0:{{ .port }}"
-            {{- end }}
+            {{- end }}{{ end }}
             {{- with $component.http }}{{ if .apiKey }}
             - name: PAYMENTS_API_KEY
               valueFrom:
