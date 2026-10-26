@@ -19,6 +19,21 @@ readonly next="$IMAGE_TAG-next"
 readonly started=$(date +%s)
 echo "evidence session $(date -u +%FT%TZ), images $IMAGE_TAG"
 
+# The Docker measurement first, with the kind nodes stopped: next to a running stand, three
+# rebuilds of the same Dockerfile took 302, 490 and 1159 s on 26.10, and the builds filled the
+# VM's swap and set off the kernel's OOM killer before drill 01 began (seen in the session;
+# those logs were deleted). It needs only Docker. Stopped containers keep their state, so the
+# nodes come back as they were.
+nodes=$(kind get nodes --name kafka-lab 2>/dev/null || true)
+[ -z "$nodes" ] || docker stop $nodes >/dev/null
+make images          # the six images measure.sh lists; k8s-images below reuses them
+make image-measure
+if [ -n "$nodes" ]; then
+  docker start $nodes >/dev/null
+  until kubectl get --raw /readyz >/dev/null 2>&1; do sleep 5; done
+  kubectl wait node --all --for=condition=Ready --timeout=10m >/dev/null
+fi
+
 make k8s-up
 make k8s-images
 make k8s-load-image
@@ -39,7 +54,6 @@ settle() {
   kubectl wait deployment --all -n lab --for=condition=Available --timeout=10m >/dev/null
 }
 
-make image-measure
 settle; IMAGE_TAG_NEXT=$next make k8s-drill-01
 settle; make k8s-drill-02
 # 800, not the 1 200 of the 28.09 sessions. On 25.10, sent from the host, drill 03's load was
