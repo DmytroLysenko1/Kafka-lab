@@ -22,13 +22,41 @@ promql() {
     jq -r '.data.result[] | "  \(.metric.service // .metric.container // "-") \(.metric.pod // "") \(.value[1])"'
 }
 
-# counter sums one counter over the service's pods, so a value is comparable across scrapes.
-counter() {
-  kubectl get --raw "$prometheus/api/v1/query?query=$(jq -rn --arg q "sum($1)" '$q|@uri')" |
-    jq -r '.data.result[0].value[1] // "none"'
+# One counter's value per pod, as {"pod": value}. A sum over pods is not comparable across
+# two readings when the pods change between them: on 26.10 the HPA scaled the API in from five
+# to two pods inside the drill's 30 s wait, and the sum fell from 57768 to 20104.
+per_pod() {
+  kubectl get --raw "$prometheus/api/v1/query?query=$(jq -rn --arg q "sum by (pod) ($1)" '$q|@uri')" |
+    jq -c '[.data.result[] | {(.metric.pod): (.value[1] | tonumber)}] | add // {}'
+}
+
+# The increase over the pods present in both readings, and the pods that came or went.
+increase() {
+  jq -rn --argjson before "$1" --argjson after "$2" '
+    [$before | keys[] | select($after[.] != null)] as $both
+    | ([$both[] | $after[.] - $before[.]] | add // 0) as $delta
+    | ([$before | keys[] | select($after[.] == null)] | join(",")) as $gone
+    | ([$after | keys[] | select($before[.] == null)] | join(",")) as $new
+    | "\($delta) over \($both | length) pods" + (if $gone != "" then ", gone: \($gone)" else "" end) + (if $new != "" then ", new: \($new)" else "" end)'
+}
+
+# The API back at its minimum first: a scale-in during the measurement would take pods, and
+# what they counted, out of the second reading. After drill 06 that takes the HPA's 300 s
+# stabilization window and more.
+wait_for_min_replicas() {
+  local waited=0 current minimum
+  minimum=$(kubectl get hpa payments-api -n "$namespace" -o jsonpath='{.spec.minReplicas}')
+  until current=$(kubectl get hpa payments-api -n "$namespace" -o jsonpath='{.status.currentReplicas}' 2>/dev/null) &&
+    [ "$current" = "$minimum" ]; do
+    [ "$waited" -lt 900 ] || { echo "the API did not come back to $minimum pods in 15 min"; exit 1; }
+    sleep 10
+    waited=$((waited + 10))
+  done
+  echo "the API at its minimum of $minimum pods (waited ${waited}s)"
 }
 
 echo "drill 07 started $(stamp), images $(deployed_tag)"
+wait_for_min_replicas
 echo
 echo "every payments target, as Prometheus scrapes it (up{job=\"payments\"}, 1 = scraped):"
 promql 'up{job="payments"}'
@@ -39,17 +67,17 @@ echo
 readonly api_requests='http_requests_total{job="payments",service="payments-api",route="POST /payments"}'
 readonly published='outbox_records_published_total{job="payments"}'
 readonly handled='payment_events_handled_total{job="payments"}'
-api_before=$(counter "$api_requests") published_before=$(counter "$published") handled_before=$(counter "$handled")
+api_before=$(per_pod "$api_requests") published_before=$(per_pod "$published") handled_before=$(per_pod "$handled")
 
 payment_targets $((rate * duration)) "$run" > "$results_dir/.targets"
 vegeta attack -format=json -targets="$results_dir/.targets" -rate="$rate" -duration="${duration}s" > "$results_dir/.attack.bin"
 accepted=$(vegeta report -type=json < "$results_dir/.attack.bin" | jq '(.status_codes["201"] // 0) + (.status_codes["200"] // 0)')
 echo "sent $((rate * duration)) payments at $rate/s, $accepted accepted; waiting 30 s for the pipeline and the scrapes"
 sleep 30
-echo "the service's own counters, summed over its pods, before and after:"
-echo "  http_requests_total{route=\"POST /payments\"}: $api_before -> $(counter "$api_requests")"
-echo "  outbox_records_published_total:                $published_before -> $(counter "$published")"
-echo "  payment_events_handled_total:                  $handled_before -> $(counter "$handled")"
+echo "the service's own counters, their increase over the pods scraped both before and after:"
+echo "  http_requests_total{route=\"POST /payments\"}: $(increase "$api_before" "$(per_pod "$api_requests")")"
+echo "  outbox_records_published_total:                $(increase "$published_before" "$(per_pod "$published")")"
+echo "  payment_events_handled_total:                  $(increase "$handled_before" "$(per_pod "$handled")")"
 echo
 
 # Every running pod's start line, looked up in Loki by the labels Alloy puts on it

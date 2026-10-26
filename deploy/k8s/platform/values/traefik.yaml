@@ -30,9 +30,11 @@ accessLog:
 # No CPU limit, so the ingress is never what throttles a load drill. Figures, drill 03's
 # 1200 req/s included: resources-20260927-214046.log — 41Mi typical, 63Mi peak; then
 # resources-20260928-043718.log, drills 01–06 including drill 06's 400 writes/s — 54Mi typical,
-# 117Mi peak, CPU 424m p95. 128Mi was 1.09× that peak; 192Mi is 1.64×. The CPU request is the idle figure
-# on purpose: a request sized for the drills' peak would reserve almost half a core for the
-# ~15 minutes a session loads it.
+# 117Mi peak, CPU 424m p95. 128Mi was 1.09× that peak; 192Mi was 1.64×. Since drills 03 and 06
+# send their heavy load through Traefik too (deploy/k8s/drills/lib.sh), resources-20261026-022549.log (the 26.10 session that found this):
+# 74Mi typical, 189Mi peak — 98% of 192Mi — CPU 400m p95, 842m max; 80Mi / 384Mi is the
+# typical use and 2× that peak. The CPU request is the idle figure on purpose: a request sized
+# for the drills' peak would reserve almost half a core for the ~15 minutes a session loads it.
 resources:
-  requests: { cpu: 50m, memory: 64Mi }
-  limits: { memory: 192Mi }
+  requests: { cpu: 50m, memory: 80Mi }
+  limits: { memory: 384Mi }

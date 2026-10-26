@@ -44,6 +44,7 @@ build() {
     exit 1
   fi
   python3 -c "import time; print(f'{time.time() - $started:.1f}s', end='')"
+  printf ' (go build step %s, export %s)' "$(step_time "$output" 'RUN .*go build')" "$(step_time "$output" 'exporting to image')"
   printf ', %s steps CACHED' "$(grep -c ' CACHED$' "$output")"
   if grep -q 'go mod download' "$output"; then
     grep -E '^#[0-9]+ \[build [0-9]+/[0-9]+\] RUN .*go mod download' -A1 "$output" | grep -q CACHED \
@@ -52,18 +53,36 @@ build() {
   echo
 }
 
+# How long one step of the plain progress output took, from its "#N DONE 1.2s" line.
+step_time() {
+  local id
+  id=$(grep -E "^#[0-9]+ .*$2" "$1" | head -1 | cut -d' ' -f1)
+  [ -n "$id" ] || { echo "-"; return; }
+  grep -E "^$id (DONE|CACHED)" "$1" | tail -1 | awk '{print ($2 == "CACHED") ? "cached" : $3}'
+}
+
 edit() {
   echo "// measure.sh: edit $1" >> "$context/internal/interfaces/http/server.go"
 }
 
 echo "measured $(date -u +%FT%TZ) on $(uname -m), docker $(docker version --format '{{.Server.Version}}'), $(go version | awk '{print $3}') on the host"
 echo
-echo "rebuild after editing one .go file — each Dockerfile warmed up first, the warm-up not reported:"
+# Three rebuilds per Dockerfile, each after its own edit: one run per variant gave 13.7 s for
+# the naive file on 26.10 and 136.5 s on 25.10, on the same machine under a different load, so
+# a single figure does not compare. The median is the one quoted.
+readonly rounds=3
+echo "rebuild after editing one .go file, $rounds times each — every Dockerfile warmed up first, the warm-up not reported:"
 for variant in naive:Dockerfile.naive real:Dockerfile no-split:Dockerfile.no-split no-mounts:Dockerfile.no-mounts neither:Dockerfile.neither; do
   tag=${variant%%:*} file=${variant#*:}
   build "$file" "$tag" >/dev/null
-  edit "$tag"
-  printf '  %-10s %s\n' "$tag" "$(build "$file" "$tag")"
+  times=""
+  for round in $(seq 1 "$rounds"); do
+    edit "$tag-$round"
+    line=$(build "$file" "$tag")
+    printf '  %-10s round %s: %s\n' "$tag" "$round" "$line"
+    times="$times ${line%%s *}"
+  done
+  printf '  %-10s median %ss\n' "$tag" "$(tr ' ' '\n' <<<"$times" | sed '/^$/d' | sort -n | sed -n "$(( (rounds + 1) / 2 ))p")"
 done
 echo "  (real = go.mod split + cache mounts; no-split and no-mounts take one away; neither, both)"
 echo
