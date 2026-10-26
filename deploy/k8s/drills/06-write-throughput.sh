@@ -148,6 +148,7 @@ for rate in $rates; do
   jq -c '{status_codes, errors: (.errors // [] | .[:3])}' <<<"$report"
 done
 kill "$watcher" 2>/dev/null || true
+wait "$watcher" 2>/dev/null || true   # reaped here, so the shell prints no "Terminated" into the log
 watcher=""
 echo
 echo "the API's autoscaler through the drill (t on the drill's clock, as step_t above):"

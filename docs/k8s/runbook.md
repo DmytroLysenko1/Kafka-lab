@@ -5,14 +5,27 @@ were recorded by drill scripts (`make k8s-drill-NN`, sources in `deploy/k8s/dril
 raw output committed under `deploy/k8s/drills/results/`; the few that come from watching the
 session instead are marked as such where they appear. Stand: kind with 3 nodes, Docker
 Desktop with 8 GB (7934Mi to the VM, 10 CPU). The current evidence set was produced in one run
-by `make k8s-evidence` on 25.10.2026 (19:55–20:49Z, images `7f89d22`, the Mac kept awake by
-caffeinate). Four attempts that day ended early — two during drill 03's load from the host, one
-in the drill right after it, one at its start (see Scale); their partial logs were deleted. Two
-drills were rerun straight after the session on the same stand and images, each fixed for a
-flaw its session log showed: drill 07 (its Loki check) and drill 06 (its timing), both said
-where they appear; the session's own logs of those two were not kept. Drills 03 and 06 of this
-set sent their load straight to the API's Service, which skewed what they say about the API's
-CPU and its HPA (Scale); they now send through Traefik, and that run is still to be made.
+by `make k8s-evidence` on 26.10.2026 (01:48–02:45Z, images `05edc89`, the Mac kept awake by
+caffeinate), on a cluster recreated from nothing a few hours before: the one before it, 28 days
+old, had run the VM out of memory (Capacity, decisions.md). The session measures the
+Dockerfiles first, with the kind nodes stopped, then brings the stand back and runs every drill.
+
+It took ten attempts over two days. The ones that failed, and what each changed:
+- 25.10, four attempts: drill 03 sent its load from the host, and Docker Desktop's port forward
+  — and with it the VM — went down under it (Scale). The heavy drills moved into the cluster.
+- 25.10, the fifth ran through, but its drills 03 and 06 sent their load straight to the API's
+  Service, which pinned each connection to one pod and skewed their CPU and HPA figures
+  (Scale); they now send through Traefik. Its logs are kept as that lesson's evidence.
+- 26.10, the sixth stopped at drill 04, whose broken address clashed with a chart change
+  (fixed); the seventh at drill 03, its vegeta OOM-killed at a limit set too low (raised) while
+  the month-old cluster ran the VM out of memory (recreated).
+- 26.10, the eighth ran through on the new cluster, and its logs were set aside: drill 07 summed
+  its counters across a scale-in (fixed), Traefik peaked at 98% of its memory limit (resized),
+  and one rebuild per Dockerfile next to the stand was too noisy to compare (now three, with
+  the nodes stopped). Its drill 06 is the one that found a ceiling (Scale).
+- 26.10, the ninth ran the VM out of memory and swap while measuring the Dockerfiles next to the
+  stand, and its drill 01 timed out. The partial logs of the sixth to ninth were deleted.
+
 Logs of earlier sessions are kept where a lesson below comes from them, and each says which
 script version made it.
 
@@ -29,7 +42,7 @@ evidence and the reasons behind them.
 | Something is wrong | `kubectl get pods`, `describe pod` → Events, `logs --previous`, `get events --sort-by=.lastTimestamp`, the EndpointSlice | match the symptom to the table of seven broken releases | [Troubleshooting](#troubleshooting--seven-broken-releases), [Where to look first](#where-to-look-first) |
 | Is it logging and being scraped? | `make k8s-drill-07` | every pod `up` 1, the counters move by what was sent, every pod's start line in Loki | [Logs and metrics](#logs-and-metrics-shown-working) |
 | A distroless pod to look inside | `kubectl debug -it -n lab <pod> --image=busybox:1.37 --target=<container> -- sh` | `kubectl exec … sh` cannot work: there is no shell | [Troubleshooting](#troubleshooting--seven-broken-releases), case g |
-| A broker pod lost | nothing at first: Strimzi brings the pod back | under-replicated partitions back to 0 within 11–19 s and the pod Ready in 22–25 s (drill 05, five runs) | [Kafka broker pod lost](#kafka-broker-pod-lost) |
+| A broker pod lost | nothing at first: Strimzi brings the pod back | under-replicated partitions back to 0 within 11–19 s and the pod Ready in 22–25 s (drill 05, six runs) | [Kafka broker pod lost](#kafka-broker-pod-lost) |
 | Dead letters to replay | `make k8s-replay CLASS=exhausted` (or another class) | the merchant totals once the replayed letters are consumed | [Replaying dead letters](#replaying-dead-letters) |
 
 ## Deploy
@@ -78,7 +91,7 @@ The tag is read from the release, not computed: `make`'s `IMAGE_TAG` hashes the 
 and after any change — a new drill log is enough — it names a tag that was never built. Drill
 04 and `make k8s-replay` read the deployed tag the same way.
 
-**Drill 01** (`01-rolling-update-20261025-220905.log`): 20 payments/s for 90 s through the
+**Drill 01** (`01-rolling-update-20261026-040102.log`): 20 payments/s for 90 s through the
 ingress, upgrade from `<tag>` to `<tag>-next` fifteen seconds in. `-next` is the same build
 under another name, so the drill measures the rollout mechanics — every pod replaced under
 traffic — not a change of behaviour between versions.
@@ -86,34 +99,33 @@ traffic — not a change of behaviour between versions.
 | | |
 |---|---|
 | requests / non-2xx | **1800 / 0** — every payment answered 201 |
-| `helm upgrade --wait` returned after | **16 s**, migration hook included (17 s and 16 s in the sessions of 28.09 and 27.09) |
-| p99 latency over the whole 90 s run | 75.2 ms (max 241 ms); p99 17.8 ms (max 68 ms) on 28.09, 8.0 ms on 27.09 |
-| API pods by node, before → after | both on `kafka-lab-worker2` → one on each worker |
+| `helm upgrade --wait` returned after | **11 s**, migration hook included (16, 17 and 16 s in the sessions of 25.10, 28.09 and 27.09) |
+| p99 latency over the whole 90 s run | 29.8 ms (max 89 ms); 75.2 ms on 25.10, 17.8 ms on 28.09, 8.0 ms on 27.09 |
+| API pods by node, before → after | one on each worker → one on each worker |
 
 The relay runs with `strategy: Recreate` now. The first run of this drill, before that
 change and with the tags still `dev`/`v2` (`01-rolling-update-20260927-012247.log`, 1800 / 0,
 10 s), lists two relay pods side by side after the rollout — the overlap `Recreate` removes;
 the current run lists one.
 
-The tail of every light drill was longer on 25.10 than in September, the same 20 payments/s
-through the same ingress: p99 75 ms against 8–18 ms here, 89 ms against 7–14 ms in drill 02,
-242 ms against 9–14 ms in drill 05 (max 981 ms). Nothing in the logs says why; the stand was a
-month older, ran a heavier platform (a 136% sum of limits against 129%) and ended the day out
-of memory (Capacity, decisions.md), but none of that was measured during the drills.
+The tail of the light drills moves from session to session at the same 20 payments/s through
+the same ingress. p99 in drills 01, 02 and 05: 8–18, 7–14 and 9–14 ms in September; 75, 89 and
+242 ms on 25.10, on the month-old cluster that ran out of memory that night; 30, 30 and 298 ms
+on 26.10, on the new one. Nothing in the logs says why, and drill 05's tail stayed long.
 
-The node column shows the spreading of decisions.md at work, and its limit. Before the
-rollout both API pods ran on `kafka-lab-worker2` — the spread counts one ReplicaSet at a time,
-and the earlier ReplicaSet's pods had been placed as they came; the new ReplicaSet's two pods
-went one to each worker.
+The node column shows the spreading of decisions.md: one API pod per worker before and after.
+It counts one ReplicaSet at a time, so it can also leave both on one worker — the 25.10 run
+started with both API pods on `kafka-lab-worker2` (`01-rolling-update-20261025-220905.log`)
+and ended with one on each.
 
 The settings meant to make it zero: `maxUnavailable: 0` (an old pod leaves only after a new
 one is ready), the readiness probe (a new pod gets traffic only once it reaches Postgres),
 and `preStop.sleep: 5` (an old pod stays reachable while the routers drop it, then gets 20 s
 to finish what it holds). The drill shows the result, not which of the three carried it — a
 control run with `preStopSleepSeconds=0` would. Worth knowing: when `helm --wait` returned,
-an old API pod was still listed, and still `READY true`, next to the two new ones (the
-current log; the first run showed the same) — "release deployed" is not "old pods gone";
-that it was in its preStop pause is an inference.
+both old API pods were still listed, and still `READY true`, next to the two new ones (the
+current log and the first run; one old pod on 25.10) — "release deployed" is not "old pods
+gone"; that they were in their preStop pause is an inference.
 
 ## Roll back
 
@@ -128,9 +140,9 @@ drills write the image tag they rolled out there (`image <tag>`), and drill 04's
 releases say so. Revisions made before that — every one in the drill logs of 27–28.09 —
 show helm's default "Upgrade complete" instead.
 
-**Drill 02** (`02-rollback-20261025-221036.log`): rollback from drill 01's `-next` release to
-the revision before it, found and named by number (115), under 20 payments/s.
-**1200 / 0** non-2xx, rollback took **6 s** (6 s and 7 s in the sessions of 28.09 and 27.09), and the migration Job kept its creation time:
+**Drill 02** (`02-rollback-20261026-040234.log`): rollback from drill 01's `-next` release to
+the revision before it, found and named by number (17), under 20 payments/s.
+**1200 / 0** non-2xx, rollback took **6 s** (6, 6 and 7 s in the sessions of 25.10, 28.09 and 27.09), and the migration Job kept its creation time:
 rollback runs no pre-upgrade hook. So migrations must be backward compatible (expand, then
 contract in a later release) — a rollback never undoes a schema change.
 
@@ -170,7 +182,7 @@ upgrade that changes the image fails:
 (hit on 27.09.2026 when the tag moved to the commit; the failed revision is kept in
 `helm-history-20260927-170131.log`). Drill 04's case a2 now prints the owners right after
 the undo — `helm Apply`, `kube-controller-manager Update`, `kubectl Update`
-(`04-broken-deployments-20261025-222151.log`). `kubectl get deploy … --show-managed-fields`
+(`04-broken-deployments-20261026-041347.log`). `kubectl get deploy … --show-managed-fields`
 shows the owners (`kubectl Update` next to `helm Apply`).
 
 `--force-conflicts` alone does not end it. When kubectl and Helm set the same value — as
@@ -243,23 +255,29 @@ Raising a replica count or a pool size means redoing that sum.
 ## Scale
 
 **Drill 03**, HPA on the API (CPU target 70% of the 100m request, 2..5 replicas). The script
-defaults to 400 req/s; the evidence session runs it as `RATE=800 make k8s-drill-03`. Every
-row but the first was sent from the host through the ingress on `127.0.0.1:8800`. The first,
-of 25.10, was sent from a pod in the cluster (`kafka-lab/vegeta:12.13.0`) straight to the
-API's Service — which skewed it, below; the drill now sends from that pod through Traefik's
-Service, and that run is still to be made.
+defaults to 400 req/s; the evidence session runs it as `RATE=800 make k8s-drill-03`, sent from
+a pod in the cluster (`kafka-lab/vegeta:12.13.0`) through Traefik's Service with the Ingress's
+`Host` — the path a caller's request takes, past the host's port forward. The September rows
+were sent from the host through the same Traefik; the 25.10 row from the pod straight to the
+API's Service, which skewed it (below).
 
 | Load (GET, 180 s) | Result | Log |
 |---|---|---|
+| 800 req/s, in the cluster through Traefik, 26.10 — **current** | 164% at t=41 s → desired 4; 167% at t=51 s → 5 (max), 4 running, all 5 at t=72 s; then 70–94% on 5 pods, above the target at the HPA's maximum; **144000 / 0** non-2xx, p99 407 ms, max 3.0 s | `03-autoscaling-20261026-040335.log` |
 | 800 req/s, in the cluster to the Service, 25.10 — **skewed**, see below | 127% at t=31 s → desired 4, 4 running at t=41 s; 104% at t=62 s → 5 (max), all 5 at t=72 s; then 61–103% on 5 pods; 144000 / 0 non-2xx, p99 15.6 ms, max 374 ms | `03-autoscaling-20261025-221137.log` |
 | 400 req/s, host, 27.09 | 51–62% most of the run, one sample at **70%** (t=91 s) — at or below the target, so the desired count stays 2: **no scale-out** | `03-autoscaling-20260927-012531.log` (an earlier script version, same load logic, and the single-total read path from before per-currency totals — the answer was 51 bytes, 42 now) |
 | 1200 req/s, host, 27.09 | 109% at t=30 s → desired 4; 160% at t=40 s → 5, all 5 running at t=61 s; settled at 64–66% on 5 pods; 216000 / 0 | `03-autoscaling-20260927-211420.log` |
 | 1200 req/s, host, 28.09, in that day's evidence session | 138% at t=41 s → desired 4; 182% at t=51 s → 5, all 5 at t=71 s; then 88% twice and 72–78%, 97% in the last two samples of the load; 216000 / 0, but p99 **182 ms**, max 1.44 s | `03-autoscaling-20260928-040732.log` |
 | 1200 req/s, host, 28.09, rerun on a settled stand | 134% at t=30 s → 4; 5 at t=91 s; then 60–67%; 216000 / 0, p99 3.3 ms, max 45 ms | `03-autoscaling-20260928-044933.log` |
 
-Scale-in in the current run: the load ended at t≈180 s and CPU was at 1% by t=226 s; desired
-went to 4 at t=483 s and to 2 at **t=514 s**, pods at t=524 s — the 300 s downscale
-stabilization window, as documented.
+Scale-in in the current run: the load ended at t≈180 s and CPU was at 8% by t=226 s; desired
+went to 4 at t=504 s and to 2 at **t=514 s**, pods at t=535 s — the 300 s downscale
+stabilization window, as documented. Read back from Prometheus (`api-cpu-per-pod-20261026-024559.log`), the five pods were
+at 61–80m at one moment and 80–94m at the next: Traefik spread the load evenly, so the HPA's
+average is each pod's. Five pods at 70–94% of 100m for 800 req/s is some 160 req/s per pod at
+about 80% of its request — more CPU per request than September's 240 req/s at 64–66%, on a
+different cluster and day; why is not measured. The p99 of 407 ms against September's 3.3–182
+ms suggests the same: at its maximum the HPA had no room left for this load on this stand.
 
 **The 25.10 row measures connection skew, not the API.** vegeta keeps its connections open,
 and a connection to a Service is pinned to one pod by kube-proxy when it opens; Traefik, on
@@ -305,55 +323,59 @@ all `dial tcp … [::1]:8800: connection refused`: `payments.localtest.me` also 
 service failure; the light drills that still go through the ingress dial `127.0.0.1:8800`
 with a `Host` header.
 
-**Drill 06** (`06-write-throughput-20261025-231555.log`), the write path end to end: POST
+**Drill 06** (`06-write-throughput-20261026-043013.log`), the write path end to end: POST
 /payments at rising rates, 30 s a step and 120 s for the last, spread over fifty merchants (one
 merchant would measure its row lock, which is exp-18's subject), then how far the outbox fell
-behind and how long until every stored payment was in its merchant's total. One relay, two
-consumers; the API starts at two pods and the HPA may add more. Like drill 03's of 25.10, this
-load went from a pod straight to the API's Service, so what it says about the API's CPU and
-the HPA is skewed the same way (one pod at 237m, another at 0m during the 400/s step,
-`api-cpu-per-pod-20261025-220313.log`); what it says about the write path — accepted, stored, drained, counted — is not.
+behind and how long until every stored payment was in its merchant's total. Sent from a pod in
+the cluster through Traefik, as drill 03. One relay, two consumers; the API starts at two pods
+and the HPA may add more.
 
-This log is a rerun, at 21:16–21:25Z, straight after the session on the same stand and images,
-made by the drill's working tree before it was committed (as `28aac33`, unchanged). The
-session's own drill 06 — its log was not kept — timed the drain and the count only after
-fetching the load pod's report, which put a floor of 7–8 s under every figure; the rerun reads
-them before. Two attempts at the rerun were stopped and their logs deleted: one still had a
-floor of its own, one ran into a second copy of the drill started by mistake.
+| payments/s | accepted / stored | p50 / p99 / max | outbox left at the step's end | drained after | all counted after | samples after the end |
+|---|---|---|---|---|---|---|
+| 50 | 1500 / 1500 | 2 / 70 / 205 ms | 0 | 0.5 s | 0.5 s | 1 |
+| 100 | 3000 / 3000 | 2 / 727 / 1111 ms | 43 | 0.7 s | 0.7 s | 2, 0.22 s apart |
+| 200 | 6000 / 6000 | 2 / 285 / 1305 ms | 0 | 2.3 s | 2.3 s | 1 |
+| 400, held 120 s | 48000 / 48000 | 5 / 1157 / 2519 ms | 0 | 1.8 s | 2.4 s | 2, 0.62 s apart |
 
-| payments/s | accepted / stored | p50 / p99 / max | outbox left at the step's end | drained after | all counted after |
-|---|---|---|---|---|---|
-| 50 | 1500 / 1500 | 4 / 58 / 153 ms | 26 | 1 s | 1 s |
-| 100 | 3000 / 3000 | 4 / 392 / 739 ms | 0 | 1 s | 2 s |
-| 200 | 6000 / 6000 | 3 / 73 / 125 ms | 0 | 2 s | 3 s |
-| 400, held 120 s | 48000 / 48000 | 4 / 339 / 700 ms | 71 | 2 s | 4 s |
+Every sample is stamped by Postgres's clock and the step's end comes from vegeta's report —
+the kind nodes' one clock — so "after" is a difference on one clock. Each figure is the first
+sample that shows the step drained or counted: where that was the first sample of all, the
+step was done before it, and the figure is only an upper bound set by when sampling began
+(a second after the step's nominal end, plus a `kubectl exec`). The steps are not back to back
+(`step_t`): the drill writes each step's targets before starting it, one `base64` per payment,
+and the 48000 of the last step put 246 s between the end of the 200/s step and its start — an
+idle stretch in which the HPA's readings fall back.
 
-The two right-hand columns are upper bounds in whole seconds, each with about a second of the
-drill's own making: the clock was read after each `kubectl exec` answered, the step's end was
-taken from the host's clock, and the count was only checked once the outbox was empty — the
-100/s step shows 0 rows left yet 1 s to drain. Read them as "within 2 s" and "within 4 s". The
-drill now stamps every sample with Postgres's own clock and takes the end from vegeta's report,
-which share the kind nodes' clock, and prints tenths with the sampling interval.
-
-No ceiling within 400 payments/s: every payment sent was accepted, stored and counted within
-four seconds of its step's end, and the outbox never held more than about half a second of
-arrivals. At 400/s the HPA read 74% on four pods at t=32 s and 96% at t=53 s, and ran five
-pods from t=63 s at 77–98%; it had gone to four between the steps — not timed, and no reading
-of the 200/s step (all at or below 49%) explains it; the drill now keeps watching between
-steps. p50 stayed at 3–4 ms throughout; the p99 of 392 ms at 100/s came with readings of
-11–43%, and nothing in the log explains it.
+No ceiling within 400 payments/s in this run: every payment sent was accepted, stored and
+counted within 2.4 s of its step's end. The API did reach its own: at 400/s it read 156% on
+three pods at t=432 s (three since the 200/s step, which read 104% at t=154 s), ran five from
+t=442 s at 89–143%, and the tail went to a p99 of 1.2 s. The eighth attempt of 26.10, the same
+drill on the new cluster with Traefik at its old limit, did find a ceiling at 400/s (seen in
+the session; its logs were set aside): five pods at 100–109%, p99 9.5 s, vegeta able to send
+only 44405 of the 48000 payments in the step, and 555 answered 503 — every one, by the API's
+own log in Loki, a `postgres.WithinTx begin` that hit its deadline, answered as
+`storage_unavailable` with "repeat the request" (`internal/interfaces/http/errors.go`) and
+stored nothing: accepted and stored were both 43850. So 400 payments/s is the edge of this
+stand, on one side or the other of it from run to run.
 
 The session of 28.09 sent the same steps from the host, through Traefik, 30 s each including
 the last: 12000 / 12000 at 400/s, p99 17 ms, 137 outbox rows left, drained and counted in 2 s,
-and the API stayed at two pods at 60% (`06-write-throughput-20260928-043357.log`).
+and the API stayed at two pods at 60% (`06-write-throughput-20260928-043357.log`). The 25.10
+run (`06-write-throughput-20261025-231555.log`) went straight to the Service and is skewed like
+that day's drill 03; its write-path figures (every payment accepted, stored and counted within
+4 s) stand.
 
-Where it would stop first is a reasoned guess, not a measurement: the single relay — one
-batch of 100 at a time, each waiting for the `acks=all` of all three brokers — before the
-consumers, whose six partitions and one short transaction per record had room to spare at
-400/s. Raising `OUTBOX_BATCH` toward `MaxClaim` (1000) is the first lever; relays split by key
-the second (decisions.md, relay). The next step to find the ceiling is
-`RATES="800 1600" make k8s-drill-06`. For the relay, one replica by design: a full batch of 100
-is followed at once by the next sweep, so it drains in batches, not at one batch a second.
+What gave first was the API, not the pipeline behind it: the relay and the consumers drained
+and counted every step within seconds even at 400/s, while the API's five pods ran past their
+request and, in the eighth attempt, its transactions timed out waiting to begin. Whether that
+was the API's CPU, the database's (Postgres's p95 was 489m against a 100m request in this
+session's resource log) or the VM's — the events of that attempt, seen in the session, showed the whole stand stalling
+at once, probes timing out on every component — the drill does not separate. On a bigger
+machine the next limit would be the single relay — one batch of 100 at a time, each waiting
+for the `acks=all` of all three brokers — a reasoned guess, not a measurement; raising
+`OUTBOX_BATCH` toward `MaxClaim` (1000) is its first lever, relays split by key the second
+(decisions.md, relay). For the relay, one replica by design: a full batch of 100 is followed at
+once by the next sweep, so it drains in batches, not at one batch a second.
 
 The consumer is not autoscaled on purpose: six partitions, and CPU is not what limits a
 consumer group. Scale it through the release, never above 6:
@@ -364,14 +386,16 @@ count back to the chart's 2; a lasting change belongs in `values.yaml`.
 
 ## Troubleshooting — seven broken releases
 
-**Drill 04** (`04-broken-deployments-20261025-222151.log`; the sessions of 28.09 and 27.09,
-`…-20260928-041742.log` and `…-20260927-212429.log`, had the same outcomes except in d): each
+**Drill 04** (`04-broken-deployments-20261026-041347.log`; the sessions of 25.10, 28.09 and
+27.09, `…-20261025-222151.log`, `…-20260928-041742.log` and `…-20260927-212429.log`, had the
+same outcomes except in d): each
 case breaks the API one way, records what kubectl shows, and restores. The API kept answering
 through the ingress (200) in every case but f, where the database itself was down. a1 never
 reached a Deployment: the migration hook stopped it. a2, b, c and e changed the Deployment, and
 with `maxUnavailable: 0` a new version that never becomes ready never replaces the old one.
-**d is the exception**: the broken version *did* become ready, for a while, and replaced a
-working pod; readiness cannot see a failure that happens after it passed. f breaks the
+**d is the exception**, though not every time: the broken version can become ready for a while
+and replace a working pod — it did on 27.09, 28.09 and 25.10, not in the current run; readiness
+cannot see a failure that happens after it passed. f breaks the
 database, not the release, and g breaks nothing.
 
 | # | Break | Symptom (`kubectl get pods`) | Where the reason is | Fix |
@@ -380,7 +404,7 @@ database, not the release, and g breaks nothing.
 | a2 | `kubectl set image … :does-not-exist` (past Helm) | new pod `ImagePullBackOff`, old two Running | `describe pod` → Events: `pull access denied, repository does not exist` | `kubectl rollout undo deploy/payments-api`, then remove kubectl's entries from `managedFields` so Helm owns the image again (see Roll back; `--force-conflicts` alone does not do it) |
 | b | API listen address `0.0.0.0:99999` | new pod `CrashLoopBackOff`, restarts climbing | `kubectl logs <pod> --previous` → `httpserve: cannot listen on 0.0.0.0:99999: … invalid port` | fix the value, upgrade |
 | c | Secret key `NO_SUCH_KEY` | new pod `Pending` / `CreateContainerConfigError`, never starts | `describe pod` → `couldn't find key NO_SUCH_KEY in Secret lab/payments-api-key` | fix the key name or create it |
-| d | memory limit 8Mi | one or both new pods **Ready with restarts** — both on 28.09; on 25.10 one, the other `CrashLoopBackOff` — and an old pod gone (see below) | `kubectl get pod -o jsonpath=…lastState.terminated` → `exit 137`, with the reason `OOMKilled` on 28.09 and `Error` on 25.10; the node's kernel log has the kill either way | raise the limit. See below: the dangerous one |
+| d | memory limit 8Mi | a new pod with restarts — `CrashLoopBackOff` with both old pods serving (current run), or **Ready**, having replaced an old pod (27.09 and 28.09: both new pods, the rollout green; 25.10: one of two) | `kubectl get pod -o jsonpath=…lastState.terminated` → `exit 137`, reason `OOMKilled` (current run, 28.09, 27.09) or `Error` (25.10); the node's kernel log has the kill either way | raise the limit. See below: the dangerous one |
 | e | CPU request 64 | new pod `Pending` forever | `kubectl get events --field-selector reason=FailedScheduling` → `0/3 nodes are available: 1 node(s) had untolerated taint(s), 2 Insufficient cpu` | lower the request, or add nodes |
 | f | database hibernated (CNPG) | pods Running, **READY false**; EndpointSlice `ready=false`; ingress **503** | EndpointSlice and ingress 503 (in the log); the API's own line `not ready: the database does not answer` is in Loki, not in the drill log | bring the database back; the pods recover on their own, no restart |
 | g | — | "how do I look inside a distroless pod?" | `kubectl exec … sh` → `exec: "sh": executable file not found` | `kubectl debug <pod> --image=busybox:1.37 --target=payments-api -c debugger-<n> -- ps …` then `kubectl logs <pod> -c debugger-<n>` |
@@ -388,21 +412,24 @@ database, not the release, and g breaks nothing.
 Notes the table cannot hold:
 
 - **d is the dangerous one.** With 8Mi the Go process is killed by the kernel's memory-cgroup
-  OOM killer at start, comes back, and may stay under the limit long enough to pass readiness.
-  On 28.09 both new pods did, with one restart each, and the rollout finished green. On 25.10,
-  45 s in, one new pod was Ready with 2 restarts and had replaced one of the two working pods,
-  and the other was in `CrashLoopBackOff` with 2 restarts; the kubelet reported the last
-  termination as `Error exit 137`, not `OOMKilled`. The kernel's log
-  (`04d-kernel-oom-20261025-225000.log`, taken from the Docker VM after the session) has the
-  `Memory cgroup out of memory: Killed process … (service)` lines, the first 9 s after the case
-  began. So read the exit code, 137 (SIGKILL), against the limit; the reason string is not
-  reliable. Either way the broken limit went live in part, and nothing in `helm upgrade` or the
-  probes said so — only the restart count and `lastState` did. Watch `RESTARTS` after every
+  OOM killer at start, comes back, and may stay under the limit long enough to pass readiness —
+  the outcome is a race: four runs, three answers. In the current run the one new pod
+  never stayed ready: `CrashLoopBackOff` with 3 restarts, both old pods serving, the last
+  termination `OOMKilled exit 137`, and the kernel's kills 7 s after the case began
+  (`04d-kernel-oom-20261026-024610.log`). On 27.09 and 28.09 both new pods passed readiness
+  with one restart each, and the rollout finished green (`04-broken-deployments-20260927-212429.log`,
+  `…-20260928-041742.log`). On 25.10, 45 s in, one new pod was Ready with 2 restarts and had replaced
+  one of the two working pods, the other in `CrashLoopBackOff`; the kubelet reported its
+  termination as `Error exit 137`, not `OOMKilled`, while the kernel's log
+  (`04d-kernel-oom-20261025-225000.log`) has the OOM kills. So read the exit code, 137
+  (SIGKILL), against the limit; the reason string is not reliable. When a new pod does pass,
+  the broken limit goes live, and nothing in `helm upgrade` or the probes says so — only the
+  restart count and `lastState` do. Watch `RESTARTS` after every
   rollout, not only `READY`. (A first attempt with a 6Mi limit was refused by the API server:
   `requests … must be less than or equal to memory limit` — the request has to move with the
   limit. That run's log was replaced; the message is from the session output.)
-- **f takes three minutes to start.** Annotation at 20:27:29, database pod gone at 20:30:33
-  (3 min 4 s; 3 min 3 s and 3 min 4 s in the sessions of 28.09 and 27.09).
+- **f takes three minutes to start.** Annotation at 02:19:22, database pod gone at 02:22:27
+  (3 min 5 s; 3 min 4 s, 3 min 3 s and 3 min 4 s in the sessions of 25.10, 28.09 and 27.09).
   That matches CloudNativePG shutting Postgres down in *smart* mode first — which waits for
   clients to disconnect, and connection pools never do — and switching to a fast shutdown
   when the 180 s smart timeout runs out. (An inference from the timing; the operator's log
@@ -427,11 +454,11 @@ Notes the table cannot hold:
   it until the pod is replaced, and the namespace's restricted-profile warning lists that
   pod from then on.
 
-**Drill 04f** (`04f-database-outage-20261025-223219.log`) hibernates the database again and
+**Drill 04f** (`04f-database-outage-20261026-042259.log`) hibernates the database again and
 watches everything that depends on it: the API, the registry, the relay and the consumer. It
 starts only when every one of them is ready, so whatever goes unready is the outage's doing.
-The database pod was gone at 20:35:23Z; the hibernation was lifted 91 s later, and the pod was
-ready again 12 s after that, at 20:37:06Z.
+The database pod was gone at 02:26:02Z; the hibernation was lifted 91 s later, and the pod was
+ready again 12 s after that, at 02:27:45Z.
 
 | | during the outage | after the database pod is ready again |
 |---|---|---|
@@ -439,21 +466,23 @@ ready again 12 s after that, at 20:37:06Z.
 | Apicurio | Running, unready, **no new restart** (its liveness is the port) | ready |
 | relay | Running, **no new restart** — each 1 s sweep fails and the next tries again | publishing |
 | consumer (2 pods) | Running, **no new restart** — nothing arrived for it to fail on | counting |
-| first payment accepted | — | **4 s** after (3 s on 28.09) |
-| that payment counted | — | **5 s** after (6 s on 28.09) |
-| every pod ready | — | 6 s after (6 s on 28.09) |
+| first payment accepted | — | **2 s** after (4 s on 25.10, 3 s on 28.09) |
+| that payment counted | — | **4 s** after (5 s and 6 s) |
+| every pod ready | — | 5 s after (6 s and 6 s) |
 
 The restart counts did not move from the first listing to the last: 0 for the API, the relay
-and the consumers, 39 for Apicurio — whose 39 were there before the drill began, left by the
-stand's earlier stops and starts (8 at the same point on 28.09); the log does not say when
-each happened. The 4 s are the API pods' readiness returning — a probe every 5 s,
-one success to pass — and the drill's own 1 s retry of the POST. The consumer exits only on a
+and the consumers, 3 for Apicurio — 3 before the drill began, one of them inside the session's
+window by the resource log (39 on the month-old cluster of 25.10, 8 on 28.09); neither log
+shows what caused them. The 2 s are, by the probe's settings rather than any log, the API
+pods' readiness returning — a probe every 5 s, one success to pass — and the drill's own 1 s
+retry of the POST. The consumer exits only on a
 record it cannot count (docs/k8s/decisions.md): with the API unready no new payment was
 published, so it had none. A consumer that does meet a record while the database is down
 restarts with the kubelet's back-off until the database answers; this drill does not stage
 that case.
 
-The run of 28.09 is `04f-database-outage-20260928-210123.log`. Two earlier versions of the
+The runs of 25.10 and 28.09 are `04f-database-outage-20261025-223219.log` and
+`…-20260928-210123.log`. Two earlier versions of the
 drill are kept. `04f-database-outage-20260928-042645.log` (same
 behaviour, 0 restarts) stamped "database back" at the moment the hibernation was lifted — the
 cluster's Ready condition still read true from before — so its 14 s / 15 s to the first
@@ -467,12 +496,12 @@ and these are what to expect, not what to promise.
 
 | Failure | Until what | Time | Log |
 |---|---|---|---|
-| broker pod killed | no under-replicated partition | ≤ 11–19 s over five runs | `05-broker-pod-loss-*` |
+| broker pod killed | no under-replicated partition | ≤ 11–19 s over six runs | `05-broker-pod-loss-*` |
 | broker pod killed | broker pod Ready | 22–25 s | same |
-| database down (~100 s) | the database pod ready again, after the hibernation was lifted | 10–12 s, two runs | `04f-database-outage-20261025-223219.log`, `…-20260928-210123.log` |
-| database down (~100 s) | first payment accepted / counted, after the database pod was ready | 3–4 s / 5–6 s | same |
+| database down (~100 s) | the database pod ready again, after the hibernation was lifted | 10–12 s, three runs | `04f-database-outage-20261026-042259.log`, `…-20261025-223219.log`, `…-20260928-210123.log` |
+| database down (~100 s) | first payment accepted / counted, after the database pod was ready | 2–4 s / 4–6 s | same |
 | a release that must be undone | `helm rollback` to a named revision, under traffic | 6–7 s | `02-rollback-*` |
-| a rolling update | `helm upgrade --wait`, migration hook included | 16–17 s (10 s in the first run, tags `dev`/`v2`) | `01-rolling-update-*` |
+| a rolling update | `helm upgrade --wait`, migration hook included | 11–17 s (10 s in the first run, tags `dev`/`v2`) | `01-rolling-update-*` |
 | two brokers down 30 s (compose, exp-13) | backlog back to its pre-outage level | 17.3–24.2 s — measured before the relay drained full batches back to back | exp-13 |
 
 ### Where to look first
@@ -491,51 +520,57 @@ narrowed to one pod with `pod="<pod>"`.
 
 ### Logs and metrics, shown working
 
-**Drill 07** (`07-observability-20261025-225052.log`) asks Prometheus and Loki through the API
+**Drill 07** (`07-observability-20261026-043851.log`) asks Prometheus and Loki through the API
 server's service proxy — what an operator's Grafana reads — instead of trusting the
-ServiceMonitor and Alloy configs. Rerun at 20:51Z, a minute after the session, on the same stand
-and images: the session's own run (its log was not kept) looked for each component's lines in
-the last 10 minutes, and found none for the consumer, which logs at start and on errors, not
-per event — although its lines were in Loki. It now looks for every running pod's start line from the pod's start on.
+ServiceMonitor and Alloy configs. It first waits for the API to be back at its two pods (330 s
+after drill 06 here): a scale-in between its two readings took pods, and what they had counted,
+out of the second one in an earlier run, and the summed counter fell from 57768 to 20104 (the
+eighth attempt, seen in the session). It now compares each counter pod by pod.
 
 | Checked | Result |
 |---|---|
-| every payments pod scraped, `up{job="payments"}` | 1 for all eight running pods: five API (scaled out by the session's drill 06, whose log was not kept; the drill 07 log shows those pods started at 20:41:58Z and 20:46:29Z), one relay, two consumers |
-| the service's own counters, before and after 300 payments sent at 20/s, 30 s later | `http_requests_total{route="POST /payments"}` 61623 → 61923, `outbox_records_published_total` 62178 → 62478, `payment_events_handled_total` 62119 → 62419: **+300 each** — every payment through the API, the relay and the consumer, as the metrics say |
-| each running pod's start line in Loki, by `{namespace, app, pod}` | found for all eight, from the API's `payments api started` to the consumers' `payments consumer started` |
+| every payments pod scraped, `up{job="payments"}` | 1 for all five running pods: two API, one relay, two consumers |
+| the service's own counters, before and after 300 payments sent at 20/s, 30 s later, over the pods scraped both times | `http_requests_total{route="POST /payments"}` +300 over 2 pods, `outbox_records_published_total` +300, `payment_events_handled_total` +300 over 2 pods — every payment through the API, the relay and the consumer, as the metrics say |
+| each running pod's start line in Loki, by `{namespace, app, pod}` | found for all five, from the API's `payments api started` to the consumers' `payments consumer started` |
 | the relay's per-batch line, `outbox published`, in the last 2 minutes | 16 lines, the drill's own load included |
 
-The counters are summed over the pods, so a pod that restarted between the two readings would
-make the difference wrong. The drill does not check for one; that all three differences are
-exactly the 300 sent is what says none happened.
+`outbox_records_published_total` reads "over 5 pods" in the log: every component registers the
+relay's counter in the shared metrics package, and only the relay's moves — the other four
+stay at 0. A pod that came or went between the readings would be named in the log; none did.
+
+The 25.10 run (`07-observability-20261025-225052.log`) found the same with eight pods, five of
+them API; its counters agreed because no pod left between its readings. The session's own run
+that day looked for each component's lines in the last 10 minutes and found none for the
+consumer, which logs at start and on errors, not per event, although its lines were in Loki —
+so the drill looks for every pod's start line from the pod's start on.
 
 ## Kafka broker pod lost
 
 **Drill 05**: `kubectl delete pod kafka-lab-dual-1 --grace-period=0 --force` under 20
 payments/s.
 
-| | run 1 (`…-20260927-023601.log`) | run 2 (`…-20260927-033552.log`) | run 3 (`…-20260927-213824.log`) | run 4 (`…-20260928-043137.log`) | current (`05-broker-pod-loss-20261025-223714.log`) |
-|---|---|---|---|---|---|
-| under-replicated partitions right after | 33 | 33 | 33 | 33 | 33 |
-| under-replicated back to 0 | **≤ 15 s** | **≤ 11 s** | **≤ 12 s** | **≤ 15 s** | **≤ 19 s** |
-| broker pod Ready again | 22 s | 22 s | 23 s | 22 s | 25 s |
-| payments accepted / lost | **2400 / 0** | **2400 / 0** | **2400 / 0** | **2400 / 0** | **2400 / 0** |
-| witness broker memory, samples of the first ~25 s | — | — | 785Mi (limit then 1280Mi) | 780–821Mi (limit then 1360Mi) | 799–836Mi (limit 1400Mi) |
-| outbox rows not yet published, per sample | — | — | — | — | 7, 13, 4, 7 |
+| | run 1 (`…-20260927-023601.log`) | run 2 (`…-20260927-033552.log`) | run 3 (`…-20260927-213824.log`) | run 4 (`…-20260928-043137.log`) | run 5 (`…-20261025-223714.log`) | current (`05-broker-pod-loss-20261026-042751.log`) |
+|---|---|---|---|---|---|---|
+| under-replicated partitions right after | 33 | 33 | 33 | 33 | 33 | 33 |
+| under-replicated back to 0 | **≤ 15 s** | **≤ 11 s** | **≤ 12 s** | **≤ 15 s** | **≤ 19 s** | **≤ 17 s** |
+| broker pod Ready again | 22 s | 22 s | 23 s | 22 s | 25 s | 25 s |
+| payments accepted / lost | **2400 / 0** | **2400 / 0** | **2400 / 0** | **2400 / 0** | **2400 / 0** | **2400 / 0** |
+| witness broker memory, samples of the first ~25 s | — | — | 785Mi | 780–821Mi | 799–836Mi (limit 1400Mi) | 552–675Mi |
+| outbox rows not yet published | — | — | — | — | 7, 13, 4, 7 (in the replication round) | 1–18, 10 samples 2–4 s apart |
 
-The samples are as far apart as each round of kubectl calls takes: 3–8 s in the earlier runs,
-6–13 s in the current one, which read the outbox in the same round — so its "≤ 19 s" says only
-that the partitions were healed by the sample at 19 s, after one at 13 s that still showed 33,
-and the five runs' spread is partly the spacing of their samples. The drill now reads the
-outbox in a loop of its own and stamps each replication sample after it is read.
+The replication samples are as far apart as each round of kubectl calls takes: 3–8 s in runs
+1–4, 6–13 s in run 5, which also read the outbox in that round, 4–6 s in the current one, which
+reads it in a loop of its own and stamps each replication sample after it is read — so "≤ 17 s"
+means the sample taken by 17 s already showed 0, the one at 11 s still 33. The six runs'
+spread is partly the spacing of their samples.
 
-Every merchant total was 240000 = 2400 × 100 — in the last three runs reported per currency,
-the current one as `{"currency":"EUR","authorized_minor":240000,"captured_minor":0,"refunded_minor":0}`.
-Four script versions: run 1 counted healing only once the pod was Ready, so its summary line
+Every merchant total was 240000 = 2400 × 100 — in the last four runs reported per currency,
+the last two as `{"currency":"EUR","authorized_minor":240000,"captured_minor":0,"refunded_minor":0}`.
+Five script versions: run 1 counted healing only once the pod was Ready, so its summary line
 says "no under-replicated partition after 22s" while its samples show 0 at t=15 s; run 2
 counted it on its own; runs 3 and 4 also require the loss to have been seen first, tell a
-failed `kubectl exec` from zero, and log the witness's memory; the current one adds the
-outbox backlog. The witness's admin tool now has a 96m heap of its own, where the first
+failed `kubectl exec` from zero, and log the witness's memory; run 5 added the outbox backlog;
+the current one samples it on its own. The witness's admin tool now has a 96m heap of its own, where the first
 runs let it inherit the broker's 512m and pushed the witness to 918Mi (seen in Prometheus in
 the session, not logged).
 
@@ -545,8 +580,8 @@ the broker back: Strimzi's pod set recreates it on its own volume, it rejoins th
 replication caught up before the pod even reported Ready. What the drill proves about
 Kafka is the end-to-end count: every accepted payment reached the merchant total. The 201s
 themselves only say the payment was written to Postgres (the outbox), which does not touch
-Kafka. What does is the relay, and the current run samples its backlog: 4–13 unpublished rows
-through the outage, while 20 new rows a second arrived — had publishing stopped, the backlog
+Kafka. What does is the relay, and the last two runs sample its backlog: 4–13 unpublished rows
+in run 5, 1–18 in the current one, sampled through the outage, while 20 new rows a second arrived — had publishing stopped, the backlog
 would have grown by about 20 a second. The relay kept publishing with 33 partitions short of
 a replica, as `min.insync.replicas: 2` of 3 lets `acks=all` writes through. The relay's errors were not recorded.
 

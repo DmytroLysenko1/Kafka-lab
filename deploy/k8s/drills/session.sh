@@ -59,7 +59,7 @@ settle; make k8s-drill-02
 # 800, not the 1 200 of the 28.09 sessions. On 25.10, sent from the host, drill 03's load was
 # running when two attempts at this session ended; in the one whose Docker logs survive (800
 # req/s, 18:40 UTC) Docker Desktop's port forward on 127.0.0.1:8800 shut down 11 s into the
-# load, and the VM stopped a minute later. Drills 03 and 06 now send from a pod in the cluster
+# load, and the VM stopped 72 s later. Drills 03 and 06 now send from a pod in the cluster
 # through Traefik (lib.sh).
 settle; RATE=800 make k8s-drill-03
 settle; make k8s-drill-04

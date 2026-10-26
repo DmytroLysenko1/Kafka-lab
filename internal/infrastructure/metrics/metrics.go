@@ -65,8 +65,9 @@ func handlingBuckets() []float64 {
 	return append(fastBuckets(), 2.5, 5, 15, 21)
 }
 
-// New builds every service's metrics in one registry: each service fills only its own, and
-// a series nobody writes to is simply never exported.
+// New builds every service's metrics in one registry: each service fills only its own. A
+// labelled series nobody writes to is never exported; a plain counter or gauge is, at 0, so
+// every pod exports outbox_records_published_total and only the relay's moves.
 func New() *Registry {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))

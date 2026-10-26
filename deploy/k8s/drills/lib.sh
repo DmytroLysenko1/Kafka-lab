@@ -50,12 +50,13 @@ load_name() { echo "load-$1-$$"; }
 # the pod spec holds none. The pod ends by itself: it waits at most 5 min for its targets and
 # lives at most the attack plus 10 min (activeDeadlineSeconds), so a drill interrupted before
 # its trap ran cannot leave it running. CPU from resources-20261025-224859.log: p95 289m at
-# 800 req/s (load-03). Memory is not that log's 109Mi: that load went straight to the Service
+# 800 req/s (load-03); 308m through Traefik in resources-20261026-044517.log. Memory is not that log's 109Mi: that load went straight to the Service
 # and was answered fast. Through Traefik on 26.10 the API saturated, vegeta — which keeps
 # its rate by adding workers while answers are slow — reached 220Mi and the kernel killed it
 # at its 256Mi limit 64 s into drill 03 (the node's dmesg, seen in the session). Workers are
 # capped so a saturated API slows the attack, which the report shows, instead of growing it
-# without bound; the limit covers that cap. The results go to an emptyDir on disk.
+# without bound. 768Mi is a margin, not a measurement of the cap: the logged peaks are 66Mi
+# (load-03) and 125Mi (load-06) in resources-20261026-044517.log. The results go to an emptyDir on disk.
 load_start() {
   local name=$1 load_rate=$2 load_seconds=$3 format=$4 report=$5
   require_image "$load_image" "make k8s-load-image"

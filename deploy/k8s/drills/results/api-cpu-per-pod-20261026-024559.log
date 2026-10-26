@@ -1,0 +1,17 @@
+# Each API pod's CPU during the 26.10 session's drill 03 (03-autoscaling-20261026-040335.log, started 02:03:35Z),
+# whose load went from a pod in the cluster through Traefik's Service, read back from Prometheus on 2026-10-26T02:45:59Z:
+# kubectl get --raw '/api/v1/namespaces/monitoring/services/monitoring-kube-prometheus-prometheus:9090/proxy/api/v1/query?query=<q>&time=<t>'
+# q = sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="lab",container="payments-api"}[1m]))
+# The CPU request is 100m. The two moments are the drill's t≈115 s and t≈165 s (its log: cpu=74% and 90%).
+t=2026-10-26T02:05:30Z
+  payments-api-6464bdbdc4-x8c97 80m
+  payments-api-6464bdbdc4-hsz84 71m
+  payments-api-6464bdbdc4-5hcxv 71m
+  payments-api-6464bdbdc4-xvn2n 70m
+  payments-api-6464bdbdc4-qh6h2 61m
+t=2026-10-26T02:06:20Z
+  payments-api-6464bdbdc4-qh6h2 94m
+  payments-api-6464bdbdc4-x8c97 92m
+  payments-api-6464bdbdc4-xvn2n 85m
+  payments-api-6464bdbdc4-hsz84 84m
+  payments-api-6464bdbdc4-5hcxv 80m

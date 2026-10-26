@@ -20,9 +20,13 @@ when it was made to, and what to do differently.
 a 487 MB build layer holding the build cache next to the binary. A two-stage build onto
 distroless is **33.7 MB** — a 20.6 MB binary on a 6 MB base — runs as uid 65532, and has no
 shell: `docker run --entrypoint sh` fails with `executable file not found`. A rebuild after
-editing one `.go` file took 136.5 s naive and 14.6 s with the module and build caches mounted;
-taking the techniques out one at a time showed the mounts doing nearly all of it, and the
-`go.mod` split paying only without them (68.1 → 49.5 s) ([01-docker.md](01-docker.md)).
+editing one `.go` file took 39.5 s naive and 10.9 s with the module and build caches mounted;
+taking the techniques out one at a time showed that of the two caching techniques the mounts
+did all of it — the `go build` step went from 9–15 s to 0.5 s — and the `go.mod` split nothing
+measurable; most of the rest of the 28.6 s is the naive image's 487 MB layer being exported
+([01-docker.md](01-docker.md)). Getting numbers that compare took measuring with the cluster
+stopped: next to it, the same rebuilds had taken anything from 13.7 to 1159 s (seen in the
+session; 136.5 s is in `measure-20261025-215950.log`).
 
 **What to do.** Two stages, a static binary, distroless `:nonroot`. Debug with
 `kubectl debug --target=<container>` — an ephemeral container in the pod's process
@@ -33,7 +37,7 @@ namespace — because `kubectl exec … sh` can never work, and that is the poin
 **What the stand did.** Drill 04f hibernated the database under the API. The API pods went
 **unready with zero restarts**, the ingress answered **503** instead of hanging, and the pods
 came back into the EndpointSlice by themselves when the database did: the first payment was
-accepted 4 s after the database pod was ready, and counted 1 s after that. In an earlier run
+accepted 2 s after the database pod was ready, and counted 2 s after that. In an earlier run
 of the same outage Apicurio, whose liveness endpoint then included its datasource, was
 **restarted by its own probe** — a dependency failure turned into a restart loop (seen in the
 session, not in a log).
@@ -48,12 +52,13 @@ probe in the namespace needed the same question.
 the Go process at start, it came back, stayed under the limit long enough to **pass
 readiness**, and replaced a working pod: on 28.09 the rollout completed with both new pods
 Ready; on 25.10 one new pod was Ready and had taken an old pod's place while the other
-crash-looped. The traces were `RESTARTS` and `lastState` — `exit 137`, reported as `OOMKilled`
-on 28.09 and as plain `Error` on 25.10, when the kernel's log shows it was the OOM killer all
-the same.
+crash-looped; on 26.10 the new pod never stayed ready and both old ones served — a race: four
+runs, three outcomes, 27.09 like 28.09. The traces were `RESTARTS` and `lastState` — `exit 137`,
+reported as `OOMKilled` on 27.09, 28.09 and 26.10 and as plain `Error` on 25.10, when the kernel's log shows it
+was the OOM killer all the same.
 
 **What to do.** Read `RESTARTS` and the exit code after every rollout, not only `READY` and
-not the reason string. Of the six broken releases, the migration hook stopped one before it
+not the reason string. Of the six releases broken on purpose (cases a1 to e), the migration hook stopped one before it
 touched a Deployment, and `maxUnavailable: 0` held off four more — a version that never
 becomes ready never replaces the old one. The one that got through was the one that looked
 healthy for a moment.
@@ -78,9 +83,11 @@ non-2xx, 6 s.
 at 70% — at or below the 70% target, so the HPA kept 2 replicas; 1200 req/s did it: 109% at
 30 s, desired 4; 160% at 40 s, desired 5; 216 000 requests, none failed. Scale-in waited out
 the 300 s stabilisation window, as documented. In a run right after the platform was
-re-applied, the same load needed 72–88% of the request on five pods and its p99 was 182 ms,
+re-applied, the same load needed 72–97% of the request on five pods (148% as the fifth came up) and its p99 was 182 ms,
 against 3.3 ms in a rerun once the stand had settled — the busy stand is the likely cause,
-inferred from the timing, not measured.
+inferred from the timing, not measured. On the recreated cluster of 26.10, 800 req/s through
+the same Traefik drove two pods to 164% at 41 s and five to 70–94% — at the HPA's maximum
+and at or above its target, every one of 144 000 answered, p99 407 ms.
 
 **What to do.** Plan the load from the request, not from a round number: the HPA sees a
 percentage of what the pod asked for. And what the machine gives the pods shows in that
@@ -89,12 +96,14 @@ percentage and in the tail latency, long before it shows in errors.
 ## 5. "The scheduler protects the node"
 
 **What the stand did.** Every kind node reports the whole Docker VM — 7934Mi, 10 CPU — as
-allocatable, so the scheduler believes in three times the memory that exists. In the 25.10
-session memory requests came to 74% of the VM and the sum of limits to 136%; the container
-working set peaked at 80% (`resources-20261025-224859.log`), and at **95%** in the 28.09
-session, while the platform was re-applied and two Grafana pods overlapped. An hour after the
-25.10 session, with more load since, the VM was out of memory and swap
-(`vm-memory-20261025-220007.log`), and both workers had gone `NotReady` (seen in the session). Requests and limits were sized from a logged
+allocatable, so the scheduler believes in three times the memory that exists. In the 26.10
+session memory requests came to 72% of the VM and the sum of limits to 134%; the container
+working set peaked at 81% (`resources-20261026-044517.log`), and at **95%** in the 28.09
+session, while the platform was re-applied and two Grafana pods overlapped. A month-old
+cluster did not hold even that: an hour after the 25.10 session, with more load since, the VM
+was out of memory and swap (`vm-memory-20261025-220007.log`) and both workers had gone
+`NotReady`, and the next day its kernel OOM-killed a provisioner mid-drill (both seen in the
+session). The evidence was taken on a cluster recreated from nothing. Requests and limits were sized from a logged
 measurement of the running stand, twice; the first pass was read off Prometheus without a log,
 and a Prometheus restart erased it.
 
@@ -105,10 +114,10 @@ first sized the stand, not in a log, which is the lesson.
 
 ## 6. "A lost broker pod is an incident"
 
-**What the stand did.** Drill 05 force-deleted a Kafka broker pod under 20 payments/s, five
+**What the stand did.** Drill 05 force-deleted a Kafka broker pod under 20 payments/s, six
 runs. Strimzi recreated it; under-replicated partitions went from 33 back to 0 within
 11–19 s — before the pod reported Ready at 22–25 s — and **2400 of 2400** payments were
-accepted, none lost. The relay's backlog stayed at 4–13 rows through the outage while 20 a
+accepted, none lost. The relay's backlog stayed at 1–18 rows through the outage while 20 a
 second arrived: it kept publishing to partitions one replica short. Compose, by contrast, keeps a killed broker dead, on purpose, so that the
 Kafka experiments can watch an outage.
 
@@ -142,7 +151,8 @@ Moved into the cluster and sent straight to the API's Service, the same 800 req/
 in full — and was wrong the other way. vegeta keeps its connections open, and kube-proxy pins
 each connection to one pod when it opens: one API pod ran at 191m of CPU while another sat at
 19m, and the HPA scaled on their average. Traefik, which the earlier runs went through, picks a
-pod per request.
+pod per request: sent from the same pod through Traefik's Service, the five pods ran at 61–80m
+at one moment and 80–94m at the next.
 
 **What to do.** Send the load the way the clients come: past the parts of the path that are not
 under test, through the parts that are. A load test that runs through a laptop's port forward
@@ -173,7 +183,7 @@ listed with the production equivalent in [decisions.md](decisions.md#lab-not-pro
 | A live drill — `make k8s-drill-04` breaking a release while `kubectl get pods -w` runs | 3 min |
 | Questions | 2 min |
 
-A plan, not a timing: the whole file is about 1 950 words, 13–15 minutes spoken at 130–150
+A plan, not a timing: the whole file is about 2 100 words, 14–16 minutes spoken at 130–150
 words a minute, and the stories are told around the drill logs on screen. The first time it is given,
 its real timings replace this table.
 

@@ -1,0 +1,25 @@
+drill 07 started 2026-10-26T02:38:51Z, images 05edc89
+the API at its minimum of 2 pods (waited 330s)
+
+every payments target, as Prometheus scrapes it (up{job="payments"}, 1 = scraped):
+  outbox-relay outbox-relay-5776c6ddc7-pgrsw 1
+  payments-consumer payments-consumer-7f78cd69b-g6qcx 1
+  payments-consumer payments-consumer-7f78cd69b-mr2wz 1
+  payments-api payments-api-6464bdbdc4-hsz84 1
+  payments-api payments-api-6464bdbdc4-qzpjt 1
+
+sent 300 payments at 20/s, 300 accepted; waiting 30 s for the pipeline and the scrapes
+the service's own counters, their increase over the pods scraped both before and after:
+  http_requests_total{route="POST /payments"}: 300 over 2 pods
+  outbox_records_published_total:                300 over 5 pods
+  payment_events_handled_total:                  300 over 2 pods
+
+each running pod's start line in Loki, by {namespace="lab", app, pod}:
+  payments-api-6464bdbdc4-hsz84 (started 2026-10-26T02:02:48Z): {"time":"2026-10-26T02:02:48.329397129Z","level":"INFO","msg":"payments api started","service":"payments-api","address":"0.0.0.0:8081","metrics":"0.0.
+  payments-api-6464bdbdc4-qzpjt (started 2026-10-26T02:32:44Z): {"time":"2026-10-26T02:32:44.987707722Z","level":"INFO","msg":"payments api started","service":"payments-api","address":"0.0.0.0:8081","metrics":"0.0.
+  outbox-relay-5776c6ddc7-pgrsw (started 2026-10-26T02:02:45Z): {"time":"2026-10-26T02:02:46.144942461Z","level":"INFO","msg":"outbox relay started","service":"outbox-relay","topic":"payments.main","batch":100,"int
+  payments-consumer-7f78cd69b-g6qcx (started 2026-10-26T02:02:45Z): {"time":"2026-10-26T02:02:45.661402211Z","level":"INFO","msg":"payments consumer started","service":"payments-consumer","topic":"payments.main","group
+  payments-consumer-7f78cd69b-mr2wz (started 2026-10-26T02:02:47Z): {"time":"2026-10-26T02:02:48.324935379Z","level":"INFO","msg":"payments consumer started","service":"payments-consumer","topic":"payments.main","group
+  outbox-relay "outbox published" lines in the last 2 minutes, the load's included: 16
+
+drill 07 done 2026-10-26T02:45:17Z

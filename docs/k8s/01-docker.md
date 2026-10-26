@@ -1,20 +1,28 @@
 # 01 — Docker images for the Go services
 
 **The same payments-api goes from 1.92 GB to 33.7 MB, and a rebuild after editing one `.go`
-file from 136.5 s to 14.6 s.** Nothing in the service changed to get there: every number
-below comes from the Dockerfile alone, measured on this repository by `make image-measure`
-(arm64, Docker 29.8.2, BuildKit) in one log,
-[`measure-20261025-215950.log`](../../deploy/docker/results/measure-20261025-215950.log),
+file from 39.5 s to 10.9 s.** Nothing in the service changed to get there: every number below,
+but those of the earlier sessions said so, comes from the Dockerfile alone, measured on this
+repository by `make image-measure` (arm64, Docker 29.8.2, BuildKit) in one log,
+[`measure-20261026-035012.log`](../../deploy/docker/results/measure-20261026-035012.log),
 which also holds the layer listings, the binary sizes, the six images and the distroless
 shell refusal quoted below.
 
-The rebuild times were taken inside the evidence session (runbook.md), with the whole kind
-stand running on the same 10-CPU VM, so they are slow in absolute terms; what they compare is
-the Dockerfiles, built one after another under the same load. The headline is one comparison,
-not one technique: it changes the base image (Debian `golang:1.26.4` against
-`golang:1.26.4-alpine` for the build and distroless for the run), the number of stages, the
-build flags and the caching at the same time. *What each technique bought* prices the two
-caching techniques on their own; the rest is said to be unseparated where it is.
+Each rebuild was made three times and the median is quoted; the three are within 1.5 s of
+each other for every Dockerfile but the naive one (35.9–40.3 s). They were taken at the start
+of the evidence session after it stopped the kind nodes (`deploy/k8s/drills/session.sh`), so
+the stand did not run beside them; the log itself does not record that. Earlier sessions
+measured next to the running stand: with one rebuild each, the naive Dockerfile took 136.5 s
+in one (`measure-20261025-215950.log`) and 13.7 s in the next; with three, `neither` took 302,
+490 and 1159 s in a third, when the builds also pushed the VM into swap (those two logs were
+deleted with their failed sessions; the figures are from the session's output). A rebuild time is a measure of
+the machine as much as of the Dockerfile unless the machine is otherwise idle.
+
+The headline is one comparison, not one technique: it changes the base image (Debian
+`golang:1.26.4` against `golang:1.26.4-alpine` for the build and distroless for the run), the
+number of stages, the build flags and the caching at the same time. *What each technique
+bought* prices the two caching techniques on their own; the rest is said to be unseparated
+where it is.
 
 Files: [`deploy/docker/Dockerfile`](../../deploy/docker/Dockerfile) (the real one, all
 six commands through `--build-arg SERVICE=…`),
@@ -26,10 +34,10 @@ never deployed), [`.dockerignore`](../../.dockerignore),
 
 | | naive (`golang:1.26.4`, Debian, one stage) | multi-stage → distroless |
 |---|---|---|
-| payments-api image (`docker image ls`) | **1.92 GB** (1,924,669,463 bytes) | **33.7 MB** (33,713,303 bytes) |
+| payments-api image (`docker image ls`) | **1.92 GB** (1,924,639,921 bytes) | **33.7 MB** (33,713,303 bytes) |
 | what ships | Go toolchain, the sources, the build cache, a shell, apt | one static binary on distroless |
 | user | root (`Config.User` empty) | `nonroot:nonroot` (uid 65532) |
-| rebuild after editing one `.go` file | 136.5 s | 14.6 s |
+| rebuild after editing one `.go` file, median of 3 | 39.5 s | 10.9 s |
 
 Where the size goes, by `docker history`:
 
@@ -63,37 +71,44 @@ embedded SQL and neither the Kafka nor the Prometheus client.
 
 ## What each technique bought
 
-The rebuild after one edited `.go` file, each Dockerfile warmed up first (`measure.sh`
-derives the three variants from the real Dockerfile with `sed`, in a copy of the repository):
+The rebuild after one edited `.go` file, three times each after a warm-up (`measure.sh`
+derives the three variants from the real Dockerfile with `sed`, in a copy of the repository).
+The log also times the `go build` step and the image export inside each rebuild:
 
-| Dockerfile | go.mod split | cache mounts | rebuild | module download |
-|---|---|---|---|---|
-| real | yes | yes | 14.6 s | cached |
-| no-split | — | yes | 14.3 s | in the build step |
-| no-mounts | yes | — | 49.5 s | cached |
-| neither | — | — | 68.1 s | in the build step |
-| naive | — | — | 136.5 s | in the build step |
+| Dockerfile | go.mod split | cache mounts | rebuild, median | `go build` step | module download |
+|---|---|---|---|---|---|
+| real | yes | yes | 10.9 s | 0.5 s | cached |
+| no-split | — | yes | 11.0 s | 0.5 s | in the build step |
+| no-mounts | yes | — | 25.2 s | 8.7–9.9 s | cached |
+| neither | — | — | 25.5 s | 13.5–15.1 s | in the build step |
+| naive | — | — | 39.5 s | 13.6–16.9 s, then 10.7–12.2 s of export | in the build step |
 
-- **Cache mounts** are what makes the rebuild fast: 68.1 → 14.3 s without the split, 49.5 →
-  14.6 s with it. The module and build caches live in BuildKit, not in a layer, so they never
-  reach the image.
-- **The go.mod split** pays only without the mounts: 68.1 → 49.5 s, because the downloaded
-  modules then survive in a layer. With the mounts the module cache survives anyway, and the
-  split changes nothing measurable (14.6 against 14.3 s). It is kept for a build whose mounts
-  start empty — a fresh builder — where the layer is what still saves the download; that
-  case was not measured.
-- **neither → naive** (68.1 → 136.5 s) is the base image, the single stage and the build
-  flags together — the naive file builds with cgo on (Debian ships gcc) and writes a 487 MB
-  layer. The log does not separate them.
+- **Cache mounts** do the work: with them the `go build` step takes 0.5 s instead of 9–15,
+  because the build cache survives the edit; the rebuild falls from 25.2 to 10.9 s. They live
+  in BuildKit, not in a layer, so they never reach the image.
+- **The go.mod split** changes nothing measurable with the mounts (10.9 against 11.0 s) —
+  the module cache mount already keeps the modules. Without them it takes the download out of
+  the build step (13.5–15.1 → 8.7–9.9 s), yet the whole rebuild took as long (25.2 against
+  25.5 s); the log does not show where those seconds went. It is kept for a build whose mounts
+  start empty — a fresh builder — where the layer is what still saves the download; that case
+  was not measured.
+- **Much of every rebuild is outside both timed steps**: 10.3–11.7 s for real, no-split and
+  neither (10.4 s of real's 10.9), 10.6–14.5 s for naive, 15.2–16.4 s for no-mounts — which is where the split's
+  seconds went, though the log does not break it down. BuildKit's handling of the build
+  context is the likely part, not a measured one.
+- **neither → naive** (25.5 → 39.5 s) is mostly the export: the naive image writes its 487 MB
+  build layer every time (10.7–12.2 s), the real one a 20.6 MB binary (0.0 s). The base
+  image, the single stage and the build flags (the naive file builds with cgo on, as Debian
+  ships gcc) are not separated by the log.
 
 | Technique | Where | Effect | Measured on its own |
 |---|---|---|---|
-| multi-stage build | `FROM golang… AS build` → `FROM distroless` | the toolchain stays in the build stage; only `/out/service` is copied out — the naive image's 985 MB base and 487 MB build layer stay behind | no — part of the headline comparison |
+| multi-stage build | `FROM golang… AS build` → `FROM distroless` | the toolchain stays in the build stage; only `/out/service` is copied out — the naive image's 985 MB base and 487 MB build layer stay behind, and so does the 11 s it takes to export that layer | no — part of the headline comparison |
 | `CGO_ENABLED=0` | build `RUN` | a static binary with no libc dependency — the precondition for `distroless/static`, which has no libc | no |
 | `-ldflags="-s -w"` | build `RUN` | binary 29,797,405 → 20,578,466 bytes (−31%), both `-trimpath`, same Go as the image: symbol table and DWARF dropped. Panics still print file:line — the runtime keeps its own pc→line table | yes |
 | `-trimpath` | build `RUN` | no `/src/...` or `$HOME` paths from the build machine inside the binary; builds are reproducible across machines | no |
-| `go.mod`/`go.sum` copied before the sources | build stage | 68.1 → 49.5 s without cache mounts; nothing with them | yes, the table above |
-| `RUN --mount=type=cache` (module + build cache) | build `RUN` | 68.1 → 14.3 s, or 49.5 → 14.6 s with the split | yes, the table above |
+| `go.mod`/`go.sum` copied before the sources | build stage | the download out of the build step without cache mounts, the rebuild no faster; nothing with them | yes, the table above |
+| `RUN --mount=type=cache` (module + build cache) | build `RUN` | `go build` step 9–15 s → 0.5 s; rebuild 25.2 → 10.9 s | yes, the table above |
 | `.dockerignore` | repo root | `docs/`, `experiments/`, `deploy/`, `.git` never enter the context, and editing them does not invalidate `COPY . .` | no |
 | `ARG SERVICE` | both stages | one file for six commands; the shared build stage downloads modules once for all of them | no |
 | `distroless/static-debian12:nonroot` | runtime stage | no shell, no package manager: `docker run --entrypoint sh` fails with `exec: "sh": executable file not found in $PATH` | yes, the refusal is in the log |

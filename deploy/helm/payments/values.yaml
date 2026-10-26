@@ -95,7 +95,7 @@ components:
     terminationGracePeriodSeconds: 30
     # Idle a pod uses a few millicores. Under drill 03's 1200 req/s (from the host) the HPA read 109–160% of
     # this request on two to four pods and 64–66% on five (03-autoscaling-20260927-211420.log;
-    # 60–67% in 03-autoscaling-20260928-044933.log; 72–88% in …-040732.log, on a stand still
+    # 60–67% in 03-autoscaling-20260928-044933.log; 72–97% in …-040732.log, on a stand still
     # busy with the platform's rollout — at its max, above the target),
     # i.e. well over 100m of work per pod before the scale-out. The CPU request is what the HPA's
     # percentage is taken of, so it is set as a round share of a loaded pod, not at idle
@@ -104,8 +104,11 @@ components:
     # (06-write-throughput-20260928-043357.log). The 25.10 runs of drills 03 and 06 sent their
     # load straight to the Service, which pinned each connection to one pod (191m on one, 19m
     # on another: api-cpu-per-pod-20261025-220313.log), so their percentages size nothing.
-    # Memory: sized from resources-20260927-175351.log (22Mi peak); 35Mi at most on 25.10
-    # (resources-20261025-224859.log), still under the limit by 1.8×.
+    # Sent through Traefik on 26.10, 800 GETs/s held five pods at 70–94% and 400 payments/s at
+    # 89–143% (03-autoscaling-20261026-040335.log, 06-write-throughput-20261026-043013.log): more
+    # CPU per request than in September, on a recreated cluster; why is not measured.
+    # Memory: sized from resources-20260927-175351.log (22Mi peak); 33Mi at most on 26.10
+    # (resources-20261026-044517.log), still under the limit by 1.9×.
     resources:
       requests: { cpu: 100m, memory: 32Mi }
       limits: { memory: 64Mi }
@@ -114,9 +117,10 @@ components:
     # the headroom that absorbs a surge during the ~15 s HPA sync plus the ~5 s a new pod
     # needs to become ready. max 5: in drill 03 from the host five pods held 1200 req/s at
     # 60–67%, so at the target they covered ~1300 req/s; on a machine busy with something
-    # else they did not (72–88%, drill 03 in the 28.09 evidence session) — still above the
-    # heaviest load the drills generate, now 800 req/s. More load needs a higher max and more
-    # nodes.
+    # else they did not (72–97%, drill 03 in the 28.09 evidence session). On 26.10 the five ran
+    # 800 req/s at 70–94% and 400 payments/s at 89–143% — at the max and at or above the target, every
+    # request answered in that session: five is the edge of this stand now, and more load needs
+    # a higher max and more nodes.
     autoscaling:
       minReplicas: 2
       maxReplicas: 5
@@ -146,8 +150,8 @@ components:
     # its publish bound — up to ~20 s against a hung broker — plus a 5 s rollback and a 1 s
     # trace flush, ~26 s.
     terminationGracePeriodSeconds: 30
-    # Figures: resources-20260927-175351.log (24Mi peak); 36Mi at most on 25.10
-    # (resources-20261025-224859.log), still under the limit by 1.8×.
+    # Figures: resources-20260927-175351.log (24Mi peak); 33Mi at most on 26.10
+    # (resources-20261026-044517.log), still under the limit by 1.9×.
     resources:
       requests: { cpu: 10m, memory: 32Mi }
       limits: { memory: 64Mi }
@@ -170,8 +174,8 @@ components:
     # and the last spans are flushed (1 s, telemetry.FlushTimeout): 29 s, checked by
     # kafka/budget_test.go.
     terminationGracePeriodSeconds: 30
-    # Figures: resources-20260927-175351.log (24Mi peak); 37Mi at most on 25.10
-    # (resources-20261025-224859.log), still under the limit by 1.7×.
+    # Figures: resources-20260927-175351.log (24Mi peak); 34Mi at most on 26.10
+    # (resources-20261026-044517.log), still under the limit by 1.9×.
     resources:
       requests: { cpu: 15m, memory: 32Mi }
       limits: { memory: 64Mi }

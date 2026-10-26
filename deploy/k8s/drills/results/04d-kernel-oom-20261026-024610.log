@@ -1,0 +1,11 @@
+# drill 04 case d (04-broken-deployments-20261026-041347.log, 02:17:32Z) printed 'last state: OOMKilled exit 137'.
+# The kernel's side, taken after the session from the Docker VM's kernel, which every kind node shares:
+# docker exec kafka-lab-worker sh -c 'dmesg -T | grep "Memory cgroup out of memory"'   (dmesg -T prints the node clock, UTC)
+[Mon Oct 26 02:17:39 2026] Memory cgroup out of memory: Killed process 1128 (service) total-vm:1278836kB, anon-rss:1328kB, file-rss:2336kB, shmem-rss:0kB, UID:65532 pgtables:124kB oom_score_adj:999
+[Mon Oct 26 02:17:39 2026] Memory cgroup out of memory: Killed process 1128 (service) total-vm:1278836kB, anon-rss:1328kB, file-rss:2336kB, shmem-rss:0kB, UID:65532 pgtables:124kB oom_score_adj:999
+[Mon Oct 26 02:17:40 2026] Memory cgroup out of memory: Killed process 1207 (service) total-vm:1278580kB, anon-rss:1068kB, file-rss:2064kB, shmem-rss:0kB, UID:65532 pgtables:120kB oom_score_adj:999
+[Mon Oct 26 02:17:40 2026] Memory cgroup out of memory: Killed process 1207 (service) total-vm:1278580kB, anon-rss:1068kB, file-rss:2064kB, shmem-rss:0kB, UID:65532 pgtables:120kB oom_score_adj:999
+[Mon Oct 26 02:17:52 2026] Memory cgroup out of memory: Killed process 1434 (service) total-vm:1278580kB, anon-rss:968kB, file-rss:3088kB, shmem-rss:0kB, UID:65532 pgtables:112kB oom_score_adj:999
+[Mon Oct 26 02:17:52 2026] Memory cgroup out of memory: Killed process 1451 (service) total-vm:1278580kB, anon-rss:968kB, file-rss:3088kB, shmem-rss:0kB, UID:65532 pgtables:112kB oom_score_adj:999
+[Mon Oct 26 02:18:17 2026] Memory cgroup out of memory: Killed process 2150 (service) total-vm:1279096kB, anon-rss:3584kB, file-rss:8380kB, shmem-rss:0kB, UID:65532 pgtables:132kB oom_score_adj:999
+[Mon Oct 26 02:18:17 2026] Memory cgroup out of memory: Killed process 2169 (service) total-vm:1279096kB, anon-rss:3584kB, file-rss:8380kB, shmem-rss:0kB, UID:65532 pgtables:132kB oom_score_adj:999

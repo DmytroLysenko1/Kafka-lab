@@ -54,9 +54,9 @@ publishes a full batch is followed at once by the next, so a backlog drains as f
 broker takes it rather than one batch a second. exp-13 worked off 458–523 records in
 17.3–24.2 s (four runs) while payments kept arriving at 10/s — measured before that change,
 when every sweep waited for the next tick; on the current relay drill 06 cleared 137 records
-within 2 s (`deploy/k8s/drills/results/06-write-throughput-20260928-043357.log`) and 71 left at
-the end of two minutes at 400 payments/s within 2 s
-(`deploy/k8s/drills/results/06-write-throughput-20261025-231555.log`). exp-13 has not been
+within 2 s (`deploy/k8s/drills/results/06-write-throughput-20260928-043357.log`) and every step,
+up to two minutes at 400 payments/s, within 2.4 s on the database's clock
+(`deploy/k8s/drills/results/06-write-throughput-20261026-043013.log`). exp-13 has not been
 rerun on it.
 
 **If the backlog grows while the brokers are healthy** — `kafka_brokers` 3, nothing

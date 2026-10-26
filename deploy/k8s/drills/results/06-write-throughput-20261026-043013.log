@@ -1,0 +1,65 @@
+drill 06 started 2026-10-26T02:30:13Z: rates 50 100 200 400 payments/s, 30s each and 120s for the last, 50 merchants per step
+  rate    step_t     sent accepted   stored    p50_ms    p99_ms    max_ms  outbox_left   drain_s counted_s  samples
+    50     7-37s     1500     1500     1500         2        70       205            0       0.5       0.5   1@n/as
+{"status_codes":{"201":1500},"errors":[]}
+   100    58-88s     3000     3000     3000         2       727      1111           43       0.7       0.7  2@0.22s
+{"status_codes":{"201":3000},"errors":[]}
+   200  116-146s     6000     6000     6000         2       285      1305            0       2.3       2.3   1@n/as
+{"status_codes":{"201":6000},"errors":[]}
+   400  392-512s    48000    48000    48000         5      1157      2519            0       1.8       2.4  2@0.62s
+{"status_codes":{"201":48000},"errors":[]}
+
+the API's autoscaler through the drill (t on the drill's clock, as step_t above):
+  hpa t=0s cpu=31% desired=2 current=2
+  hpa t=10s cpu=31% desired=2 current=2
+  hpa t=20s cpu=5% desired=2 current=2
+  hpa t=30s cpu=17% desired=2 current=2
+  hpa t=41s cpu=17% desired=2 current=2
+  hpa t=52s cpu=27% desired=2 current=2
+  hpa t=62s cpu=24% desired=2 current=2
+  hpa t=72s cpu=24% desired=2 current=2
+  hpa t=82s cpu=12% desired=2 current=2
+  hpa t=93s cpu=52% desired=2 current=2
+  hpa t=103s cpu=52% desired=2 current=2
+  hpa t=113s cpu=45% desired=2 current=2
+  hpa t=123s cpu=9% desired=2 current=2
+  hpa t=133s cpu=9% desired=2 current=2
+  hpa t=143s cpu=25% desired=2 current=2
+  hpa t=154s cpu=104% desired=3 current=2
+  hpa t=164s cpu=104% desired=3 current=2
+  hpa t=174s cpu=81% desired=3 current=3
+  hpa t=184s cpu=2% desired=3 current=3
+  hpa t=194s cpu=2% desired=3 current=3
+  hpa t=204s cpu=2% desired=3 current=3
+  hpa t=214s cpu=3% desired=3 current=3
+  hpa t=225s cpu=3% desired=3 current=3
+  hpa t=235s cpu=3% desired=3 current=3
+  hpa t=245s cpu=5% desired=3 current=3
+  hpa t=255s cpu=5% desired=3 current=3
+  hpa t=265s cpu=6% desired=3 current=3
+  hpa t=275s cpu=1% desired=3 current=3
+  hpa t=285s cpu=1% desired=3 current=3
+  hpa t=296s cpu=2% desired=3 current=3
+  hpa t=306s cpu=2% desired=3 current=3
+  hpa t=316s cpu=2% desired=3 current=3
+  hpa t=329s cpu=1% desired=3 current=3
+  hpa t=339s cpu=6% desired=3 current=3
+  hpa t=349s cpu=6% desired=3 current=3
+  hpa t=360s cpu=8% desired=3 current=3
+  hpa t=370s cpu=4% desired=3 current=3
+  hpa t=380s cpu=4% desired=3 current=3
+  hpa t=390s cpu=2% desired=3 current=3
+  hpa t=401s cpu=5% desired=3 current=3
+  hpa t=412s cpu=11% desired=3 current=3
+  hpa t=422s cpu=11% desired=3 current=3
+  hpa t=432s cpu=156% desired=5 current=3
+  hpa t=442s cpu=143% desired=5 current=5
+  hpa t=452s cpu=143% desired=5 current=5
+  hpa t=463s cpu=110% desired=5 current=5
+  hpa t=473s cpu=89% desired=5 current=5
+  hpa t=484s cpu=89% desired=5 current=5
+  hpa t=494s cpu=91% desired=5 current=5
+  hpa t=504s cpu=91% desired=5 current=5
+  hpa t=515s cpu=91% desired=5 current=5
+./06-write-throughput.sh: line 154: 94000 Terminated: 15          watch_hpa "$began" > "$scratch/hpa"
+drill 06 done 2026-10-26T02:38:50Z

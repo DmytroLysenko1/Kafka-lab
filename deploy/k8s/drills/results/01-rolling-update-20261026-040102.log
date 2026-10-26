@@ -1,0 +1,34 @@
+drill 01 started 2026-10-26T02:01:02Z, rolling 05edc89 -> 05edc89-next under 20 req/s for 90s
+REVISION	UPDATED                 	STATUS  	CHART         	APP VERSION	DESCRIPTION  
+17      	Mon Oct 26 04:00:41 2026	deployed	payments-0.1.0	dev        	image 05edc89
+before:
+POD                                 NODE                IMAGE                                 READY
+migrate-fd742                       kafka-lab-worker2   kafka-lab/migrate:05edc89             false
+outbox-relay-5776c6ddc7-kfvdz       kafka-lab-worker2   kafka-lab/outbox-relay:05edc89        true
+payments-api-6464bdbdc4-6rvjm       kafka-lab-worker    kafka-lab/payments-api:05edc89        true
+payments-api-6464bdbdc4-ksqvx       kafka-lab-worker2   kafka-lab/payments-api:05edc89        true
+payments-consumer-7f78cd69b-7xzkx   kafka-lab-worker    kafka-lab/payments-consumer:05edc89   true
+payments-consumer-7f78cd69b-gx9g6   kafka-lab-worker2   kafka-lab/payments-consumer:05edc89   true
+prune-29882957-lmhs8                kafka-lab-worker2   kafka-lab/prune:84690a7               false
+rollout to 05edc89-next took 11s (helm --wait, migrate hook included)
+after:
+POD                                 NODE                IMAGE                                      READY
+migrate-bd79z                       kafka-lab-worker2   kafka-lab/migrate:05edc89-next             false
+outbox-relay-5b4dff7cdf-4tf4w       kafka-lab-worker2   kafka-lab/outbox-relay:05edc89-next        true
+payments-api-6464bdbdc4-6rvjm       kafka-lab-worker    kafka-lab/payments-api:05edc89             true
+payments-api-6464bdbdc4-ksqvx       kafka-lab-worker2   kafka-lab/payments-api:05edc89             true
+payments-api-f896c867d-b4bnx        kafka-lab-worker    kafka-lab/payments-api:05edc89-next        true
+payments-api-f896c867d-h4cqw        kafka-lab-worker2   kafka-lab/payments-api:05edc89-next        true
+payments-consumer-df6485788-d9kqp   kafka-lab-worker2   kafka-lab/payments-consumer:05edc89-next   true
+payments-consumer-df6485788-lzhx8   kafka-lab-worker    kafka-lab/payments-consumer:05edc89-next   true
+prune-29882957-lmhs8                kafka-lab-worker2   kafka-lab/prune:84690a7                    false
+REVISION	UPDATED                 	STATUS  	CHART         	APP VERSION	DESCRIPTION       
+18      	Mon Oct 26 04:01:18 2026	deployed	payments-0.1.0	dev        	image 05edc89-next
+Requests      [total, rate, throughput]         1800, 20.01, 20.01
+Duration      [total, attack, wait]             1m30s, 1m30s, 3.44ms
+Latencies     [min, mean, 50, 90, 95, 99, max]  2.16ms, 4.869ms, 3.236ms, 7.839ms, 11.579ms, 29.822ms, 89.336ms
+Bytes In      [total, mean]                     97200, 54.00
+Bytes Out     [total, mean]                     135000, 75.00
+Success       [ratio]                           100.00%
+Status Codes  [code:count]                      201:1800  
+Error Set:
